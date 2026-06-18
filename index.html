@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mica Contable - Sistema de Conciliación</title>
+    <style>
+        /* Paleta de colores e identidad visual: Azul Pizarra, Gris y Teal */
+        :root {
+            --bg-primary: #f8fafc;
+            --bg-card: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --primary: #0f172a;
+            --primary-hover: #1e293b;
+            --accent: #0d9488;
+            --accent-light: #ccfbf1;
+            --success: #16a34a;
+            --success-light: #dcfce7;
+            --warning: #ea580c;
+            --warning-light: #ffedd5;
+            --border-color: #e2e8f0;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            line-height: 1.5;
+            padding: 20px;
+        }
+
+        header {
+            max-width: 1200px;
+            margin: 0 auto 24px auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .brand h1 {
+            font-size: 24px;
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        .brand p {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        main {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 24px;
+        }
+
+        /* Secciones de Importación */
+        .import-section {
+            background-color: var(--bg-card);
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid var(--border-color);
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .drop-zone {
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .drop-zone:hover {
+            border-color: var(--accent);
+            background-color: #f0fdfa;
+        }
+
+        .drop-zone input[type="file"] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .drop-zone h3 {
+            font-size: 16px;
+            margin-bottom: 6px;
+            color: var(--primary);
+        }
+
+        .drop-zone p {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        /* Tarjetas de Métricas Rápidas */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+        }
+
+        .metric-card {
+            background: var(--bg-card);
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+        }
+
+        .metric-card h4 {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-card .value {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-top: 4px;
+        }
+
+        /* Filtros e Interacción */
+        .controls-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            background: var(--bg-card);
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+        }
+
+        .filter-buttons {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-filter {
+            background: #f1f5f9;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-filter.active, .btn-filter:hover {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .search-input {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 13px;
+            min-width: 240px;
+            outline: none;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent);
+        }
+
+        /* Grilla de Datos */
+        .data-table-container {
+            background-color: var(--bg-card);
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 13px;
+        }
+
+        th {
+            background-color: #f8fafc;
+            color: var(--text-muted);
+            padding: 14px 16px;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            vertical-align: middle;
+        }
+
+        tr:hover {
+            background-color: #f8fafc;
+        }
+
+        /* Distintivos (Badges) */
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-recibido {
+            background-color: var(--warning-light);
+            color: var(--warning);
+        }
+
+        .badge-emitido {
+            background-color: var(--accent-light);
+            color: var(--accent);
+        }
+
+        /* Selectores de Categoría y Sugerencias */
+        .category-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 250px;
+        }
+
+        .select-category {
+            flex-grow: 1;
+            padding: 6px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            font-size: 12px;
+            background-color: #fff;
+            outline: none;
+        }
+
+        .select-category.suggested {
+            border-color: var(--accent);
+            background-color: #f0fdfa;
+        }
+
+        .badge-suggested {
+            background-color: var(--accent-light);
+            color: var(--accent);
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 12px;
+            font-weight: bold;
+        }
+
+        /* Botón de Confirmación */
+        .btn-confirm {
+            background-color: #f1f5f9;
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s;
+        }
+
+        .btn-confirm.confirmed {
+            background-color: var(--success-light);
+            color: var(--success);
+            border-color: var(--success);
+        }
+
+        .btn-confirm:hover:not(.confirmed) {
+            background-color: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+
+        /* Adaptabilidad Móvil Extrema (Card View en pantallas pequeñas) */
+        @media (max-width: 768px) {
+            table, thead, tbody, th, td, tr {
+                display: block;
+            }
+
+            thead {
+                display: none;
+            }
+
+            tr {
+                margin-bottom: 16px;
+                border: 1px solid var(--border-color);
+                border-radius: 10px;
+                background-color: var(--bg-card);
+                padding: 12px;
+            }
+
+            td {
+                border-bottom: none;
+                padding: 6px 0;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 8px;
+            }
+
+            td::before {
+                content: attr(data-label);
+                font-weight: 600;
+                color: var(--text-muted);
+                font-size: 12px;
+            }
+
+            .category-cell {
+                width: 100%;
+                justify-content: flex-end;
+                min-width: unset;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="brand">
+            <h1>Mica Contable</h1>
+            <p>Portal de Operaciones e Impuestos Nacionales y Provinciales</p>
+        </div>
+    </header>
+
+    <main>
+        <!-- Sección de Carga de Archivos -->
+        <section class="import-section">
+            <div class="drop-zone" id="zone-recibidos">
+                <h3>Comprobantes Recibidos (Compras)</h3>
+                <p>Arrastrá el CSV de ARCA o hacé clic para buscar</p>
+                <input type="file" id="file-recibidos" accept=".csv">
+            </div>
+            <div class="drop-zone" id="zone-emitidos">
+                <h3>Comprobantes Emitidos (Ventas)</h3>
+                <p>Arrastrá el CSV de ARCA o hacé clic para buscar</p>
+                <input type="file" id="file-emitidos" accept=".csv">
+            </div>
+        </section>
+
+        <!-- Métricas Rápidas -->
+        <section class="metrics-grid">
+            <div class="metric-card">
+                <h4>Ventas Totales (Emitidos)</h4>
+                <div class="value" id="val-sales">$ 0,00</div>
+            </div>
+            <div class="metric-card">
+                <h4>Gastos Totales (Recibidos)</h4>
+                <div class="value" id="val-purchases">$ 0,00</div>
+            </div>
+            <div class="metric-card">
+                <h4>Nivel de Categorización</h4>
+                <div class="value" id="val-accuracy">0%</div>
+            </div>
+        </section>
+
+        <!-- Barra de Filtros y Búsqueda -->
+        <section class="controls-row">
+            <div class="filter-buttons">
+                <button class="btn-filter active" onclick="appStore.setFilter('all')">Todos</button>
+                <button class="btn-filter" onclick="appStore.setFilter('recibidos')">Solo Compras</button>
+                <button class="btn-filter" onclick="appStore.setFilter('emitidos')">Solo Ventas</button>
+                <button class="btn-filter" onclick="appStore.setFilter('pending')">Sin Categorizar</button>
+            </div>
+            <input type="text" class="search-input" id="search-box" placeholder="Buscar por CUIT, Razón Social o Tipo..." oninput="appStore.setSearch(this.value)">
+        </section>
+
+        <!-- Grilla de Resultados -->
+        <section class="data-table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Origen</th>
+                        <th>Fecha</th>
+                        <th>Comprobante</th>
+                        <th>CUIT</th>
+                        <th>Razón Social</th>
+                        <th>Total</th>
+                        <th>Categoría Tributaria</th>
+                        <th>Estado</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body">
+                    <tr>
+                        <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                            Aún no se han importado archivos CSV de ARCA para este período.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        // Listado estandarizado de categorías propuesto para este modelo
+        const CATEGORIES_RECIBIDOS = [
+            "Mercaderías / Insumos",
+            "Servicios Públicos (Luz, Agua, Gas)",
+            "Telefonía e Internet",
+            "Honorarios Profesionales",
+            "Alquileres Comerciales",
+            "Seguros",
+            "Movilidad y Viáticos",
+            "Gastos de Oficina y Limpieza",
+            "Medicina Prepaga",
+            "Impuestos y Tasas",
+            "Sueldos y Cargas Sociales",
+            "Otros Gastos No Deducibles"
+        ];
+
+        const CATEGORIES_EMITIDOS = [
+            "Venta de Servicios locales",
+            "Venta de Bienes",
+            "Exportación de Servicios",
+            "Honorarios de Asesoría",
+            "Otros Ingresos Financieros"
+        ];
+
+        // 1. MOTOR DE CATEGORIZACIÓN INTELIGENTE (SOLID: Open/Closed & Single Responsibility)
+        class CategorizationEngine {
+            constructor() {
+                this.storageKey = 'mica_historical_categories';
+                this.history = JSON.parse(localStorage.getItem(this.storageKey)) || {};
+            }
+
+            // Busca si ya hay un patrón registrado para este CUIT
+            getSuggestion(cuit) {
+                if (this.history[cuit]) {
+                    return { category: this.history[cuit], exists: true };
+                }
+                return { category: "", exists: false };
+            }
+
+            // Registra una nueva regla persistente
+            saveMapping(cuit, category) {
+                if (!cuit || cuit === "S/D") return;
+                this.history[cuit] = category;
+                localStorage.setItem(this.storageKey, JSON.stringify(this.history));
+            }
+        }
+
+        const categorizer = new CategorizationEngine();
+
+        // 2. PARSER Y NORMALIZADOR DE CSV (SOLID: Single Responsibility)
+        class CSVParser {
+            static parse(content, type) {
+                const lines = content.split(/\r?\n/);
+                if (lines.length < 2) return [];
+
+                // Detectamos los encabezados de la primera línea limpiando comillas
+                const headers = lines[0].split(';').map(h => h.replace(/"/g, '').trim());
+                const list = [];
+
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+
+                    // Parseo básico compatible con separadores punto y coma
+                    const values = line.split(';').map(v => v.replace(/"/g, '').trim());
+                    if (values.length < headers.length) continue;
+
+                    const rawData = {};
+                    headers.forEach((header, idx) => {
+                        rawData[header] = values[idx];
+                    });
+
+                    list.push(this.normalize(rawData, type));
+                }
+                return list;
+            }
+
+            // Convierte las diferencias entre Emitidos y Recibidos en un único objeto homogéneo
+            static normalize(raw, type) {
+                let name = "S/D";
+                let cuit = "S/D";
+                let date = raw['Fecha de Emisión'] || 'S/D';
+                let docType = raw['Tipo de Comprobante'] || 'S/D';
+
+                if (type === 'recibido') {
+                    name = raw['Denominación Emisor'] || 'Consumidor Final';
+                    cuit = raw['Nro. Doc. Emisor'] || 'S/D';
+                } else {
+                    name = raw['Denominación Receptor'] || 'Consumidor Final';
+                    cuit = raw['Nro. Doc. Receptor'] || 'S/D';
+                }
+
+                // ARCA utiliza la coma para los decimales en los reportes locales (Ej: "150967,08")
+                let rawTotal = raw['Imp. Total'] || '0';
+                rawTotal = rawTotal.replace(/\./g, '').replace(',', '.');
+                const parsedTotal = parseFloat(rawTotal) || 0;
+
+                // Buscamos si el sistema ya "aprendió" la categoría para este CUIT
+                const suggestion = categorizer.getSuggestion(cuit);
+
+                return {
+                    id: `${type}-${cuit}-${date}-${parsedTotal}`,
+                    tipo: type, // 'recibido' o 'emitido'
+                    fecha: date,
+                    comprobante: docType,
+                    cuit: cuit,
+                    razonSocial: name,
+                    total: parsedTotal,
+                    categoria: suggestion.category,
+                    sugerida: suggestion.exists,
+                    confirmada: false
+                };
+            }
+        }
+
+        // 3. STORE DE LA APLICACIÓN (SOLID: Single Responsibility)
+        class AppStore {
+            constructor() {
+                this.items = [];
+                this.currentFilter = 'all';
+                this.searchQuery = '';
+            }
+
+            addItems(newItems) {
+                // Evitamos duplicar en caso de volver a cargar el archivo
+                newItems.forEach(item => {
+                    if (!this.items.some(i => i.id === item.id)) {
+                        this.items.push(item);
+                    }
+                });
+                this.updateMetrics();
+                UIManager.render();
+            }
+
+            setFilter(filter) {
+                this.currentFilter = filter;
+                document.querySelectorAll('.btn-filter').forEach(btn => {
+                    btn.classList.toggle('active', btn.innerText.toLowerCase().includes(filter === 'recibidos' ? 'compras' : filter === 'emitidos' ? 'ventas' : filter === 'pending' ? 'sin' : 'todos'));
+                });
+                UIManager.render();
+            }
+
+            setSearch(query) {
+                this.searchQuery = query.toLowerCase();
+                UIManager.render();
+            }
+
+            updateCategory(id, categoryVal) {
+                const item = this.items.find(i => i.id === id);
+                if (item) {
+                    item.categoria = categoryVal;
+                    // Al cambiar manualmente, quitamos la marca de sugerida pura y esperamos confirmación
+                    item.sugerida = false;
+                    UIManager.render();
+                }
+            }
+
+            confirmItem(id) {
+                const item = this.items.find(i => i.id === id);
+                if (item && item.categoria) {
+                    item.confirmada = true;
+                    // Guardamos la regla en el historial persistente para que aprenda del comportamiento
+                    categorizer.saveMapping(item.cuit, item.categoria);
+                    
+                    // Inteligencia en tiempo real: propagamos la categoría a otros registros del mismo CUIT aún sin confirmar
+                    this.items.forEach(other => {
+                        if (other.cuit === item.cuit && !other.confirmada) {
+                            other.categoria = item.categoria;
+                            other.sugerida = true;
+                        }
+                    });
+
+                    this.updateMetrics();
+                    UIManager.render();
+                }
+            }
+
+            getFilteredItems() {
+                return this.items.filter(item => {
+                    const matchesSearch = item.razonSocial.toLowerCase().includes(this.searchQuery) || 
+                                          item.cuit.includes(this.searchQuery) ||
+                                          item.comprobante.toLowerCase().includes(this.searchQuery);
+                    
+                    if (!matchesSearch) return false;
+
+                    if (this.currentFilter === 'recibidos') return item.tipo === 'recibido';
+                    if (this.currentFilter === 'emitidos') return item.tipo === 'emitido';
+                    if (this.currentFilter === 'pending') return !item.confirmada;
+
+                    return true;
+                });
+            }
+
+            updateMetrics() {
+                const totalSales = this.items
+                    .filter(i => i.tipo === 'emitido')
+                    .reduce((sum, i) => sum + i.total, 0);
+
+                const totalPurchases = this.items
+                    .filter(i => i.tipo === 'recibido')
+                    .reduce((sum, i) => sum + i.total, 0);
+
+                const confirmedCount = this.items.filter(i => i.confirmada).length;
+                const accuracy = this.items.length > 0 
+                    ? Math.round((confirmedCount / this.items.length) * 100) 
+                    : 0;
+
+                document.getElementById('val-sales').innerText = `$ ${totalSales.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+                document.getElementById('val-purchases').innerText = `$ ${totalPurchases.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+                document.getElementById('val-accuracy').innerText = `${accuracy}%`;
+            }
+        }
+
+        const appStore = new AppStore();
+
+        // 4. CONTROLADOR DE LA INTERFAZ DE USUARIO (SOLID: Single Responsibility / Interface Segregation)
+        class UIManager {
+            static init() {
+                this.setupDragAndDrop('zone-recibidos', 'file-recibidos', 'recibido');
+                this.setupDragAndDrop('zone-emitidos', 'file-emitidos', 'emitido');
+            }
+
+            static setupDragAndDrop(zoneId, inputId, type) {
+                const zone = document.getElementById(zoneId);
+                const input = document.getElementById(inputId);
+
+                input.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) this.processFile(file, type);
+                });
+
+                zone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    zone.style.borderColor = 'var(--accent)';
+                });
+
+                zone.addEventListener('dragleave', () => {
+                    zone.style.borderColor = 'var(--border-color)';
+                });
+
+                zone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    zone.style.borderColor = 'var(--border-color)';
+                    const file = e.dataTransfer.files[0];
+                    if (file) this.processFile(file, type);
+                });
+            }
+
+            static processFile(file, type) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const parsed = CSVParser.parse(e.target.result, type);
+                    appStore.addItems(parsed);
+                };
+                reader.readAsText(file, 'UTF-8');
+            }
+
+            static render() {
+                const tbody = document.getElementById('table-body');
+                const items = appStore.getFilteredItems();
+
+                if (items.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                Ningún comprobante coincide con los filtros aplicados.
+                            </td>
+                        </tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = items.map(item => {
+                    const isRecibido = item.tipo === 'recibido';
+                    const badgeClass = isRecibido ? 'badge-recibido' : 'badge-emitido';
+                    const badgeText = isRecibido ? 'Compra' : 'Venta';
+                    const categoriesList = isRecibido ? CATEGORIES_RECIBIDOS : CATEGORIES_EMITIDOS;
+
+                    // Opciones del selector de categoría
+                    const optionsHTML = `
+                        <option value="">-- Seleccionar Categoría --</option>
+                        ${categoriesList.map(cat => `
+                            <option value="${cat}" ${item.categoria === cat ? 'selected' : ''}>${cat}</option>
+                        `).join('')}
+                    `;
+
+                    // Lógica para detectar si hay una propuesta inteligente sin confirmar
+                    const isSuggestedClass = (item.sugerida && !item.confirmada) ? 'suggested' : '';
+                    const suggestionIndicator = (item.sugerida && !item.confirmada) 
+                        ? `<span class="badge-suggested">Sugerido</span>` 
+                        : '';
+
+                    // Formato del botón de confirmación
+                    const confirmButtonHTML = item.confirmada
+                        ? `<button class="btn-confirm confirmed" disabled>✓ Confirmado</button>`
+                        : `<button class="btn-confirm" onclick="appStore.confirmItem('${item.id}')" ${!item.categoria ? 'disabled' : ''}>✓ Confirmar</button>`;
+
+                    return `
+                        <tr>
+                            <td data-label="Origen">
+                                <span class="badge ${badgeClass}">${badgeText}</span>
+                            </td>
+                            <td data-label="Fecha">${item.fecha}</td>
+                            <td data-label="Comprobante">${item.comprobante}</td>
+                            <td data-label="CUIT">${item.cuit}</td>
+                            <td data-label="Razón Social"><strong>${item.razonSocial}</strong></td>
+                            <td data-label="Total">$ ${item.total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                            <td data-label="Categoría Tributaria">
+                                <div class="category-cell">
+                                    <select class="select-category ${isSuggestedClass}" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
+                                        ${optionsHTML}
+                                    </select>
+                                    ${suggestionIndicator}
+                                </div>
+                            </td>
+                            <td data-label="Estado">
+                                ${confirmButtonHTML}
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+        }
+
+        // Inicializar el sistema al cargar el documento
+        document.addEventListener('DOMContentLoaded', () => {
+            UIManager.init();
+        });
+    </script>
+</body>
+</html>
