@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mica Contable - Sistema Integral</title>
+    <!-- Estilos externalizados -->
+    <link rel="stylesheet" href="src/css/styles.css">
+    <!-- Biblioteca SheetJS para parsear planillas Excel (.xlsx/.xls) en el cliente -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+    <!-- MENÚ LATERAL (SIDEBAR) -->
+    <aside>
+        <div class="sidebar-brand">
+            <h2>Mica</h2>
+            <p>SISTEMA CONTABLE E IMPOSITIVO</p>
+        </div>
+
+        <div class="sidebar-section-title">Admin / Contadora</div>
+        <ul class="sidebar-nav">
+            <li><a class="active-nav" onclick="switchTab('tab-conciliador')">📊 <span class="nav-text">Conciliador CSV</span></a></li>
+            <li><a onclick="switchTab('tab-bancos')">🏦 <span class="nav-text">Extracto Bancario</span></a></li>
+            <li><a onclick="switchTab('tab-sueldos')">👥 <span class="nav-text">Sueldos (Acompy)</span></a></li>
+            <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Movimientos Manuales</span></a></li>
+            <li><a onclick="switchTab('tab-ajustes-contadora')">⚙️ <span class="nav-text">Ajustes Tributarios</span></a></li>
+            <li><a onclick="switchTab('tab-configuracion')">👥 <span class="nav-text">Configuración</span></a></li>
+        </ul>
+
+        <div class="sidebar-section-title">Hub de Clientes</div>
+        <ul class="sidebar-nav">
+            <li><a onclick="switchTab('tab-client-dashboard')">🏠 <span class="nav-text">Panel Gerencial</span></a></li>
+            <li><a onclick="switchTab('tab-client-ocr')">📷 <span class="nav-text">Cargar Documentos</span></a></li>
+        </ul>
+    </aside>
+
+    <div class="wrapper">
+        <header>
+            <h1 id="page-title">Conciliador CSV (Operaciones)</h1>
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-muted);" id="current-entity-label">
+                Empresa Activa: VARONE VANESA PAOLA
+            </div>
+        </header>
+
+        <!-- SECCIÓN 1: CONCILIADOR CSV Y PERCEPCIONES -->
+        <section id="tab-conciliador" class="tab-content">
+            <div class="import-section">
+                <div class="drop-zone" id="zone-recibidos">
+                    <h3>Comprobantes Recibidos (Compras)</h3>
+                    <p>Arrastrá el CSV de ARCA o hacé clic para buscar</p>
+                    <input type="file" id="file-recibidos" accept=".csv">
+                </div>
+                <div class="drop-zone" id="zone-emitidos">
+                    <h3>Comprobantes Emitidos (Ventas)</h3>
+                    <p>Arrastrá el CSV de ARCA o hacé clic para buscar</p>
+                    <input type="file" id="file-emitidos" accept=".csv">
+                </div>
+                <!-- Carga de Percepciones Provinciales -->
+                <div class="drop-zone" id="zone-percepciones" style="border-color: #38bdf8;">
+                    <h3>Percepciones Provinciales</h3>
+                    <p>Subir percepciones provinciales (CSV/TXT)</p>
+                    <div style="margin: 8px 0;">
+                        <select id="percep-jurisdiccion" class="form-control" style="width: auto; display: inline-block; padding: 4px 8px; font-size: 11px;" onclick="event.stopPropagation()">
+                            <option value="ARBA">ARBA (Buenos Aires)</option>
+                            <option value="AGIP">AGIP (CABA)</option>
+                            <option value="DGR-CBA">DGR (Córdoba)</option>
+                        </select>
+                    </div>
+                    <input type="file" id="file-percepciones" accept=".csv,.txt">
+                </div>
+            </div>
+
+            <!-- Panel de Resolución Manual de Descuadres ("Otros Tributos") -->
+            <div class="card hidden" id="card-resolucion-manual">
+                <h3 style="color: var(--warning); border-color: var(--warning);">⚠️ Comprobantes con Saldo Pendiente por Explicar</h3>
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Se requiere asignar manualmente el descuadre de otros tributos de las siguientes compras a una jurisdicción o cuenta contable.</p>
+                <div class="data-table-container">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Comprobante</th>
+                                <th>Proveedor (CUIT)</th>
+                                <th>Otros Tributos</th>
+                                <th>Saldo Pendiente</th>
+                                <th>Acción del Contador</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-resolucion-manual-body">
+                            <!-- Inyectado dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="controls-row">
+                <div class="filter-buttons">
+                    <button class="btn-filter active" onclick="appStore.setFilter('all')">Todos</button>
+                    <button class="btn-filter" onclick="appStore.setFilter('recibidos')">Solo Compras</button>
+                    <button class="btn-filter" onclick="appStore.setFilter('emitidos')">Solo Ventas</button>
+                    <button class="btn-filter" onclick="appStore.setFilter('pending')">Sin Categorizar</button>
+                </div>
+                <input type="text" class="search-input" id="search-box" placeholder="Buscar por CUIT, Razón Social..." oninput="appStore.setSearch(this.value)">
+            </div>
+
+            <div class="data-table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Origen</th>
+                            <th>Fecha</th>
+                            <th>Comprobante</th>
+                            <th>CUIT</th>
+                            <th>Razón Social</th>
+                            <th>Total</th>
+                            <th>Desglose Percepciones</th>
+                            <th>Categoría Tributaria</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <tr>
+                            <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                                Aún no se han importado archivos CSV de ARCA para este período.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 2: CONCILIADOR BANCARIO -->
+        <section id="tab-bancos" class="tab-content hidden">
+            <div class="import-section">
+                <div class="drop-zone" id="zone-bancos" style="border-color: var(--accent);">
+                    <h3>Cargar Extracto Bancario</h3>
+                    <p>Arrastrá el Excel del banco (.xlsx / .xls) o hacé clic para buscar</p>
+                    <div style="margin: 8px 0;">
+                        <input type="text" id="bank-name" class="form-control" placeholder="Nombre del Banco (ej. Galicia, Santander)" style="width: 250px; display: inline-block; padding: 4px 8px; font-size: 11px;" onclick="event.stopPropagation()">
+                    </div>
+                    <input type="file" id="file-bancos" accept=".xlsx,.xls,.csv">
+                </div>
+            </div>
+
+            <div class="grid-inputs">
+                <!-- Panel de Verificación de Movimientos -->
+                <div class="card" style="grid-column: span 2;">
+                    <h3>Bandeja de Conciliación Bancaria</h3>
+                    <div class="data-table-container" style="max-height: 400px; overflow-y: auto;">
+                        <table class="simple-table">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Descripción / Concepto</th>
+                                    <th>Importe</th>
+                                    <th>Tipo</th>
+                                    <th>Clasificación / Cuenta</th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-bancos-body">
+                                <tr>
+                                    <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                        No hay extractos bancarios procesados para este período.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Gestor de Reglas de Clasificación -->
+                <div class="card">
+                    <h3>Reglas de Clasificación Automática</h3>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Agrega palabras clave para pre-clasificar automáticamente egresos y cobros del banco.</p>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div class="form-group">
+                            <label>Tipo de Movimiento</label>
+                            <select id="rule-type" class="form-control">
+                                <option value="debit">DÉBITO (Egreso)</option>
+                                <option value="credit">CRÉDITO (Ingreso)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Palabra Clave (Keyword)</label>
+                            <input type="text" id="rule-pattern" class="form-control" placeholder="Ej: EDESUR, MERCADOPAGO">
+                        </div>
+                        <div class="form-group">
+                            <label>Cuenta / Categoría Destino</label>
+                            <input type="text" id="rule-category" class="form-control" placeholder="Ej: Servicios Públicos, Ventas">
+                        </div>
+                        <button class="btn-primary" id="btn-add-rule" style="margin-top: 8px;">Agregar Regla</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 3: LIQUIDACIÓN DE SUELDOS -->
+        <section id="tab-sueldos" class="tab-content hidden">
+            <div class="import-section">
+                <div class="drop-zone" id="zone-sueldos" style="border-color: #8b5cf6;">
+                    <h3>Cargar Reporte de Sueldos (Acompy)</h3>
+                    <p>Arrastrá el Excel de Acompy o haz clic para buscar</p>
+                    <input type="file" id="file-sueldos" accept=".xlsx,.xls">
+                </div>
+            </div>
+
+            <div class="grid-inputs">
+                <!-- Inputs y desgloses de sueldos -->
+                <div class="card">
+                    <h3>Datos Consolidados del Reporte</h3>
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                            <span>Sueldo Bruto (Total Remunerativo)</span>
+                            <strong id="lbl-sueldo-bruto">$ 0,00</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                            <span>Anticipos / Adelantos</span>
+                            <strong id="lbl-anticipos">$ 0,00</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                            <span>Aportes Sindicales retenidos</span>
+                            <strong id="lbl-sindicato-aporte">$ 0,00</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                            <span>Sueldo Neto a pagar</span>
+                            <strong id="lbl-sueldo-neto">$ 0,00</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inputs manuales contables de liquidación -->
+                <div class="card">
+                    <h3>Cargas y Contribuciones Manuales</h3>
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <div class="form-group">
+                            <label>Formulario 931 AFIP (Total Cargas Sociales)</label>
+                            <input type="number" id="input-f931" class="form-control" value="0" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label>Contribución Sindical Extraordinaria</label>
+                            <input type="number" id="input-sindicato-contrib" class="form-control" value="0" step="0.01">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Resultados Costo Laboral -->
+                <div class="card">
+                    <h3>Resultados y Costo Laboral</h3>
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 14px; border-bottom: 1px dashed var(--border-color); padding-bottom: 8px;">
+                            <span>Total de Caja a Pagar</span>
+                            <strong id="lbl-total-a-pagar" style="color: var(--warning);">$ 0,00</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; border-top: 1px solid var(--primary); padding-top: 8px;">
+                            <span>Costo Laboral Real</span>
+                            <strong id="lbl-costo-laboral" style="color: var(--success);">$ 0,00</strong>
+                        </div>
+                    </div>
+                    <button class="btn-primary" id="btn-save-payroll" style="width: 100%; margin-top: 16px;">✓ Confirmar y Liquidar Período</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 4: MOVIMIENTOS MANUALES -->
+        <section id="tab-movimientos-manuales" class="tab-content hidden">
+            <div class="grid-inputs">
+                <!-- Formulario de Compra Manual REGINFO AFIP -->
+                <div class="card" style="grid-column: span 2;">
+                    <h3>Registrar Compra Manual (Formato REGINFO)</h3>
+                    <form id="form-purchase-reginfo">
+                        <div class="grid-inputs" style="margin-bottom: 12px;">
+                            <div class="form-group">
+                                <label>Fecha Comprobante (AAAAMMDD)</label>
+                                <input type="text" name="fecha" class="form-control" placeholder="Ej: 20260704" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Tipo Comprobante (Código AFIP)</label>
+                                <select name="tipoComprobante" class="form-control" required>
+                                    <option value="001">001 - Factura A</option>
+                                    <option value="006">006 - Factura B</option>
+                                    <option value="003">003 - Nota de Crédito A</option>
+                                    <option value="011">011 - Factura C</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Punto de Venta (5 dígitos)</label>
+                                <input type="text" name="puntoVenta" class="form-control" placeholder="00001" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Número Comprobante (8 dígitos)</label>
+                                <input type="text" name="numeroComprobante" class="form-control" placeholder="00000123" required>
+                            </div>
+                            <div class="form-group">
+                                <label>CUIT Proveedor</label>
+                                <input type="text" name="cuit" class="form-control" placeholder="30123456789" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Razón Social Proveedor</label>
+                                <input type="text" name="razonSocial" class="form-control" placeholder="Proveedor S.A." required>
+                            </div>
+                            <div class="form-group">
+                                <label>Categoría Gasto</label>
+                                <select name="categoria" class="form-control">
+                                    <option value="Mercaderías / Insumos">Mercaderías / Insumos</option>
+                                    <option value="Servicios Públicos (Luz, Agua, Gas)">Servicios Públicos</option>
+                                    <option value="Telefonía e Internet">Telefonía e Internet</option>
+                                    <option value="Honorarios Profesionales">Honorarios Profesionales</option>
+                                    <option value="Alquileres Comerciales">Alquileres Comerciales</option>
+                                    <option value="Movilidad y Viáticos">Movilidad y Viáticos</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <h4 style="font-size: 13px; color: var(--accent); margin-bottom: 8px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px;">Desglose de Montos</h4>
+                        <div class="grid-inputs">
+                            <div class="form-group">
+                                <label>Importe Total</label>
+                                <input type="number" name="importeTotal" class="form-control" placeholder="0.00" step="0.01" required>
+                            </div>
+                            <div class="form-group">
+                                <label>No Gravado / Conceptos no Integrantes</label>
+                                <input type="number" name="importeNoGravado" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Importe Operaciones Exentas</label>
+                                <input type="number" name="importeExento" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Percepción IVA (Nacional)</label>
+                                <input type="number" name="importePercepIva" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Percepción IIBB (Provincial)</label>
+                                <input type="number" name="importePercepIibb" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Percepción Tasas Municipales</label>
+                                <input type="number" name="importePercepMun" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Impuestos Internos</label>
+                                <input type="number" name="importeInternos" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                        </div>
+
+                        <div class="grid-inputs" style="margin-top: 12px;">
+                            <div class="form-group">
+                                <label>Moneda / Tipo de Cambio</label>
+                                <div style="display: flex; gap: 8px;">
+                                    <input type="text" name="moneda" class="form-control" value="PES" style="width: 80px;" readonly>
+                                    <input type="number" name="tipoCambio" class="form-control" value="1.000000" step="0.000001">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Cantidad de Alícuotas de IVA</label>
+                                <input type="number" name="cantidadAlicuotas" class="form-control" value="1" min="1">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn-primary" style="margin-top: 16px;">✓ Registrar Compra REGINFO</button>
+                    </form>
+                </div>
+
+                <!-- Formulario de Movimiento Interno (Caja Chica) -->
+                <div class="card">
+                    <h3>Registrar Movimiento Interno</h3>
+                    <form id="form-internal-movement">
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div class="form-group">
+                                <label>Tipo de Movimiento</label>
+                                <div style="display: flex; gap: 16px; margin: 4px 0;">
+                                    <label style="font-weight: 500; font-size: 13px;"><input type="radio" name="tipo" value="Ingreso" checked> Ingreso (+)</label>
+                                    <label style="font-weight: 500; font-size: 13px;"><input type="radio" name="tipo" value="Gasto"> Gasto (-)</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Fecha Calendario</label>
+                                <input type="date" name="fecha" id="internal-date" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Mes de Imputación Contable</label>
+                                <input type="month" name="imputacion" id="internal-imputacion" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Importe</label>
+                                <input type="number" name="importe" class="form-control" placeholder="0.00" step="0.01" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Descripción / Motivo</label>
+                                <textarea name="descripcion" class="form-control" placeholder="Concepto del movimiento..." rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="btn-primary" style="margin-top: 8px;">✓ Guardar Movimiento</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 5: AJUSTES TRIBUTARIOS (CONTADORA) -->
+        <section id="tab-ajustes-contadora" class="tab-content hidden">
+            <div class="card">
+                <h3>Parámetros de Liquidación de Impuestos</h3>
+                <div class="grid-inputs">
+                    <div class="form-group">
+                        <label>Alícuota IVA General (%)</label>
+                        <input type="number" class="form-control" id="tax-iva-general" value="21">
+                    </div>
+                    <div class="form-group">
+                        <label>Alícuota IVA Reducido (%)</label>
+                        <input type="number" class="form-control" id="tax-iva-reducido" value="10.5">
+                    </div>
+                    <div class="form-group">
+                        <label>Alícuota IIBB ARBA (Prov. Bs As %)</label>
+                        <input type="number" class="form-control" id="tax-iibb-arba" value="3.5">
+                    </div>
+                    <div class="form-group">
+                        <label>Alícuota IIBB AGIP (CABA %)</label>
+                        <input type="number" class="form-control" id="tax-iibb-agip" value="3.0">
+                    </div>
+                </div>
+                <button class="btn-primary" onclick="alert('Parámetros guardados y actualizados para el cálculo de reportes.')">Guardar Configuración Impositiva</button>
+            </div>
+
+            <div class="card">
+                <h3>Reglas de Deducción (Caja Gris de Vinculación)</h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Definición de qué porcentaje de cada gasto es computable para Ganancias y el Impuesto sobre los Débitos y Créditos Bancarios.</p>
+                <table class="simple-table">
+                    <thead>
+                        <tr>
+                            <th>Categoría de Gasto</th>
+                            <th>Deducción Ganancias</th>
+                            <th>Impacto IVA Cred. Fiscal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Mercaderías / Insumos</td>
+                            <td>Computable 100%</td>
+                            <td>Pleno (100%)</td>
+                        </tr>
+                        <tr>
+                            <td>Medicina Prepaga</td>
+                            <td>Sujeto a tope del 5% ganancia neta</td>
+                            <td>Exento</td>
+                        </tr>
+                        <tr>
+                            <td>Movilidad y Viáticos</td>
+                            <td>Computable hasta tope legal</td>
+                            <td>Pleno (100%)</td>
+                        </tr>
+                        <tr>
+                            <td>Servicios Públicos</td>
+                            <td>Computable 100%</td>
+                            <td>Diferencial (27%)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 6: CONFIGURACIÓN GENERAL (ADMIN) -->
+        <section id="tab-configuracion" class="tab-content hidden">
+            <div class="card">
+                <h3>Administración de Clientes / Empresas Representadas</h3>
+                <table class="simple-table" id="table-clients">
+                    <thead>
+                        <tr>
+                            <th>CUIT</th>
+                            <th>Denominación Social</th>
+                            <th>Condición Fiscal</th>
+                            <th>Jurisdicción</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>20263235550</td>
+                            <td>VARONE VANESA PAOLA</td>
+                            <td>Responsable Inscripto</td>
+                            <td>AGIP (CABA)</td>
+                        </tr>
+                        <tr>
+                            <td>30710536461</td>
+                            <td>QUINTO ELEMENTO S.A</td>
+                            <td>Responsable Inscripto</td>
+                            <td>ARBA (Bs. As.)</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <h3>Usuarios del Sistema</h3>
+                <table class="simple-table">
+                    <thead>
+                        <tr>
+                            <th>Usuario</th>
+                            <th>Rol</th>
+                            <th>Empresa Vinculada</th>
+                            <th>Último Acceso</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>emiliano_admin</td>
+                            <td>Administrador General</td>
+                            <td>Todas</td>
+                            <td>Hoy, 15:32</td>
+                        </tr>
+                        <tr>
+                            <td>micaela_contable</td>
+                            <td>Estudio Contable (Asesor)</td>
+                            <td>Todas</td>
+                            <td>Ayer, 18:20</td>
+                        </tr>
+                        <tr>
+                            <td>vanesa_gerente</td>
+                            <td>Gerente / Cliente Final</td>
+                            <td>VARONE VANESA PAOLA</td>
+                            <td>Hace 3 días</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 7: HUB DE USUARIO - PANEL GERENCIAL (TABLERO UNIFICADO) -->
+        <section id="tab-client-dashboard" class="tab-content hidden">
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h4>Ventas Brutas</h4>
+                    <div class="value" id="client-sales-val">$ 0,00</div>
+                </div>
+                <div class="metric-card" style="border-left: 4px solid var(--warning);">
+                    <h4>Egresos / Gastos Totales</h4>
+                    <div class="value" id="client-purchases-val">$ 0,00</div>
+                </div>
+                <div class="metric-card" style="border-left: 4px solid var(--success);">
+                    <h4>Resultado Operativo Neto</h4>
+                    <div class="value" id="client-net-val">$ 0,00</div>
+                </div>
+            </div>
+
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h4>IVA Estimado Proximo Vencimiento</h4>
+                    <div class="value" id="client-iva-val" style="color: var(--warning);">$ 0,00</div>
+                    <span style="font-size: 11px; color: var(--text-muted);">Saldo estimado (Débito menos Crédito)</span>
+                </div>
+                <div class="metric-card">
+                    <h4>IIBB Estimado (ARBA/AGIP)</h4>
+                    <div class="value" id="client-iibb-val" style="color: var(--warning);">$ 0,00</div>
+                    <span style="font-size: 11px; color: var(--text-muted);">Calculado sobre Ventas brutas gravadas</span>
+                </div>
+                <div class="metric-card" style="border-left: 4px solid var(--danger);">
+                    <h4>Costo Laboral del Mes</h4>
+                    <div class="value" id="client-labor-val" style="color: var(--danger);">$ 0,00</div>
+                    <span style="font-size: 11px; color: var(--text-muted);">Sueldos + F931 + Sindicato</span>
+                </div>
+            </div>
+
+            <div class="grid-inputs">
+                <div class="card">
+                    <h3>Desglose de Gastos por Categoría</h3>
+                    <ul class="progress-list" id="client-category-chart">
+                        <li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">
+                            Sin datos disponibles. Cargá comprobantes recibidos para ver el desglose.
+                        </li>
+                    </ul>
+                </div>
+                <div class="card">
+                    <h3>Alertas Contables Recientes</h3>
+                    <ul style="font-size: 13px; list-style: none; display: flex; flex-direction: column; gap: 10px;">
+                        <li style="padding: 10px; background-color: var(--warning-light); border-radius: 6px; color: var(--warning);" id="alert-unresolved-taxes">
+                            ⚠️ <strong>Atención:</strong> Tienes comprobantes de compra con "Otros Tributos" sin conciliar.
+                        </li>
+                        <li style="padding: 10px; background-color: var(--success-light); border-radius: 6px; color: var(--success);">
+                            ✓ <strong>Información:</strong> La última presentación de IVA cerró correctamente.
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 8: HUB DE USUARIO - CARGA OCR (TICKETS Y GASTOS FÍSICOS) -->
+        <section id="tab-client-ocr" class="tab-content hidden">
+            <div class="card">
+                <h3>Cargar Comprobantes Físicos (Lector Inteligente OCR)</h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+                    ¿Tenés tickets de combustible, peajes o compras menores en efectivo? Subilos acá para que el sistema los digitalice y los sume al flujo contable automáticamente.
+                </p>
+
+                <div class="ocr-zone" id="ocr-dropzone">
+                    <p style="font-size: 15px; font-weight: 600; color: var(--accent);">
+                        Haz clic aquí o arrastra un ticket / factura (PDF, JPG, PNG)
+                    </p>
+                    <span style="font-size: 12px; color: var(--text-muted);">Simulador de extracción instantánea OCR</span>
+                    <input type="file" id="ocr-input" accept="image/*,application/pdf" style="position: absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor:pointer;">
+                </div>
+
+                <div class="ocr-progress-container" id="ocr-progress-container">
+                    <div class="ocr-progress-bar" id="ocr-progressbar"></div>
+                </div>
+                <p id="ocr-status-text" style="font-size: 13px; font-weight: 600; text-align: center; margin-top: 10px; color: var(--text-muted);"></p>
+            </div>
+
+            <div class="card">
+                <h3>Historial de Documentos Digitalizados por el Cliente</h3>
+                <table class="simple-table">
+                    <thead>
+                        <tr>
+                            <th>Fecha de Carga</th>
+                            <th>Proveedor Identificado</th>
+                            <th>CUIT Extraído</th>
+                            <th>Total Detectado</th>
+                            <th>Estado OCR</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ocr-history-table">
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">No hay documentos escaneados recientemente.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- MODAL POP-UP: ASIGNACIÓN Y DIVISION MULTI-ACTIVIDAD (VENTAS) -->
+    <div id="modal-multi-actividad" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 style="font-size: 16px; font-weight: bold; color: var(--primary);">Asignación Obligatoria Multi-Actividad</h3>
+                <button onclick="document.getElementById('modal-multi-actividad').classList.add('hidden')" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Esta venta pertenece a un cliente con múltiples actividades económicas registradas. Selecciona cómo imputar los montos de la factura.</p>
+                <div style="background-color: var(--bg-primary); padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span>Comprobante:</span> <strong id="modal-act-comprobante">Factura A 00001</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span>Proveedor/Receptor:</span> <strong id="modal-act-cliente">Cliente Final</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span>Neto Gravado:</span> <strong id="modal-act-neto">$ 0,00</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>Exento:</span> <strong id="modal-act-exento">$ 0,00</strong>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <!-- Opción 1: Toda la factura a una actividad -->
+                    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">
+                        <input type="radio" name="modal-act-opt" id="opt-all-to-one" value="all" checked style="margin-top: 4px;">
+                        <div>
+                            <span>Asignar el 100% a una sola actividad</span>
+                            <div style="margin-top: 6px;" onclick="event.stopPropagation()">
+                                <select id="select-modal-act-single" class="form-control">
+                                    <!-- Inyectado dinámicamente -->
+                                </select>
+                            </div>
+                        </div>
+                    </label>
+
+                    <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
+
+                    <!-- Opción 2: Dividir montos entre actividades -->
+                    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">
+                        <input type="radio" name="modal-act-opt" id="opt-split-act" value="split" style="margin-top: 4px;">
+                        <div style="width: 100%;">
+                            <span>Dividir base (Itemizar) entre múltiples actividades</span>
+                            <div style="margin-top: 8px; font-weight: normal; font-size: 12px; display: flex; flex-direction: column; gap: 8px;" id="container-modal-split-fields" onclick="event.stopPropagation()">
+                                <!-- Inyectado dinámicamente en ui.js -->
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="document.getElementById('modal-multi-actividad').classList.add('hidden')">Cancelar</button>
+                <button class="btn-primary" id="btn-modal-act-submit">Confirmar Imputación</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL POP-UP: MAPEO DE COLUMNAS FALLBACK (SALARIOS / BANCOS) -->
+    <div id="modal-column-mapper" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modal-mapper-title" style="font-size: 16px; font-weight: bold; color: var(--primary);">Mapeo Manual de Columnas</h3>
+                <button onclick="document.getElementById('modal-column-mapper').classList.add('hidden')" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-mapper-body">
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">No pudimos identificar automáticamente las columnas del archivo subido. Por favor, asocia qué columna de tu planilla corresponde a cada campo.</p>
+                <div style="display: flex; flex-direction: column; gap: 12px;" id="container-mapper-selects">
+                    <!-- Inyectado dinámicamente -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="document.getElementById('modal-column-mapper').classList.add('hidden')">Cancelar</button>
+                <button class="btn-primary" id="btn-modal-mapper-submit">Aplicar y Guardar Plantilla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script inicializador cargado como módulo ES -->
+    <script type="module" src="src/js/ui.js"></script>
+</body>
+</html>
