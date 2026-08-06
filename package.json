@@ -1,0 +1,26 @@
+{
+  "name": "sistema",
+  "version": "1.0.0",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amoresemiliano/mica_contable_sistema.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/amoresemiliano/mica_contable_sistema/issues"
+  },
+  "homepage": "https://github.com/amoresemiliano/mica_contable_sistema#readme",
+  "description": "",
+  "devDependencies": {
+    "jest": "^30.4.2"
+  },
+  "type": "module"
+}
