@@ -694,6 +694,12 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
             const toImport = validRows.map(r => {
                 const item = r.normalizedData;
                 const isCompra = (context && context.tipoOperacion === 'COMPRA') || r.tipoOperacion === 'COMPRA';
+                const netoGravadoVal = item.netoGravado !== undefined 
+                    ? item.netoGravado 
+                    : (item.alicuotas && item.alicuotas.length > 0 
+                        ? item.alicuotas.reduce((sum, a) => sum + (a.baseImponible || 0), 0) 
+                        : Math.max(0, (item.total || 0) - (item.totalIva || 0) - (item.exento || 0) - (item.netoNoGravado || 0) - (item.otrosTributos || 0)));
+
                 return {
                     id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substr(2, 9),
                     fecha: item.fecha,
@@ -702,7 +708,7 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                     tenant: context ? context.tenant : getActiveCompanyCuit(),
                     cuit: item.cuit,
                     razonSocial: item.razonSocial || '',
-                    proveedor: "CUIT " + item.cuit,
+                    proveedor: isCompra ? ("CUIT " + item.cuit) : (item.razonSocial || ("CUIT " + item.cuit)),
                     comprobante: `${item.tipo_cbte}-${item.pdv}-${item.nroDesde}`,
                     tipo_cbte: item.tipo_cbte,
                     pdv: item.pdv,
@@ -718,6 +724,8 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                     otrosTributos: item.otrosTributos || 0,
                     exento: item.exento || 0,
                     netoNoGravado: item.netoNoGravado || 0,
+                    noGravado: item.netoNoGravado || 0,
+                    netoGravado: netoGravadoVal,
                     alicuotas: item.alicuotas || [],
                     categoria: null,
                     sugerida: false,

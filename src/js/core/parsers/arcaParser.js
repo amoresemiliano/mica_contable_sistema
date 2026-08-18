@@ -55,10 +55,10 @@ export function parseArcaRows(rows, context = {}) {
         else if (clean === 'punto de venta') mapping.pdv = idx;
         else if (clean === 'numero desde') mapping.nroDesde = idx;
         else if (clean === 'numero hasta') mapping.nroHasta = idx;
-        else if (clean.includes('emisor') || clean.includes('receptor')) {
+        else if (clean.includes('emisor') || clean.includes('receptor') || clean.includes('comprador') || clean.includes('cliente')) {
             if (clean.includes('tipo')) mapping.tipoDoc = idx;
             const isEmisor = clean.includes('emisor');
-            const isReceptor = clean.includes('receptor');
+            const isReceptor = clean.includes('receptor') || clean.includes('comprador') || clean.includes('cliente');
             const target = (context.tipo === 'VENTAS' || context.tipoOperacion === 'VENTA') ? isReceptor : isEmisor;
             if (target || (!context.tipo && !context.tipoOperacion)) {
                 if (clean.includes('nro') || clean.includes('cuit')) mapping.cuit = idx;
@@ -67,11 +67,11 @@ export function parseArcaRows(rows, context = {}) {
         }
         else if (clean === 'tipo cambio') mapping.tipoCambio = idx;
         else if (clean === 'moneda') mapping.moneda = idx;
-        else if (clean === 'neto no gravado') mapping.noGravado = idx;
-        else if (clean === 'op. exentas') mapping.exento = idx;
-        else if (clean === 'otros tributos') mapping.otrosTributos = idx;
-        else if (clean === 'total iva') mapping.totalIva = idx;
-        else if (clean === 'imp. total') mapping.total = idx;
+        else if (clean === 'neto no gravado' || clean === 'imp. neto no gravado' || clean.includes('no gravado')) mapping.noGravado = idx;
+        else if (clean === 'op. exentas' || clean === 'imp. op. exentas' || clean.includes('exentas')) mapping.exento = idx;
+        else if (clean.includes('otros tributos')) mapping.otrosTributos = idx;
+        else if (clean === 'total iva' || clean === 'imp. iva' || clean.includes('total iva')) mapping.totalIva = idx;
+        else if (clean === 'imp. total' || clean === 'total') mapping.total = idx;
         
         // Detección de alícuotas: "iva 21%" o "neto grav. iva 21%"
         const isIva = clean.match(/^iva\s*(\d+(?:,\d+)?)\s*%/);
@@ -96,7 +96,12 @@ export function parseArcaRows(rows, context = {}) {
             return null;
         }
         if (typeof val === 'number') return val;
-        let str = String(val).replace(/\./g, '').replace(',', '.');
+        let str = String(val).trim();
+        if (str.includes('.') && str.includes(',')) {
+            str = str.replace(/\./g, '').replace(',', '.');
+        } else if (str.includes(',')) {
+            str = str.replace(',', '.');
+        }
         const num = parseFloat(str);
         if (isNaN(num)) {
             errors.push(`El campo ${fieldName} contiene un valor no numérico inválido: ${val}`);
@@ -108,7 +113,12 @@ export function parseArcaRows(rows, context = {}) {
     const parseNumberLenient = (val) => {
         if (val === null || val === undefined || val === '') return 0; // Opcional -> 0
         if (typeof val === 'number') return val;
-        let str = String(val).replace(/\./g, '').replace(',', '.');
+        let str = String(val).trim();
+        if (str.includes('.') && str.includes(',')) {
+            str = str.replace(/\./g, '').replace(',', '.');
+        } else if (str.includes(',')) {
+            str = str.replace(',', '.');
+        }
         const num = parseFloat(str);
         return isNaN(num) ? 0 : num;
     };
@@ -171,6 +181,18 @@ export function parseArcaRows(rows, context = {}) {
             }
         });
 
+        const netoNoGravadoVal = mapping.noGravado !== undefined ? parseNumberLenient(row[mapping.noGravado]) : 0;
+        const exentoVal = mapping.exento !== undefined ? parseNumberLenient(row[mapping.exento]) : 0;
+        const otrosTributosVal = mapping.otrosTributos !== undefined ? parseNumberLenient(row[mapping.otrosTributos]) : 0;
+        const totalIvaVal = mapping.totalIva !== undefined ? parseNumberLenient(row[mapping.totalIva]) : 0;
+
+        let netoGravadoVal = 0;
+        if (alicuotas && alicuotas.length > 0) {
+            netoGravadoVal = alicuotas.reduce((sum, a) => sum + (a.baseImponible || 0), 0);
+        } else {
+            netoGravadoVal = Math.max(0, (total || 0) - totalIvaVal - exentoVal - netoNoGravadoVal - otrosTributosVal);
+        }
+
         results.push({
             sourceRowNumber: i + 1,
             rawRow: row,
@@ -186,10 +208,11 @@ export function parseArcaRows(rows, context = {}) {
                 razonSocial: mapping.razonSocial !== undefined ? String(row[mapping.razonSocial] || '').trim() : '',
                 moneda: moneda,
                 tipoCambio: tipoCambio,
-                netoNoGravado: mapping.noGravado !== undefined ? parseNumberLenient(row[mapping.noGravado]) : 0,
-                exento: mapping.exento !== undefined ? parseNumberLenient(row[mapping.exento]) : 0,
-                otrosTributos: mapping.otrosTributos !== undefined ? parseNumberLenient(row[mapping.otrosTributos]) : 0,
-                totalIva: mapping.totalIva !== undefined ? parseNumberLenient(row[mapping.totalIva]) : 0,
+                netoGravado: netoGravadoVal,
+                netoNoGravado: netoNoGravadoVal,
+                exento: exentoVal,
+                otrosTributos: otrosTributosVal,
+                totalIva: totalIvaVal,
                 total: total || 0,
                 alicuotas
             },

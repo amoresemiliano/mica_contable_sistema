@@ -141,4 +141,131 @@ describe('First Real Import - Fase 1', () => {
 
         expect(stage2[0].status).toBe('EXACT_DUPLICATE');
     });
+
+    const csvEmitidosSemicolons = `Fecha;Tipo;Punto de Venta;Numero Desde;Numero Hasta;Doc. Receptor Tipo;Doc. Receptor Nro;Denominacion Receptor;Imp. Total;Total IVA;Moneda;Tipo Cambio
+05/07/2026;1;1;123;123;80;30799999999;CLIENTE S.A.;2420,00;420,00;PES;1,000000`;
+
+    const csvEmitidosCompradorCommas = `Fecha,Tipo,Punto de Venta,Numero Desde,Numero Hasta,Doc. Comprador Tipo,Doc. Comprador Nro,Denominacion Comprador,Imp. Total,Total IVA,Moneda,Tipo Cambio
+05/07/2026,1,1,123,123,80,30799999999,CLIENTE S.A.,2420.00,420.00,PES,1.000000`;
+
+    test('G. CSV ARCA Emitidos (Ventas) separado por ; autodetecta delimitador y mapea receptor', () => {
+        const rows = parseDelimitedText(csvEmitidosSemicolons);
+        const parsed = parseArcaRows(rows, { tipoOperacion: 'VENTA', batchId: 200 });
+
+        expect(parsed.length).toBe(1);
+        expect(parsed[0].errors).toEqual([]);
+        const data = parsed[0].normalizedData;
+        expect(data.fecha).toBe('05/07/2026');
+        expect(data.cuit).toBe('30799999999');
+        expect(data.razonSocial).toBe('CLIENTE S.A.');
+        expect(data.total).toBe(2420);
+        expect(data.netoGravado).toBe(2000);
+    });
+
+    test('H. CSV ARCA Emitidos separado por , autodetecta delimitador y mapea comprador', () => {
+        const rows = parseDelimitedText(csvEmitidosCompradorCommas);
+        const parsed = parseArcaRows(rows, { tipoOperacion: 'VENTA', batchId: 201 });
+
+        expect(parsed.length).toBe(1);
+        expect(parsed[0].errors).toEqual([]);
+        const data = parsed[0].normalizedData;
+        expect(data.cuit).toBe('30799999999');
+        expect(data.razonSocial).toBe('CLIENTE S.A.');
+        expect(data.total).toBe(2420);
+    });
+
+    test('I y J. stageImport para VENTA genera ACCEPTED y detecta EXACT_DUPLICATE en re-upload', async () => {
+        const fingerprintProvider = createNodeFingerprintProvider();
+        const rows = parseDelimitedText(csvEmitidosSemicolons);
+        const incomingRows = parseArcaRows(rows, { tipoOperacion: 'VENTA', batchId: 202 });
+        const context = { tenant: '30710536461', tipoOperacion: 'VENTA' };
+
+        const stage1 = await stageImport({
+            incomingRows,
+            existingRecords: [],
+            context,
+            fingerprintProvider
+        });
+        expect(stage1[0].status).toBe('ACCEPTED');
+
+        const existingUIStoreItems = [{
+            id: 'test-uuid-venta-1',
+            fecha: '05/07/2026',
+            tipo: 'emitido',
+            tipoOperacion: 'VENTA',
+            tenant: '30710536461',
+            cuit: '30799999999',
+            razonSocial: 'CLIENTE S.A.',
+            comprobante: '1-1-123',
+            tipo_cbte: 1,
+            pdv: 1,
+            nroDesde: 123,
+            nroHasta: 123,
+            moneda: 'PES',
+            tipoCambio: 1,
+            total: 2420,
+            importe: 2420,
+            importeTotal: 2420,
+            totalIva: 420,
+            iva: 420,
+            otrosTributos: 0,
+            exento: 0,
+            netoNoGravado: 0,
+            noGravado: 0,
+            netoGravado: 2000,
+            alicuotas: []
+        }];
+
+        const stage2 = await stageImport({
+            incomingRows,
+            existingRecords: existingUIStoreItems,
+            context,
+            fingerprintProvider
+        });
+        expect(stage2[0].status).toBe('EXACT_DUPLICATE');
+    });
+
+    test('K. Coexistencia de registros COMPRA y VENTA con mismo comprobante (1-1-123) NO genera falso duplicado', async () => {
+        const fingerprintProvider = createNodeFingerprintProvider();
+        const rowsVenta = parseDelimitedText(csvEmitidosSemicolons);
+        const incomingVentas = parseArcaRows(rowsVenta, { tipoOperacion: 'VENTA', batchId: 203 });
+        const contextVenta = { tenant: '30710536461', tipoOperacion: 'VENTA' };
+
+        // Store contiene una COMPRA con el mismo número de comprobante 1-1-123
+        const existingCompraItem = [{
+            id: 'test-uuid-compra-1',
+            fecha: '01/07/2026',
+            tipo: 'recibido',
+            tipoOperacion: 'COMPRA',
+            tenant: '30710536461',
+            cuit: '30711111112',
+            razonSocial: 'PROVEEDOR S.A.',
+            comprobante: '1-1-123',
+            tipo_cbte: 1,
+            pdv: 1,
+            nroDesde: 123,
+            nroHasta: 123,
+            moneda: 'PES',
+            tipoCambio: 1,
+            total: 1210,
+            importe: 1210,
+            importeTotal: 1210,
+            totalIva: 210,
+            iva: 210,
+            otrosTributos: 0,
+            exento: 0,
+            netoNoGravado: 0,
+            alicuotas: []
+        }];
+
+        const staged = await stageImport({
+            incomingRows: incomingVentas,
+            existingRecords: existingCompraItem,
+            context: contextVenta,
+            fingerprintProvider
+        });
+
+        // Debe ser ACCEPTED, no confundirse con la COMPRA existente
+        expect(staged[0].status).toBe('ACCEPTED');
+    });
 });

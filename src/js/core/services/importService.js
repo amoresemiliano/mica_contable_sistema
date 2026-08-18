@@ -25,13 +25,12 @@ function normalizeCuit(value) {
     const str = (value || '').toString().trim();
     if (!str) throw new Error("CUIT obligatorio");
     
-    // Acepta sólo 11 dígitos continuos o el formato XX-XXXXXXXX-X
-    const validFormat = /^(?:\d{11}|\d{2}-\d{8}-\d{1})$/;
-    if (!validFormat.test(str)) {
-        throw new Error("CUIT de contraparte inválido (debe tener 11 dígitos continuos o formato XX-XXXXXXXX-X)");
+    const clean = str.replace(/-/g, '');
+    if (!/^(?:0|1|\d{7,11})$/.test(clean)) {
+        throw new Error("CUIT de contraparte inválido (debe tener entre 7 y 11 dígitos o ser 0/1 para Consumidor Final)");
     }
     
-    return str.replace(/-/g, '');
+    return clean;
 }
 
 /**
