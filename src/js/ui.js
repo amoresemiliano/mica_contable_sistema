@@ -75,6 +75,7 @@ async function checkUserProfile(session) {
   const { data: profile, error } = await supabase
     .from('eco_user_profiles')
     .select('id, organization_id, role, is_active')
+    .eq('auth_user_id', session.user.id)
     .single();
 
   if (error && error.code !== 'PGRST116') {
