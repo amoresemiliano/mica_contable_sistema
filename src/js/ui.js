@@ -337,7 +337,7 @@ export function renderBancosGrid() {
                         <option value="Ingreso por Ventas" ${tx.cuentaSugerida === 'Ingreso por Ventas' ? 'selected' : ''}>Ingreso por Ventas</option>
                         <option value="Gasto Bancario" ${tx.cuentaSugerida === 'Gasto Bancario' ? 'selected' : ''}>Gasto Bancario</option>
                         <option value="Percepción IVA" ${tx.cuentaSugerida === 'Percepción IVA' ? 'selected' : ''}>Percepción IVA</option>
-                        <option value="Percepción IIBB (SIRCREB)" ${tx.cuentaSugerida.includes('SIRCREB') || tx.cuentaSugerida.includes('IIBB') ? 'selected' : ''}>Percepción IIBB (SIRCREB)</option>
+                        <option value="Percepción IIBB (SIRCREB)" ${(tx.cuentaSugerida || '').includes('SIRCREB') || (tx.cuentaSugerida || '').includes('IIBB') ? 'selected' : ''}>Percepción IIBB (SIRCREB)</option>
                         <option value="Impuesto Débito/Crédito" ${tx.cuentaSugerida === 'Impuesto Débito/Crédito' ? 'selected' : ''}>Impuesto Débito/Crédito</option>
                         <option value="Pago de Impuestos" ${tx.cuentaSugerida === 'Pago de Impuestos' ? 'selected' : ''}>Pago de Impuestos</option>
                     </select>
@@ -942,19 +942,19 @@ export class UIManager {
             const text = await readFileAsText(file).catch(() => '');
             const formatInfo = detectFileFormat({ arrayBuffer: buffer, text, fileName: file.name, mimeType: file.type });
             
+            const isExcelFormat = formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF' || file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx');
+
             let rows = [];
-            if (type !== 'percepcion') {
-                if (formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF') {
-                    if (typeof window === 'undefined' || !window.XLSX) throw new Error("Librería SheetJS no cargada en el navegador.");
-                    const sheetAdapter = createSheetJsAdapter(window.XLSX);
-                    rows = sheetAdapter.workbookToRows(buffer, { sheetName: null });
-                } else if (formatInfo === 'TEXT_DELIMITED') {
-                    rows = parseDelimitedText(text);
-                } else if (formatInfo === 'TEXT_FIXED_WIDTH') {
-                    rows = parseDelimitedText(text, { delimiter: 'NONE' });
-                } else {
-                    throw new Error("Formato no soportado o desconocido.");
-                }
+            if (isExcelFormat) {
+                if (typeof window === 'undefined' || !window.XLSX) throw new Error("Librería SheetJS no cargada en el navegador.");
+                const sheetAdapter = createSheetJsAdapter(window.XLSX);
+                rows = sheetAdapter.workbookToRows(buffer, { sheetName: null });
+            } else if (formatInfo === 'TEXT_DELIMITED') {
+                rows = parseDelimitedText(text);
+            } else if (formatInfo === 'TEXT_FIXED_WIDTH') {
+                rows = parseDelimitedText(text, { delimiter: 'NONE' });
+            } else {
+                throw new Error("Formato no soportado o desconocido.");
             }
 
             const fingerprintProvider = createBrowserFingerprintProvider();
@@ -982,8 +982,7 @@ export class UIManager {
                 const jurisdiction = (document.getElementById('percep-jurisdiccion')?.value || 'ARBA').toUpperCase();
                 context.jurisdiccion = jurisdiction;
 
-                const isExcel = file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx') || format === 'EXCEL';
-                if (isExcel) {
+                if (isExcelFormat) {
                     parsedItems = parseIvaPerceptions(rows, context);
                 } else {
                     parsedItems = parseArbaText(text, context);
@@ -1039,6 +1038,74 @@ export class UIManager {
         this.renderMainTable();
         this.renderPerceptionsTable();
         this.renderBankTable();
+        this.renderSalarySummary();
+    }
+
+    static renderSalarySummary() {
+        const container = document.getElementById('salary-detail-container');
+        const badge = document.getElementById('salary-source-badge');
+        const sal = appStore.salaries;
+
+        if (!sal) {
+            if (badge) badge.innerText = "Fuente: ACOMPY | Período: Sin Cargar";
+            if (container) {
+                container.innerHTML = `Aún no se ha importado reporte de sueldos Acompy para este período.`;
+            }
+            return;
+        }
+
+        if (badge) {
+            badge.innerText = `Fuente: ${sal.fuente || 'ACOMPY'} | Período: ${sal.periodo || 'N/D'}`;
+        }
+
+        if (!container) return;
+
+        const fmt = (v) => `$ ${(v || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+        container.innerHTML = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; text-align: left;">
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Período Liquidado</span>
+                    <strong style="font-size: 14px; color: var(--primary);">${sal.periodo || 'N/D'}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Remunerativo</span>
+                    <strong style="font-size: 14px;">${fmt(sal.remunerativo)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">No Remunerativo</span>
+                    <strong style="font-size: 14px;">${fmt(sal.noRemunerativo)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Anticipos / Adelantos</span>
+                    <strong style="font-size: 14px;">${fmt(sal.anticipos)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">SAC Proporcional</span>
+                    <strong style="font-size: 14px;">${fmt(sal.sacProporcional)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Aporte Sindical Oblig.</span>
+                    <strong style="font-size: 14px;">${fmt(sal.aporteSindicalObligatorio)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">FAECYS</span>
+                    <strong style="font-size: 14px;">${fmt(sal.faecys)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Sueldo Neto Total</span>
+                    <strong style="font-size: 14px; color: var(--success);">${fmt(sal.sueldoNeto)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Sueldo Bruto Calculado</span>
+                    <strong style="font-size: 14px;">${fmt(sal.sueldoBrutoCalculado)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Aporte Sindical Calculado</span>
+                    <strong style="font-size: 14px;">${fmt(sal.aporteSindicalCalculado)}</strong>
+                </div>
+            </div>
+        `;
     }
 
     static renderPerceptionsTable() {
