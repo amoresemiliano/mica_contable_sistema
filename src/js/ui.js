@@ -1,11 +1,149 @@
+import { supabase } from './core/services/supabaseClient.js';
 import { appStore } from './store.js';
-import { CSVParser } from './parser.js';
 import { setupOCR, renderOcrHistory } from './ocr.js';
 import { Reconciler } from './reconciler.js';
-import { BankParser } from './bankParser.js';
-import { SalaryParser } from './salaryParser.js';
 import { ManualMovements } from './manualMovements.js';
 import { Activities } from './activities.js';
+import { readFileAsArrayBuffer, readFileAsText, detectFileFormat } from './core/adapters/fileAdapter.js';
+import { createSheetJsAdapter } from './core/adapters/sheetJsAdapter.js';
+import { parseDelimitedText } from './adapters/textAdapter.js';
+import { createBrowserFingerprintProvider } from './adapters/browserFingerprintProvider.js';
+import { parseArcaRows } from './core/parsers/arcaParser.js';
+import { parseArbaText } from './core/parsers/arbaParser.js';
+import { parseBankRows } from './core/parsers/bankParser.js';
+import { parseSalaryRows } from './core/parsers/salaryParser.js';
+import { stageImport } from './core/services/importService.js';
+
+async function loginWithGoogle() {
+  const redirectUrl = window.location.origin + window.location.pathname;
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: redirectUrl
+    }
+  });
+
+  if (error) {
+    alert('Error al iniciar sesión: ' + error.message);
+  }
+}
+
+async function logout() {
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    alert('Error al cerrar sesión: ' + error.message);
+  }
+}
+
+document.getElementById('google-login-btn')?.addEventListener('click', loginWithGoogle);
+document.getElementById('logout-btn')?.addEventListener('click', logout);
+
+const appContainer = document.getElementById('app-container');
+const loginContainer = document.getElementById('login-container');
+const authStatusMsg = document.getElementById('auth-status-message');
+const loginBtn = document.getElementById('google-login-btn');
+
+async function checkUserProfile(session) {
+  let fallbackBtn = document.getElementById('fallback-logout-btn');
+  if (!fallbackBtn && authStatusMsg) {
+    fallbackBtn = document.createElement('button');
+    fallbackBtn.id = 'fallback-logout-btn';
+    fallbackBtn.className = 'btn-secondary';
+    fallbackBtn.innerText = 'Cerrar Sesión';
+    fallbackBtn.style.marginTop = '20px';
+    fallbackBtn.onclick = logout;
+    authStatusMsg.parentNode.appendChild(fallbackBtn);
+  }
+
+  const userInfoEl = document.getElementById('user-header-info');
+
+  if (!session) {
+    appContainer.classList.add('hidden');
+    loginContainer.style.display = 'flex';
+    authStatusMsg.style.display = 'none';
+    loginBtn.style.display = 'flex';
+    if (fallbackBtn) fallbackBtn.style.display = 'none';
+    if (userInfoEl) userInfoEl.innerText = '';
+    return;
+  }
+
+  loginBtn.style.display = 'none';
+  authStatusMsg.style.display = 'block';
+  authStatusMsg.innerText = 'Verificando permisos...';
+  if (fallbackBtn) fallbackBtn.style.display = 'none';
+
+  const { data: profile, error } = await supabase
+    .from('eco_user_profiles')
+    .select('id, organization_id, role, is_active')
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    appContainer.classList.add('hidden');
+    loginContainer.style.display = 'flex';
+    authStatusMsg.innerText = 'No se pudo verificar el acceso.';
+    if (fallbackBtn) fallbackBtn.style.display = 'block';
+    if (userInfoEl) userInfoEl.innerText = '';
+    return;
+  }
+
+  if (error?.code === 'PGRST116' || !profile) {
+    appContainer.classList.add('hidden');
+    loginContainer.style.display = 'flex';
+    authStatusMsg.innerText = 'Acceso pendiente de aprobación.';
+    if (fallbackBtn) fallbackBtn.style.display = 'block';
+    if (userInfoEl) userInfoEl.innerText = '';
+    return;
+  }
+
+  if (profile.is_active === false) {
+    appContainer.classList.add('hidden');
+    loginContainer.style.display = 'flex';
+    authStatusMsg.innerText = 'Acceso pendiente de aprobación o deshabilitado.';
+    if (fallbackBtn) fallbackBtn.style.display = 'block';
+    if (userInfoEl) userInfoEl.innerText = '';
+    return;
+  }
+
+  // Cargar nombre de la organización con fallback seguro
+  let orgName = 'Organización';
+  if (profile.organization_id) {
+    try {
+      const { data: org, error: orgError } = await supabase
+        .from('eco_organizations')
+        .select('name')
+        .eq('id', profile.organization_id)
+        .single();
+      
+      if (!orgError && org?.name) {
+        orgName = org.name;
+      }
+    } catch (e) {
+      orgName = 'Organización';
+    }
+  }
+
+  // Identidad del usuario (preferir full_name de Google metadata, fallback a email)
+  const userIdentity = session.user?.user_metadata?.full_name || session.user?.email || 'Usuario';
+  const role = profile.role || 'USER';
+
+  if (userInfoEl) {
+    userInfoEl.innerText = `${userIdentity} · ${role} · ${orgName}`;
+  }
+
+  loginContainer.style.display = 'none';
+  appContainer.classList.remove('hidden');
+  if (fallbackBtn) fallbackBtn.style.display = 'none';
+}
+
+supabase.auth.getSession().then(({ data: { session } }) => {
+  checkUserProfile(session);
+});
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+    checkUserProfile(session);
+  }
+});
 
 const CATEGORIES_RECIBIDOS = [
     "Mercaderías / Insumos",
@@ -453,6 +591,142 @@ function showColumnMapperModal(headers, title, onApply) {
     };
 
     modal.classList.remove('hidden');
+}// MOSTRAR VISTA PREVIA (STAGING)
+function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
+    if (typeof context === 'function') {
+        onConfirm = context;
+        context = { tenant: getActiveCompanyCuit(), tipoOperacion: 'COMPRA' };
+    }
+
+    const validRows = stagedRows.filter(r => r.status === 'ACCEPTED' || r.status === 'POSSIBLE_AMENDMENT');
+    const duplicateRows = stagedRows.filter(r => r.status === 'EXACT_DUPLICATE');
+    const invalidRows = stagedRows.filter(r => r.status === 'INVALID');
+    
+    // Crear el overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    
+    overlay.innerHTML = `
+        <div class="modal-card" style="width: 80%; max-width: 800px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3 style="font-size: 16px; font-weight: bold; color: var(--primary);">Vista Previa de Importación</h3>
+                <button class="btn-close-modal" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                <p><strong>Archivo:</strong> ${fileName}</p>
+                <div style="display: flex; gap: 15px; margin: 15px 0;">
+                    <div style="background: #e6f4ea; color: #137333; padding: 10px; border-radius: 4px; flex: 1; text-align: center;">
+                        <strong>${validRows.length}</strong><br>Válidas / Modificadas
+                    </div>
+                    <div style="background: #fef7e0; color: #b06000; padding: 10px; border-radius: 4px; flex: 1; text-align: center;">
+                        <strong>${duplicateRows.length}</strong><br>Duplicadas Exactas (Ignoradas)
+                    </div>
+                    <div style="background: #fce8e6; color: #c5221f; padding: 10px; border-radius: 4px; flex: 1; text-align: center;">
+                        <strong>${invalidRows.length}</strong><br>Inválidas
+                    </div>
+                </div>
+                
+                ${invalidRows.length > 0 ? `
+                <div style="background: #fce8e6; color: #c5221f; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 12px;">
+                    <strong>Errores encontrados:</strong>
+                    <ul style="margin: 5px 0 0 20px;">
+                        ${invalidRows.slice(0, 5).map(r => `<li>Fila ${r.sourceRowNumber || '?'}: ${r.errors?.join(', ') || 'Error de parseo'}</li>`).join('')}
+                        ${invalidRows.length > 5 ? `<li>...y ${invalidRows.length - 5} más</li>` : ''}
+                    </ul>
+                </div>
+                ` : ''}
+                
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 5px;">Muestra de datos válidos (máximo 5):</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 15px;">
+                    <thead>
+                        <tr style="background: var(--bg-hover); text-align: left;">
+                            <th style="padding: 6px; border: 1px solid var(--border-color);">Fecha</th>
+                            <th style="padding: 6px; border: 1px solid var(--border-color);">Comprobante</th>
+                            <th style="padding: 6px; border: 1px solid var(--border-color);">Total</th>
+                            <th style="padding: 6px; border: 1px solid var(--border-color);">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${validRows.slice(0, 5).map(r => {
+                            const d = r.normalizedData;
+                            const cbte = `${d.tipo_cbte}-${d.pdv}-${d.nroDesde}`;
+                            const isAmended = r.status === 'POSSIBLE_AMENDMENT';
+                            const totalFormatted = (d.total || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+                            return `
+                            <tr>
+                                <td style="padding: 6px; border: 1px solid var(--border-color);">${d.fecha}</td>
+                                <td style="padding: 6px; border: 1px solid var(--border-color);">${cbte}</td>
+                                <td style="padding: 6px; border: 1px solid var(--border-color);">$ ${totalFormatted}</td>
+                                <td style="padding: 6px; border: 1px solid var(--border-color); font-weight: bold; color: ${isAmended ? '#b06000' : '#137333'};">
+                                    ${isAmended ? 'Modificado' : 'Nuevo'}
+                                </td>
+                            </tr>
+                            `;
+                        }).join('')}
+                        ${validRows.length === 0 ? '<tr><td colspan="4" style="text-align: center; padding: 10px;">No hay filas válidas</td></tr>' : ''}
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer" style="margin-top: auto;">
+                <button class="btn-secondary btn-cancel-modal">Cancelar</button>
+                <button class="btn-primary btn-confirm-modal" ${validRows.length === 0 ? 'disabled' : ''}>Confirmar Importación (${validRows.length})</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    const closeAndRemove = () => {
+        if (overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
+        }
+    };
+    
+    overlay.querySelector('.btn-close-modal').onclick = closeAndRemove;
+    overlay.querySelector('.btn-cancel-modal').onclick = closeAndRemove;
+    
+    const confirmBtn = overlay.querySelector('.btn-confirm-modal');
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            closeAndRemove();
+            // Transformar las filas staged al modelo de la UI garantizando el contrato de identidad fiscal
+            const toImport = validRows.map(r => {
+                const item = r.normalizedData;
+                const isCompra = (context && context.tipoOperacion === 'COMPRA') || r.tipoOperacion === 'COMPRA';
+                return {
+                    id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substr(2, 9),
+                    fecha: item.fecha,
+                    tipo: isCompra ? 'recibido' : 'emitido',
+                    tipoOperacion: isCompra ? 'COMPRA' : 'VENTA',
+                    tenant: context ? context.tenant : getActiveCompanyCuit(),
+                    cuit: item.cuit,
+                    razonSocial: item.razonSocial || '',
+                    proveedor: "CUIT " + item.cuit,
+                    comprobante: `${item.tipo_cbte}-${item.pdv}-${item.nroDesde}`,
+                    tipo_cbte: item.tipo_cbte,
+                    pdv: item.pdv,
+                    nroDesde: item.nroDesde,
+                    nroHasta: item.nroHasta || item.nroDesde,
+                    moneda: item.moneda || 'PES',
+                    tipoCambio: item.tipoCambio || 1,
+                    total: item.total || 0,
+                    importe: item.total || 0,
+                    importeTotal: item.total || 0,
+                    totalIva: item.totalIva || 0,
+                    iva: item.totalIva || 0,
+                    otrosTributos: item.otrosTributos || 0,
+                    exento: item.exento || 0,
+                    netoNoGravado: item.netoNoGravado || 0,
+                    alicuotas: item.alicuotas || [],
+                    categoria: null,
+                    sugerida: false,
+                    confirmada: false,
+                    rawRecord: item
+                };
+            });
+            onConfirm(toImport);
+        };
+    }
 }
 
 // CONTROLADOR DE RENDERIZADO DEL CONCILIADOR ARCA (NÚCLEO EXISTENTE ADAPTADO)
@@ -486,74 +760,97 @@ export class UIManager {
         });
     }
 
-    static processFile(file, type) {
-        if (type === 'recibido' || type === 'emitido') {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const parsed = CSVParser.parse(e.target.result, type);
-                appStore.addItems(parsed);
-                // Si son ventas, revisar si se requiere imputación de actividades
-                if (type === 'emitido') {
-                    checkMultiActivityQueue();
+    static async processFile(file, type) {
+        try {
+            const buffer = await readFileAsArrayBuffer(file);
+            const text = await readFileAsText(file).catch(() => '');
+            const formatInfo = detectFileFormat({ arrayBuffer: buffer, text, fileName: file.name, mimeType: file.type });
+            
+            let rows = [];
+            if (type !== 'percepcion') {
+                if (formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF') {
+                    if (typeof window === 'undefined' || !window.XLSX) throw new Error("Librería SheetJS no cargada en el navegador.");
+                    const sheetAdapter = createSheetJsAdapter(window.XLSX);
+                    rows = sheetAdapter.workbookToRows(buffer, { sheetName: null });
+                } else if (formatInfo === 'TEXT_DELIMITED') {
+                    rows = parseDelimitedText(text);
+                } else if (formatInfo === 'TEXT_FIXED_WIDTH') {
+                    rows = parseDelimitedText(text, { delimiter: 'NONE' });
+                } else {
+                    throw new Error("Formato no soportado o desconocido.");
                 }
-            };
-            reader.readAsText(file, 'UTF-8');
-        } 
-        else if (type === 'percepcion') {
-            const jurisdiction = document.getElementById('percep-jurisdiccion').value;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const parsed = Reconciler.parsePerceptions(e.target.result, jurisdiction);
-                appStore.addPerceptions(parsed);
-                Reconciler.runCrossMatching(); // Ejecutar match cruzado
-                alert(`Se importaron ${parsed.length} percepciones de ${jurisdiction}.`);
-            };
-            reader.readAsText(file, 'UTF-8');
-        }
-        else if (type === 'banco') {
-            const bankName = document.getElementById('bank-name').value || 'Generico';
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const buffer = e.target.result;
-                const result = BankParser.parseExcel(buffer, bankName);
+            }
+
+            const fingerprintProvider = createBrowserFingerprintProvider();
+            const tenant = getActiveCompanyCuit();
+            let parsedItems = [];
+            let context = { batchId: Date.now(), tenant };
+
+            if (type === 'recibido' || type === 'emitido') {
+                context.tipoOperacion = type === 'recibido' ? 'COMPRA' : 'VENTA';
+                parsedItems = parseArcaRows(rows, context);
+                
+                const staged = await stageImport({ 
+                    incomingRows: parsedItems, 
+                    existingRecords: appStore.items || [], 
+                    context, 
+                    fingerprintProvider 
+                });
+                
+                showStagingPreviewModal(staged, file.name, context, (acceptedItems) => {
+                    appStore.addItems(acceptedItems);
+                    if (type === 'emitido') checkMultiActivityQueue();
+                    UIManager.render();
+                });
+            } else if (type === 'percepcion') {
+                const jurisdiction = document.getElementById('percep-jurisdiccion').value;
+                context.jurisdiccion = jurisdiction;
+                parsedItems = parseArbaText(text, context);
+                
+                // Asumimos validación y stage simple
+                appStore.addPerceptions(parsedItems);
+                Reconciler.runCrossMatching();
+                alert(`Se importaron ${parsedItems.length} percepciones de ${jurisdiction}.`);
+            } else if (type === 'banco') {
+                const bankName = document.getElementById('bank-name').value || 'Generico';
+                context.banco = bankName;
+                const result = parseBankRows(rows, context);
                 
                 if (result.mappingRequired) {
                     showColumnMapperModal(result.headers, `Mapeador de Columnas: ${bankName}`, (mapping) => {
-                        // Guardar plantilla y re-procesar
                         appStore.saveBankTemplate(bankName, mapping);
-                        const secondResult = BankParser.parseExcel(buffer, bankName);
+                        context.columns = mapping;
+                        const secondResult = parseBankRows(rows, context);
                         appStore.addBankTransactions(secondResult.transactions);
+                        UIManager.render();
                     });
                 } else {
                     appStore.addBankTransactions(result.transactions);
+                    UIManager.render();
                 }
-            };
-            reader.readAsArrayBuffer(file);
-        }
-        else if (type === 'sueldo') {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const buffer = e.target.result;
-                const result = SalaryParser.parseExcel(buffer);
+            } else if (type === 'sueldo') {
+                const result = parseSalaryRows(rows, context);
 
                 if (result.error) {
                     alert(result.error);
                 } else if (result.mappingRequired) {
                     showColumnMapperModal(result.headers, "Mapeador de Columnas: Sueldos Acompy", (mapping) => {
-                        // Re-procesar con el mapeo nuevo
-                        const secondResult = SalaryParser.parseExcel(buffer, mapping);
+                        context.columns = mapping;
+                        const secondResult = parseSalaryRows(rows, context);
                         if (secondResult.error) alert(secondResult.error);
                         else {
                             appStore.addSalary(secondResult);
-                            updateSalaryFormFields();
+                            if (typeof updateSalaryFormFields === 'function') updateSalaryFormFields();
                         }
                     });
                 } else {
                     appStore.addSalary(result);
-                    updateSalaryFormFields();
+                    if (typeof updateSalaryFormFields === 'function') updateSalaryFormFields();
                 }
-            };
-            reader.readAsArrayBuffer(file);
+            }
+        } catch (error) {
+            alert("Error al procesar archivo: " + error.message);
+            console.error(error);
         }
     }
 

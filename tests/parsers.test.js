@@ -1,9 +1,11 @@
-import { parseArbaText, parseArbaAmount } from '../src/js/core/parsers/arbaParser.js';
+import { parseDelimitedText } from '../src/js/adapters/textAdapter.js';
 import { parseArcaRows } from '../src/js/core/parsers/arcaParser.js';
+import { parseArbaText } from '../src/js/core/parsers/arbaParser.js';
 import { parseSalaryRows } from '../src/js/core/parsers/salaryParser.js';
 import { parseBankRows } from '../src/js/core/parsers/bankParser.js';
 import { normalizeDecimal, stageImport, toSafeTrace, buildRecordIdentity } from '../src/js/core/services/importService.js';
 import { createTenantConfig, TIPO_IVA, PERIODO_CONTABLE } from '../src/js/core/config/tenantConfig.js';
+import { createNodeFingerprintProvider } from './helpers/nodeFingerprintProvider.js';
 import {
     ARBA_FIXTURES,
     ARCA_COMPRAS_30,
@@ -234,13 +236,15 @@ describe('Import Service (Staging & Identity)', () => {
         { tenant: 'TenantA', tipoOperacion: 'COMPRA', cuit: '30711111112', tipo_cbte: 1, pdv: 15, nroDesde: 100, nroHasta: 100, moneda: 'PES', importeTotal: 100, totalIva: 21, alicuotas: [{tasa: 21, baseImponible: 100, importeIva: 21}] }
     ];
 
-    test('Tenant ausente lanza error', () => {
-        expect(() => stageImport({ incomingRows: [], existingRecords: [], context: {} })).toThrow();
+    test('Tenant ausente lanza error', async () => {
+        const fingerprintProvider = createNodeFingerprintProvider();
+        await expect(stageImport({ incomingRows: [], existingRecords: [], context: {}, fingerprintProvider })).rejects.toThrow();
     });
-    test('Estado INVALID', () => {
-        const res = stageImport({
+    test('Estado INVALID', async () => {
+        const fingerprintProvider = createNodeFingerprintProvider();
+        const res = await stageImport({
             incomingRows: [{ errors: ['error grave'] }],
-            existingRecords: [], context: { tenant: 'TenantA', tipoOperacion: 'COMPRA' }
+            existingRecords: [], context: { tenant: 'TenantA', tipoOperacion: 'COMPRA' }, fingerprintProvider
         });
         expect(res[0].status).toBe('INVALID');
     });
@@ -338,25 +342,28 @@ describe('Import Service (Staging & Identity)', () => {
         .toThrow("CUIT de contraparte inválido");
     });
 
-    test('Identidad exacta desde archivos diferentes (EXACT_DUPLICATE)', () => {
-        const res = stageImport({
+    test('Identidad exacta desde archivos diferentes (EXACT_DUPLICATE)', async () => {
+        const fingerprintProvider = createNodeFingerprintProvider();
+        const res = await stageImport({
             incomingRows: [{ normalizedData: { cuit: '30711111112', tipo_cbte: 1, pdv: 15, nroDesde: 100, nroHasta: 100, moneda: 'PES', importeTotal: 100, totalIva: 21, alicuotas: [{tasa: 21, baseImponible: 100, importeIva: 21}] } }],
-            existingRecords: existing, context: { tenant: 'TenantA', tipoOperacion: 'COMPRA' }
+            existingRecords: existing, context: { tenant: 'TenantA', tipoOperacion: 'COMPRA' }, fingerprintProvider
         });
         expect(res[0].status).toBe('EXACT_DUPLICATE');
     });
-    test('Misma identidad y distinta base imponible (POSSIBLE_AMENDMENT)', () => {
-        const res = stageImport({
+    test('Misma identidad y distinta base imponible (POSSIBLE_AMENDMENT)', async () => {
+        const fingerprintProvider = createNodeFingerprintProvider();
+        const res = await stageImport({
             incomingRows: [{ normalizedData: { cuit: '30711111112', tipo_cbte: 1, pdv: 15, nroDesde: 100, nroHasta: 100, moneda: 'PES', importeTotal: 100, totalIva: 21, alicuotas: [{tasa: 21, baseImponible: 50, importeIva: 21}] } }],
-            existingRecords: existing, context: { tenant: 'TenantA', tipoOperacion: 'COMPRA' }
+            existingRecords: existing, context: { tenant: 'TenantA', tipoOperacion: 'COMPRA' }, fingerprintProvider
         });
         expect(res[0].status).toBe('POSSIBLE_AMENDMENT');
     });
-    test('Huella con diferente distribución por alícuota (POSSIBLE_AMENDMENT)', () => {
-        const res = stageImport({
+    test('Huella con diferente distribución por alícuota (POSSIBLE_AMENDMENT)', async () => {
+        const fingerprintProvider = createNodeFingerprintProvider();
+        const res = await stageImport({
             incomingRows: [{ normalizedData: { cuit: '30711111112', tipo_cbte: 1, pdv: 15, nroDesde: 100, nroHasta: 100, moneda: 'PES', importeTotal: 121, netoGravadoTotal: 100, totalIva: 21, alicuotas: [{tasa: 10.5, baseImponible: 200, importeIva: 21}] } }],
             existingRecords: [{ tenant: 'TenantA', tipoOperacion: 'COMPRA', cuit: '30711111112', tipo_cbte: 1, pdv: 15, nroDesde: 100, nroHasta: 100, moneda: 'PES', importeTotal: 121, netoGravadoTotal: 100, totalIva: 21, alicuotas: [{tasa: 21, baseImponible: 100, importeIva: 21}] }], 
-            context: { tenant: 'TenantA', tipoOperacion: 'COMPRA' }
+            context: { tenant: 'TenantA', tipoOperacion: 'COMPRA' }, fingerprintProvider
         });
         expect(res[0].status).toBe('POSSIBLE_AMENDMENT');
     });

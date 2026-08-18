@@ -55,14 +55,14 @@ export function parseArcaRows(rows, context = {}) {
         else if (clean === 'punto de venta') mapping.pdv = idx;
         else if (clean === 'numero desde') mapping.nroDesde = idx;
         else if (clean === 'numero hasta') mapping.nroHasta = idx;
-        else if (clean.includes('doc. emisor') || clean.includes('doc. receptor')) {
+        else if (clean.includes('emisor') || clean.includes('receptor')) {
             if (clean.includes('tipo')) mapping.tipoDoc = idx;
             const isEmisor = clean.includes('emisor');
             const isReceptor = clean.includes('receptor');
-            const target = context.tipo === 'VENTAS' ? isReceptor : isEmisor;
-            if (target || !context.tipo) {
-                if (clean.includes('nro')) mapping.cuit = idx;
-                if (clean.includes('denominacion')) mapping.razonSocial = idx;
+            const target = (context.tipo === 'VENTAS' || context.tipoOperacion === 'VENTA') ? isReceptor : isEmisor;
+            if (target || (!context.tipo && !context.tipoOperacion)) {
+                if (clean.includes('nro') || clean.includes('cuit')) mapping.cuit = idx;
+                if (clean.includes('denominacion') || clean.includes('nombre') || clean.includes('razon social')) mapping.razonSocial = idx;
             }
         }
         else if (clean === 'tipo cambio') mapping.tipoCambio = idx;

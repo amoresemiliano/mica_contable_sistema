@@ -1,4 +1,6 @@
-import crypto from 'crypto';
+
+
+import { buildFiscalFingerprint } from './fiscalFingerprint.js';
 
 /**
  * Normalización decimal determinista.
@@ -92,45 +94,7 @@ export function buildRecordIdentity(normalizedData, context) {
     ]);
 }
 
-/**
- * Política de Hash:
- * - Serialización: JSON.stringify de un array canónico.
- * - Campos: netoGravadoTotal, netoNoGravado, exento, otrosTributos, totalIva, importeTotal, moneda, tipoCambio, alicuotas.
- * - Orden: Fijo en el array. Alícuotas ordenadas por tasa, base, importe.
- * - Separación: Estructura JSON.
- * - Algoritmo Final: SHA-256 en formato hexadecimal.
- */
-export function buildFiscalFingerprint(rowData) {
-    if (!rowData) return crypto.createHash('sha256').update('null').digest('hex');
-    
-    let alicuotas = rowData.alicuotas || [];
-    
-    // Canonicalize alicuotas and sort
-    const canonicalAlicuotas = alicuotas.map(a => ({
-        tasa: normalizeDecimal(a.tasa, 4),
-        baseImponible: normalizeDecimal(a.baseImponible, 2),
-        importeIva: normalizeDecimal(a.importeIva, 2)
-    })).sort((a, b) => {
-        if (a.tasa !== b.tasa) return a.tasa.localeCompare(b.tasa);
-        if (a.baseImponible !== b.baseImponible) return a.baseImponible.localeCompare(b.baseImponible);
-        return a.importeIva.localeCompare(b.importeIva);
-    });
-    
-    const canonicalArray = [
-        normalizeDecimal(rowData.netoGravadoTotal, 2),
-        normalizeDecimal(rowData.netoNoGravado, 2),
-        normalizeDecimal(rowData.exento, 2),
-        normalizeDecimal(rowData.otrosTributos, 2),
-        normalizeDecimal(rowData.totalIva, 2),
-        normalizeDecimal(rowData.importeTotal || rowData.total, 2),
-        rowData.moneda || 'PES',
-        normalizeDecimal(rowData.tipoCambio, 6),
-        canonicalAlicuotas
-    ];
-    
-    const serialized = JSON.stringify(canonicalArray);
-    return crypto.createHash('sha256').update(serialized).digest('hex');
-}
+
 
 /**
  * Crea una vista segura del registro (trazabilidad)
@@ -152,7 +116,8 @@ export function toSafeTrace(record) {
 /**
  * Orquestador puro de importación (staging).
  */
-export function stageImport({ incomingRows, existingRecords, context }) {
+export async function stageImport({ incomingRows, existingRecords, context, fingerprintProvider }) {
+    if (!fingerprintProvider) throw new Error("fingerprintProvider es obligatorio");
     if (!context || !context.tenant) {
         throw new Error("Contexto con 'tenant' es obligatorio.");
     }
@@ -166,24 +131,24 @@ export function stageImport({ incomingRows, existingRecords, context }) {
 
     const stagedResults = [];
 
-    incomingRows.forEach(row => {
+    for (const row of incomingRows) {
         if (row.errors && row.errors.length > 0) {
             stagedResults.push({ ...row, status: 'INVALID' });
-            return;
+            continue;
         }
 
         const data = row.normalizedData;
         if (!data) {
             stagedResults.push({ ...row, status: 'INVALID' });
-            return;
+            continue;
         }
 
         const identityKey = buildRecordIdentity(data, context);
-        const incomingHash = buildFiscalFingerprint(data);
+        const incomingHash = await buildFiscalFingerprint(data, fingerprintProvider);
         const existing = existingIndex[identityKey];
 
         if (existing) {
-            const existingHash = buildFiscalFingerprint(existing);
+            const existingHash = await buildFiscalFingerprint(existing, fingerprintProvider);
             
             if (incomingHash === existingHash) {
                 stagedResults.push({ ...row, status: 'EXACT_DUPLICATE', identityKey });
@@ -198,7 +163,7 @@ export function stageImport({ incomingRows, existingRecords, context }) {
                 tipoOperacion: context.tipoOperacion
             };
         }
-    });
+    }
 
     return stagedResults;
 }
