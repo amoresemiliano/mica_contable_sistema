@@ -10,8 +10,14 @@ export class AppStore {
         this.manualMovements = []; // Movimientos REGINFO e internos
         this.ocrHistory = [];
         
-        // Motor de Keywords Bancarias cargado en LocalStorage o por defecto
-        this.bankRules = JSON.parse(localStorage.getItem('mica_bank_rules')) || {
+        const getLocalJSON = (key) => {
+            if (typeof localStorage !== 'undefined' && localStorage.getItem) {
+                try { return JSON.parse(localStorage.getItem(key)); } catch(e) { return null; }
+            }
+            return null;
+        };
+
+        this.bankRules = getLocalJSON('mica_bank_rules') || {
             debit: [
                 { pattern: 'MANTE', category: 'Gasto Bancario' },
                 { pattern: 'COMIS', category: 'Gasto Bancario' },
@@ -30,7 +36,7 @@ export class AppStore {
             ]
         };
 
-        this.bankTemplates = JSON.parse(localStorage.getItem('mica_bank_templates')) || {};
+        this.bankTemplates = getLocalJSON('mica_bank_templates') || {};
         this.currentFilter = 'all';
         this.searchQuery = '';
         this.listeners = [];
@@ -55,10 +61,28 @@ export class AppStore {
 
     // Cargar Percepciones Provinciales
     addPerceptions(newPerceptions) {
-        newPerceptions.forEach(percep => {
-            // Normalizar CUIT (limpiar guiones y espacios)
-            percep.cuit = percep.cuit.toString().replace(/\D/g, '');
-            this.perceptions.push(percep);
+        if (!Array.isArray(newPerceptions)) return;
+        newPerceptions.forEach(p => {
+            const percep = p.normalizedData || p;
+            if (!percep || !percep.cuit) return;
+            const cleanCuit = (percep.cuit || '').toString().replace(/\D/g, '');
+            const amountVal = typeof percep.amount === 'number' ? percep.amount : (typeof percep.monto === 'number' ? percep.monto : parseFloat(percep.importe) || 0);
+            let periodStr = percep.period || '';
+            if (!periodStr && percep.fecha) {
+                const parts = percep.fecha.split('/');
+                if (parts.length === 3) {
+                    periodStr = `${parts[2]}-${parts[1]}`;
+                }
+            }
+            this.perceptions.push({
+                ...percep,
+                cuit: cleanCuit,
+                amount: amountVal,
+                monto: amountVal,
+                importe: amountVal,
+                period: periodStr,
+                jurisdiction: (percep.jurisdiction || 'ARBA').toUpperCase()
+            });
         });
         this.notify();
     }
@@ -85,7 +109,21 @@ export class AppStore {
 
     // Cargar Sueldos consolidados de Acompy
     addSalary(salaryData) {
-        this.salaries = salaryData;
+        if (!salaryData) return;
+        const norm = salaryData.normalizedData || salaryData;
+        this.salaries = {
+            ...norm,
+            sueldoBruto: norm.sueldoBruto || norm.sueldoBrutoCalculado || norm.remunerativo || 0,
+            sueldoBrutoCalculado: norm.sueldoBrutoCalculado || norm.remunerativo || 0,
+            anticipos: norm.anticipos || norm.anticipoSueldo || 0,
+            anticipoSueldo: norm.anticipoSueldo || norm.anticipos || 0,
+            sindicatoAporte: norm.sindicatoAporte || norm.aporteSindicalCalculado || norm.aporteSindicalObligatorio || 0,
+            aporteSindicalCalculado: norm.aporteSindicalCalculado || norm.aporteSindicalObligatorio || 0,
+            sueldoNeto: norm.sueldoNeto || 0,
+            remunerativo: norm.remunerativo || 0,
+            noRemunerativo: norm.noRemunerativo || 0,
+            periodo: norm.periodo || ''
+        };
         this.notify();
     }
 

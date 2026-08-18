@@ -44,7 +44,10 @@ export function parseBankRows(rows, context = {}) {
     headers.forEach((clean, idx) => {
         if (clean.includes('fec.')) mapping.fecha = idx;
         else if (clean === 'fecha') mapping.fecha = idx;
-        else if (clean.includes('concepto') || clean.includes('descripcion') || clean.includes('detalle')) mapping.descripcion = idx;
+        else if (clean.includes('concepto') || clean.includes('descripcion')) {
+            if (mapping.concepto === undefined) mapping.concepto = idx;
+        }
+        else if (clean.includes('detalle')) mapping.detalle = idx;
         else if (clean.includes('importe') || clean.includes('monto')) mapping.importe = idx;
         else if (clean.includes('debito') || clean.includes('egreso') || clean.includes('salida')) mapping.debito = idx;
         else if (clean.includes('credito') || clean.includes('ingreso') || clean.includes('entrada')) mapping.credito = idx;
@@ -53,7 +56,9 @@ export function parseBankRows(rows, context = {}) {
     const checkStrictNumber = (val) => {
         if (val === null || val === undefined || val === '') return null;
         if (typeof val === 'number') return val;
-        let str = String(val).replace(/\./g, '').replace(',', '.');
+        let str = String(val).trim();
+        if (str.includes('.') && str.includes(',')) str = str.replace(/\./g, '').replace(',', '.');
+        else if (str.includes(',')) str = str.replace(',', '.');
         const num = parseFloat(str);
         return isNaN(num) ? null : num;
     };
@@ -63,7 +68,9 @@ export function parseBankRows(rows, context = {}) {
         if (!row || !Array.isArray(row) || row.length === 0) continue;
 
         const dateVal = mapping.fecha !== undefined ? row[mapping.fecha] : null;
-        const descVal = mapping.descripcion !== undefined ? String(row[mapping.descripcion] || '').trim() : '';
+        const conceptoVal = mapping.concepto !== undefined ? String(row[mapping.concepto] || '').trim() : '';
+        const detalleVal = mapping.detalle !== undefined ? String(row[mapping.detalle] || '').trim() : '';
+        const descVal = [conceptoVal, detalleVal].filter(Boolean).join(' - ');
 
         if (!dateVal && !descVal) continue;
 
@@ -88,24 +95,19 @@ export function parseBankRows(rows, context = {}) {
             let debVal = checkStrictNumber(debValRaw);
             let credVal = checkStrictNumber(credValRaw);
             
-            // Si hay string vacío se considera null. 
-            // Para la regla "ambos vacíos" o si es inválido
-            const isDebEmpty = debVal === null;
-            const isCredEmpty = credVal === null;
+            const hasDeb = debVal !== null && Math.abs(debVal) > 0;
+            const hasCred = credVal !== null && Math.abs(credVal) > 0;
 
-            if (!isDebEmpty && debVal > 0 && !isCredEmpty && credVal > 0) {
+            if (hasDeb && hasCred) {
                 amountErrors.push("Débito y Crédito informados simultáneamente.");
-            } else if (isDebEmpty && isCredEmpty) {
+            } else if (!hasDeb && !hasCred) {
                 amountErrors.push("Débito y Crédito vacíos o inválidos.");
-            } else if (!isDebEmpty && debVal > 0) {
-                amount = debVal;
+            } else if (hasDeb) {
+                amount = Math.abs(debVal);
                 isDebit = true;
-            } else if (!isCredEmpty && credVal > 0) {
-                amount = credVal;
+            } else if (hasCred) {
+                amount = Math.abs(credVal);
                 isCredit = true;
-            } else {
-                // Hay ceros u otros valores
-                amountErrors.push("Débito y Crédito sin montos válidos mayores a cero.");
             }
         }
 

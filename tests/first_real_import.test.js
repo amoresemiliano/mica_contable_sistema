@@ -1,5 +1,9 @@
 import { parseDelimitedText } from '../src/js/adapters/textAdapter.js';
 import { parseArcaRows } from '../src/js/core/parsers/arcaParser.js';
+import { parseArbaText } from '../src/js/core/parsers/arbaParser.js';
+import { parseIvaPerceptions } from '../src/js/core/parsers/ivaPerceptionParser.js';
+import { parseBankRows } from '../src/js/core/parsers/bankParser.js';
+import { parseSalaryRows } from '../src/js/core/parsers/salaryParser.js';
 import { stageImport } from '../src/js/core/services/importService.js';
 import { createNodeFingerprintProvider } from './helpers/nodeFingerprintProvider.js';
 
@@ -267,5 +271,97 @@ describe('First Real Import - Fase 1', () => {
 
         // Debe ser ACCEPTED, no confundirse con la COMPRA existente
         expect(staged[0].status).toBe('ACCEPTED');
+    });
+
+    test('L. Percepciones ARBA TXT de 70 caracteres parsea CUIT, fecha, comprobante y monto sin undefined', () => {
+        const arbaLine = "0290230-68273765-016/06/20260015100000000000000426651FA000000028382,92";
+        const parsed = parseArbaText(arbaLine, { jurisdiccion: 'ARBA' });
+        expect(parsed.length).toBe(1);
+        expect(parsed[0].errors).toEqual([]);
+
+        const norm = parsed[0].normalizedData;
+        expect(norm.cuit).toBe('30682737650');
+        expect(norm.fecha).toBe('16/06/2026');
+        expect(norm.period).toBe('2026-06');
+        expect(norm.sucursal).toBe('0015');
+        expect(norm.comprobante).toBe('100000000000000426651FA0');
+        expect(norm.monto).toBe(28382.92);
+        expect(norm.tipo).toBe('percepcion');
+        expect(norm.fuente).toBe('ARBA');
+    });
+
+    test('M. Sueldos Acompy XLSX extrae fila de TOTALES y período de forma limpia', () => {
+        const sampleRows = [
+            ["BORRADOR SUELDOS"],
+            ["Empresa", "JOB TRAINING S R L"],
+            ["Periodo", "05/2026"],
+            ["Totales por Concepto Agrupado por Empleado"],
+            ["Legajo", "Apellido y Nombre", "CUIL", "Sueldo Mensual", "Remunerativo", "Redondeo", "No Remunerativo", "Jubilacion", "Ley 19032", "Obra Social", "Retenciones", "Total"],
+            ["00000001", "PIRSCH JORGE ANTONIO", 20163237114, 620000, 620000, 0, 0, 68200, 18600, 37200, 124000, 496000],
+            [null, null, "Totales:", 620000, 620000, 0, 0, 68200, 18600, 37200, 124000, 496000]
+        ];
+
+        const results = parseSalaryRows(sampleRows);
+        expect(results.length).toBe(1);
+        expect(results[0].errors).toEqual([]);
+
+        const norm = results[0].normalizedData;
+        expect(norm.periodo).toBe('05/2026');
+        expect(norm.remunerativo).toBe(620000);
+        expect(norm.sueldoNeto).toBe(496000);
+        expect(norm.sueldoBrutoCalculado).toBe(620000);
+        expect(norm.sueldoBruto).toBe(620000);
+        expect(norm.fuente).toBe('ACOMPY');
+    });
+
+    test('N. Percepciones IVA XLS parsea CUIT, fecha, certificado y monto correctamente', () => {
+        const ivaRows = [
+            ["CUIT Agente Ret./Perc.", "Denominación o Razón Social", "Impuesto", "Descripción Impuesto", "Régimen", "Descripción Régimen", "Fecha Ret./Perc.", "Número Certificado", "Descripción Operación", "Importe Ret./Perc.", "Número Comprobante", "Fecha Comprobante", "Descripción Comprobante", "Fecha Registración DJ Ag.Ret."],
+            ["30500003193", "BANCO BBVA ARGENTINA S.A.", "767", "SICORE - RETENCIONES Y PERCEPCIONES - IMPUESTO AL VALOR AGRE", "493", "REG.PER.AL VALOR AGREGADO - EMPRESAS PROVEEDORAS.", "29/05/2026", "2137960", "PERCEPCION", 997.27, "0000010918741690", "29/05/2026", "OTRO COMPROBANTE", "12/06/2026"]
+        ];
+
+        const results = parseIvaPerceptions(ivaRows);
+        expect(results.length).toBe(1);
+        expect(results[0].errors).toEqual([]);
+
+        const norm = results[0].normalizedData;
+        expect(norm.cuit).toBe('30500003193');
+        expect(norm.razonSocial).toBe('BANCO BBVA ARGENTINA S.A.');
+        expect(norm.fecha).toBe('29/05/2026');
+        expect(norm.comprobante).toBe('2137960');
+        expect(norm.monto).toBe(997.27);
+        expect(norm.fuente).toBe('IVA');
+        expect(norm.jurisdiction).toBe('NACIONAL (IVA)');
+    });
+
+    test('O. BBVA Bank XLS parsea montos negativos de débito, números JS y combina concepto y detalle', () => {
+        const bbvaRows = [
+            ["Empresa: ", "JOB TRAINING S.R.L(30689920779)"],
+            ["Cuenta: ", "133-004976/9(CC $)"],
+            ["Sucursal: ", "133 - PARQUE INDUSTRIAL PILAR"],
+            ["Saldo: ", "-11.404.622,84"],
+            ["Movimientos de: ", "Ultimos 60 Días."],
+            [],
+            ["Fecha", "Fecha Valor", "Concepto", "Codigo", "Número Documento", "Oficina", "Crédito", "Débito", "Detalle"],
+            ["29-05-2026", "29-05-2026", "SELLADO", "030", "", "133 - PARQUE INDUSTRIAL PILAR", "", -1073.43, "Saldo Disponible"],
+            ["21-05-2026", "21-05-2026", "DEPOSITO", "001", "", "133 - PARQUE INDUSTRIAL PILAR", 50000, "", "CREDITO EN CUENTA"]
+        ];
+
+        const results = parseBankRows(bbvaRows);
+        expect(results.length).toBe(2);
+        expect(results[0].errors).toEqual([]);
+        expect(results[1].errors).toEqual([]);
+
+        const debitTx = results[0].normalizedData;
+        expect(debitTx.fecha).toBe('29-05-2026');
+        expect(debitTx.descripcion).toBe('SELLADO - Saldo Disponible');
+        expect(debitTx.monto).toBe(1073.43);
+        expect(debitTx.tipo).toBe('debit');
+
+        const creditTx = results[1].normalizedData;
+        expect(creditTx.fecha).toBe('21-05-2026');
+        expect(creditTx.descripcion).toBe('DEPOSITO - CREDITO EN CUENTA');
+        expect(creditTx.monto).toBe(50000);
+        expect(creditTx.tipo).toBe('credit');
     });
 });

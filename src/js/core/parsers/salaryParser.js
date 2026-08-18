@@ -6,11 +6,23 @@
 export function parseSalaryRows(rows, context = {}) {
     const results = [];
     
-    // Primero, identificar cabeceras. Asumiremos la primera fila con algo válido o donde estén "TOTALES" referenciados.
-    // Como Acompy tiene cabeceras como "Legajo", "Remunerativo", buscamos su posición relativas.
     let headerRowIdx = -1;
     let headers = [];
     let mapping = {};
+    let periodo = context.periodo || null;
+
+    // Buscar período en las primeras filas
+    for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const row = rows[i];
+        if (Array.isArray(row)) {
+            const rowStr = row.map(c => String(c || '')).join(' ');
+            const match = rowStr.match(/(\d{2}\/\d{4})/);
+            if (match) {
+                periodo = match[1];
+                break;
+            }
+        }
+    }
     
     // Buscar cabecera
     for (let i = 0; i < Math.min(rows.length, 15); i++) {
@@ -45,10 +57,9 @@ export function parseSalaryRows(rows, context = {}) {
         const row = rows[i];
         if (!row || !Array.isArray(row)) continue;
         
-        // Buscar texto "TOTALES" o "TOTALES:" en cualquier columna excluyendo "SUBTOTAL"
         const hasTotals = row.some(cell => {
-            if (typeof cell !== 'string') return false;
-            const up = cell.toUpperCase();
+            if (!cell) return false;
+            const up = String(cell).toUpperCase().trim();
             return (up === 'TOTALES' || up === 'TOTALES:') && !up.includes('SUBTOTAL');
         });
         
@@ -84,32 +95,38 @@ export function parseSalaryRows(rows, context = {}) {
     const target = totalRowsMatched[0];
     const row = target.row;
     
-    const cleanNumber = (val) => {
-        if (!val) return 0;
-        let str = String(val).replace(/\./g, '').replace(',', '.');
-        return parseFloat(str) || 0;
+    const parseNumberSafe = (val) => {
+        if (val === null || val === undefined || val === '') return 0;
+        if (typeof val === 'number') return val;
+        let str = String(val).trim();
+        if (str.includes('.') && str.includes(',')) {
+            str = str.replace(/\./g, '').replace(',', '.');
+        } else if (str.includes(',')) {
+            str = str.replace(',', '.');
+        }
+        const num = parseFloat(str);
+        return isNaN(num) ? 0 : num;
     };
     
     // Extracción
-    const remunerativo = mapping.remunerativo !== undefined ? cleanNumber(row[mapping.remunerativo]) : 0;
-    const noRemunerativo = mapping.noRemunerativo !== undefined ? cleanNumber(row[mapping.noRemunerativo]) : 0;
-    const anticipoSueldo = mapping.anticipoSueldo !== undefined ? cleanNumber(row[mapping.anticipoSueldo]) : 0;
-    const sacProporcional = mapping.sacProporcional !== undefined ? cleanNumber(row[mapping.sacProporcional]) : 0;
-    const aporteSindicalObligatorio = mapping.aporteSindicalObligatorio !== undefined ? cleanNumber(row[mapping.aporteSindicalObligatorio]) : 0;
-    const faecys = mapping.faecys !== undefined ? cleanNumber(row[mapping.faecys]) : 0;
-    const sueldoNeto = mapping.sueldoNeto !== undefined ? cleanNumber(row[mapping.sueldoNeto]) : 0;
+    const remunerativo = mapping.remunerativo !== undefined ? parseNumberSafe(row[mapping.remunerativo]) : 0;
+    const noRemunerativo = mapping.noRemunerativo !== undefined ? parseNumberSafe(row[mapping.noRemunerativo]) : 0;
+    const anticipoSueldo = mapping.anticipoSueldo !== undefined ? parseNumberSafe(row[mapping.anticipoSueldo]) : 0;
+    const sacProporcional = mapping.sacProporcional !== undefined ? parseNumberSafe(row[mapping.sacProporcional]) : 0;
+    const aporteSindicalObligatorio = mapping.aporteSindicalObligatorio !== undefined ? parseNumberSafe(row[mapping.aporteSindicalObligatorio]) : 0;
+    const faecys = mapping.faecys !== undefined ? parseNumberSafe(row[mapping.faecys]) : 0;
+    const sueldoNeto = mapping.sueldoNeto !== undefined ? parseNumberSafe(row[mapping.sueldoNeto]) : 0;
 
-    // Cálculo Bruto = Remunerativo + No Remunerativo + Anticipo
-    // (SAC ya está en Remunerativo según el contador)
     const sueldoBrutoCalculado = remunerativo + noRemunerativo + anticipoSueldo;
     const aporteSindicalCalculado = aporteSindicalObligatorio + faecys;
 
     results.push({
         sourceRowNumber: target.rowIndex + 1,
-        rawRow: row, // o JSON.stringify(row) si se prefiere seguro
+        rawRow: row,
         errors: [],
         warnings: (mapping.sueldoNeto === undefined) ? ["Columna 'Total' (neto) no detectada claramente."] : [],
         normalizedData: {
+            periodo,
             remunerativo,
             noRemunerativo,
             anticipoSueldo,
@@ -118,7 +135,12 @@ export function parseSalaryRows(rows, context = {}) {
             faecys,
             sueldoNeto,
             sueldoBrutoCalculado,
-            aporteSindicalCalculado
+            aporteSindicalCalculado,
+            sueldoBruto: sueldoBrutoCalculado,
+            anticipos: anticipoSueldo,
+            sindicatoAporte: aporteSindicalCalculado,
+            fuente: 'ACOMPY',
+            tipo: 'sueldo'
         },
         batchId
     });

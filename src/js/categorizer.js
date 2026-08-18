@@ -1,8 +1,9 @@
 // 1. MOTOR DE CATEGORIZACIÓN INTELIGENTE (SOLID: Single Responsibility)
 export class CategorizationEngine {
     constructor() {
-        this.storageKey = 'mica_historical_categories';
-        this.history = JSON.parse(localStorage.getItem(this.storageKey)) || {};
+        this.storageKey = 'mica_category_history';
+        const raw = (typeof localStorage !== 'undefined' && localStorage.getItem) ? localStorage.getItem(this.storageKey) : null;
+        this.history = JSON.parse(raw) || {};
     }
 
     // Busca si ya hay un patrón registrado para este CUIT

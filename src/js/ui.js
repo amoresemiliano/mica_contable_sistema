@@ -10,6 +10,7 @@ import { parseDelimitedText } from './adapters/textAdapter.js';
 import { createBrowserFingerprintProvider } from './adapters/browserFingerprintProvider.js';
 import { parseArcaRows } from './core/parsers/arcaParser.js';
 import { parseArbaText } from './core/parsers/arbaParser.js';
+import { parseIvaPerceptions } from './core/parsers/ivaPerceptionParser.js';
 import { parseBankRows } from './core/parsers/bankParser.js';
 import { parseSalaryRows } from './core/parsers/salaryParser.js';
 import { stageImport } from './core/services/importService.js';
@@ -741,6 +742,169 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
     }
 }
 
+function showPerceptionsPreviewModal(validItems, invalidCount, fileName, onConfirm) {
+    const totalAmount = validItems.reduce((sum, item) => sum + (item.amount || item.monto || 0), 0);
+    const samplePeriod = validItems.length > 0 ? (validItems[0].period || validItems[0].periodo || 'N/D') : 'N/D';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    
+    overlay.innerHTML = `
+        <div class="modal-card" style="width: 85%; max-width: 850px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3 style="font-size: 16px; font-weight: bold; color: var(--primary);">Vista Previa de Percepciones</h3>
+                <button class="btn-close-modal" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                <p style="font-size: 13px;"><strong>Archivo:</strong> ${fileName}</p>
+                <div style="display: flex; gap: 12px; margin: 12px 0;">
+                    <div style="background: #e6f4ea; color: #137333; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 18px;">${validItems.length}</strong><br><span style="font-size: 11px;">Registros Válidos</span>
+                    </div>
+                    <div style="background: #fce8e6; color: #c5221f; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 18px;">${invalidCount}</strong><br><span style="font-size: 11px;">Omitidas / Error</span>
+                    </div>
+                    <div style="background: #e0f2fe; color: #0369a1; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 14px;">${samplePeriod}</strong><br><span style="font-size: 11px;">Período</span>
+                    </div>
+                    <div style="background: #f0fdf4; color: #15803d; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 14px;">$ ${totalAmount.toLocaleString('es-AR', {minimumFractionDigits: 2})}</strong><br><span style="font-size: 11px;">Total Importe</span>
+                    </div>
+                </div>
+                
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">Detalle de percepciones a incorporar:</p>
+                <div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="background: var(--bg-hover); text-align: left; position: sticky; top: 0; z-index: 1;">
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Fuente</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Fecha</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">CUIT Agente</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Comprobante</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color); text-align: right;">Importe</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${validItems.map(item => `
+                                <tr>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color); font-weight: 600; color: var(--primary);">${item.fuente || item.jurisdiction || 'ARBA'}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${item.fecha}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${item.cuit}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${item.comprobante || 'N/D'}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color); text-align: right; font-weight: 600;">$ ${(item.amount || item.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
+                <button class="btn-secondary btn-cancel-modal">Cancelar</button>
+                <button class="btn-primary btn-confirm-modal" ${validItems.length === 0 ? 'disabled' : ''}>Confirmar Importación (${validItems.length})</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    const closeAndRemove = () => {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    
+    overlay.querySelector('.btn-close-modal').onclick = closeAndRemove;
+    overlay.querySelector('.btn-cancel-modal').onclick = closeAndRemove;
+    
+    const confirmBtn = overlay.querySelector('.btn-confirm-modal');
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            closeAndRemove();
+            onConfirm(validItems);
+        };
+    }
+}
+
+function showBankPreviewModal(transactions, fileName, onConfirm) {
+    const debits = transactions.filter(t => t.tipo === 'debit');
+    const credits = transactions.filter(t => t.tipo === 'credit');
+    const totalDebits = debits.reduce((sum, t) => sum + (t.monto || 0), 0);
+    const totalCredits = credits.reduce((sum, t) => sum + (t.monto || 0), 0);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    
+    overlay.innerHTML = `
+        <div class="modal-card" style="width: 85%; max-width: 850px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3 style="font-size: 16px; font-weight: bold; color: var(--primary);">Vista Previa de Extracto Bancario</h3>
+                <button class="btn-close-modal" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                <p style="font-size: 13px;"><strong>Archivo:</strong> ${fileName}</p>
+                <div style="display: flex; gap: 12px; margin: 12px 0;">
+                    <div style="background: #e6f4ea; color: #137333; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 18px;">${transactions.length}</strong><br><span style="font-size: 11px;">Movimientos Totales</span>
+                    </div>
+                    <div style="background: #fce8e6; color: #c5221f; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 14px;">$ ${totalDebits.toLocaleString('es-AR', {minimumFractionDigits: 2})}</strong><br><span style="font-size: 11px;">${debits.length} Débitos (Egresos)</span>
+                    </div>
+                    <div style="background: #f0fdf4; color: #15803d; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 14px;">$ ${totalCredits.toLocaleString('es-AR', {minimumFractionDigits: 2})}</strong><br><span style="font-size: 11px;">${credits.length} Créditos (Ingresos)</span>
+                    </div>
+                </div>
+                
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">Detalle de movimientos a incorporar:</p>
+                <div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="background: var(--bg-hover); text-align: left; position: sticky; top: 0; z-index: 1;">
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Fecha</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Descripción</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Tipo</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color); text-align: right;">Importe</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${transactions.map(t => `
+                                <tr>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${t.fecha}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${t.descripcion}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-weight: 600; color: ${t.tipo === 'debit' ? '#c5221f' : '#15803d'};">
+                                            ${t.tipo === 'debit' ? 'DÉBITO (-)' : 'CRÉDITO (+)'}
+                                        </span>
+                                    </td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color); text-align: right; font-weight: 600;">$ ${t.monto.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
+                <button class="btn-secondary btn-cancel-modal">Cancelar</button>
+                <button class="btn-primary btn-confirm-modal" ${transactions.length === 0 ? 'disabled' : ''}>Confirmar Importación (${transactions.length})</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    const closeAndRemove = () => {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    
+    overlay.querySelector('.btn-close-modal').onclick = closeAndRemove;
+    overlay.querySelector('.btn-cancel-modal').onclick = closeAndRemove;
+    
+    const confirmBtn = overlay.querySelector('.btn-confirm-modal');
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            closeAndRemove();
+            onConfirm(transactions);
+        };
+    }
+}
+
 // CONTROLADOR DE RENDERIZADO DEL CONCILIADOR ARCA (NÚCLEO EXISTENTE ADAPTADO)
 export class UIManager {
     static init() {
@@ -815,49 +979,54 @@ export class UIManager {
                     UIManager.render();
                 });
             } else if (type === 'percepcion') {
-                const jurisdiction = document.getElementById('percep-jurisdiccion').value;
+                const jurisdiction = (document.getElementById('percep-jurisdiccion')?.value || 'ARBA').toUpperCase();
                 context.jurisdiccion = jurisdiction;
-                parsedItems = parseArbaText(text, context);
+
+                const isExcel = file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx') || format === 'EXCEL';
+                if (isExcel) {
+                    parsedItems = parseIvaPerceptions(rows, context);
+                } else {
+                    parsedItems = parseArbaText(text, context);
+                }
                 
-                // Asumimos validación y stage simple
-                appStore.addPerceptions(parsedItems);
-                Reconciler.runCrossMatching();
-                alert(`Se importaron ${parsedItems.length} percepciones de ${jurisdiction}.`);
-            } else if (type === 'banco') {
-                const bankName = document.getElementById('bank-name').value || 'Generico';
-                context.banco = bankName;
-                const result = parseBankRows(rows, context);
+                const validPerceptions = parsedItems.filter(r => r.normalizedData !== null).map(r => r.normalizedData);
+                const invalidRows = parsedItems.filter(r => r.normalizedData === null);
                 
-                if (result.mappingRequired) {
-                    showColumnMapperModal(result.headers, `Mapeador de Columnas: ${bankName}`, (mapping) => {
-                        appStore.saveBankTemplate(bankName, mapping);
-                        context.columns = mapping;
-                        const secondResult = parseBankRows(rows, context);
-                        appStore.addBankTransactions(secondResult.transactions);
+                if (validPerceptions.length === 0) {
+                    alert("No se encontraron percepciones válidas en el archivo.");
+                } else {
+                    showPerceptionsPreviewModal(validPerceptions, invalidRows.length, file.name, (acceptedItems) => {
+                        appStore.addPerceptions(acceptedItems);
+                        Reconciler.runCrossMatching();
                         UIManager.render();
                     });
+                }
+            } else if (type === 'banco') {
+                const bankName = document.getElementById('bank-name')?.value || 'Generico';
+                context.banco = bankName;
+                const result = parseBankRows(rows, context);
+                const validTransactions = result.filter(r => r.errors.length === 0).map(r => r.normalizedData);
+
+                if (validTransactions.length === 0) {
+                    alert("No se encontraron movimientos bancarios válidos en el archivo.");
                 } else {
-                    appStore.addBankTransactions(result.transactions);
-                    UIManager.render();
+                    showBankPreviewModal(validTransactions, file.name, (accepted) => {
+                        appStore.addBankTransactions(accepted);
+                        UIManager.render();
+                    });
                 }
             } else if (type === 'sueldo') {
-                const result = parseSalaryRows(rows, context);
+                const results = parseSalaryRows(rows, context);
+                const firstRes = results && results[0];
 
-                if (result.error) {
-                    alert(result.error);
-                } else if (result.mappingRequired) {
-                    showColumnMapperModal(result.headers, "Mapeador de Columnas: Sueldos Acompy", (mapping) => {
-                        context.columns = mapping;
-                        const secondResult = parseSalaryRows(rows, context);
-                        if (secondResult.error) alert(secondResult.error);
-                        else {
-                            appStore.addSalary(secondResult);
-                            if (typeof updateSalaryFormFields === 'function') updateSalaryFormFields();
-                        }
-                    });
-                } else {
-                    appStore.addSalary(result);
+                if (firstRes && firstRes.errors && firstRes.errors.length > 0) {
+                    alert("Error en el archivo de sueldos: " + firstRes.errors.join(', '));
+                } else if (firstRes && firstRes.normalizedData) {
+                    appStore.addSalary(firstRes.normalizedData);
                     if (typeof updateSalaryFormFields === 'function') updateSalaryFormFields();
+                    alert(`Sueldos Acompy importados correctamente (Período: ${firstRes.normalizedData.periodo || 'N/D'}).`);
+                } else {
+                    alert("No se pudo extraer el resumen de sueldos.");
                 }
             }
         } catch (error) {
@@ -867,6 +1036,86 @@ export class UIManager {
     }
 
     static render() {
+        this.renderMainTable();
+        this.renderPerceptionsTable();
+        this.renderBankTable();
+    }
+
+    static renderPerceptionsTable() {
+        const tbody = document.getElementById('table-percepciones-body');
+        const badge = document.getElementById('percepciones-summary-badge');
+        const list = appStore.perceptions || [];
+
+        if (badge) {
+            const total = list.reduce((sum, p) => sum + (p.amount || p.monto || 0), 0);
+            const totalFormatted = total.toLocaleString('es-AR', {minimumFractionDigits: 2});
+            badge.innerText = `${list.length} Percepciones | Total $ ${totalFormatted}`;
+        }
+
+        if (!tbody) return;
+
+        if (list.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                        No se han cargado percepciones para este período.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = list.map(p => {
+            const fuenteText = p.fuente || p.jurisdiction || 'ARBA';
+            const montoVal = (p.amount || p.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+            return `
+                <tr>
+                    <td><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; font-weight: 700;">${fuenteText}</span></td>
+                    <td>${p.fecha}</td>
+                    <td>${p.period || p.periodo || 'N/D'}</td>
+                    <td>${p.cuit}</td>
+                    <td><strong>${p.razonSocial || 'AGENTE PERCEPCION'}</strong></td>
+                    <td>${p.comprobante || 'N/D'}</td>
+                    <td style="font-weight: 600;">$ ${montoVal}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    static renderBankTable() {
+        const tbody = document.getElementById('table-bancos-body');
+        if (!tbody) return;
+
+        const transactions = appStore.bankTransactions || [];
+        if (transactions.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                        No hay extractos bancarios procesados para este período.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = transactions.map(t => {
+            const isDebit = t.tipo === 'debit';
+            const badgeClass = isDebit ? 'badge-recibido' : 'badge-emitido';
+            const badgeText = isDebit ? 'DÉBITO' : 'CRÉDITO';
+            const montoVal = (t.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+
+            return `
+                <tr>
+                    <td>${t.fecha}</td>
+                    <td><strong>${t.descripcion}</strong></td>
+                    <td style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
+                    <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+                    <td><span style="color: var(--text-muted); font-size: 11px;">Pendiente</span></td>
+                    <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Conciliar</button></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    static renderMainTable() {
         const tbody = document.getElementById('table-body');
         if (!tbody) return;
 

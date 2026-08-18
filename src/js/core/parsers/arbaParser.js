@@ -29,20 +29,38 @@ export function parseArbaText(text, context = {}) {
         }
 
         try {
-            const codigoInicial = line.substring(0, 8); // 0-8
-            const cuitStr = line.substring(8, 19);      // 8-19
-            const fechaStr = line.substring(19, 29);    // 19-29
-            const sucursal = line.substring(29, 41);    // 29-41
-            const padding = line.substring(41, 42);     // 41-42
-            const comprobante = line.substring(42, 56); // 42-56
-            const montoStr = line.substring(56, 70);    // 56-70
+            let cleanCuit = '';
+            let fechaStr = '';
+            let sucursal = '';
+            let comprobante = '';
+            let montoStr = '';
+            let codigoInicial = '';
+
+            const isRealArbaFormat = line.substring(4, 18).includes('-');
+
+            if (isRealArbaFormat) {
+                codigoInicial = line.substring(0, 4);
+                const cuitRaw = line.substring(4, 18);
+                cleanCuit = cuitRaw.replace(/\D/g, '').replace(/^2(?=30|33|34|20|27)/, '');
+                fechaStr = line.substring(18, 28);
+                sucursal = line.substring(28, 32);
+                comprobante = line.substring(32, 56);
+                montoStr = line.substring(56, 70);
+            } else {
+                codigoInicial = line.substring(0, 8);
+                cleanCuit = line.substring(8, 19);
+                fechaStr = line.substring(19, 29);
+                sucursal = line.substring(29, 41);
+                comprobante = line.substring(42, 56);
+                montoStr = line.substring(56, 70);
+            }
 
             // Validación de CUIT (11 dígitos)
-            if (!/^\d{11}$/.test(cuitStr)) {
+            if (!/^\d{11}$/.test(cleanCuit)) {
                 result.errors.push("Formato de CUIT inválido");
             }
             
-            // Validación de fecha (básica)
+            // Validación de fecha (DD/MM/YYYY)
             if (!/^\d{2}\/\d{2}\/\d{4}$/.test(fechaStr)) {
                 result.errors.push("Formato de Fecha inválido");
             }
@@ -53,16 +71,23 @@ export function parseArbaText(text, context = {}) {
             }
 
             if (result.errors.length === 0) {
+                const parts = fechaStr.split('/');
+                const period = parts.length === 3 ? `${parts[2]}-${parts[1]}` : '';
+
                 result.normalizedData = {
-                    cuit: cuitStr,
+                    cuit: cleanCuit,
                     fecha: fechaStr,
+                    period: period,
                     sucursal: sucursal.trim(),
                     comprobante: comprobante.trim(),
                     monto: parsedAmount,
-                    // Campos de auditoría conservados
+                    amount: parsedAmount,
+                    importe: parsedAmount,
+                    jurisdiction: (context.jurisdiccion || 'ARBA').toUpperCase(),
+                    fuente: 'ARBA',
+                    tipo: 'percepcion',
                     audit: {
-                        codigoInicial,
-                        padding
+                        codigoInicial
                     }
                 };
             }
@@ -78,23 +103,23 @@ export function parseArbaText(text, context = {}) {
 
 /**
  * Valida y parsea el importe del archivo ARBA.
- * @param {string} rawAmount - String original (e.g. "0000000000150,")
+ * @param {string} rawAmount - String original (e.g. "000000028382,92")
  * @returns {number|null} El número flotante o null si es inválido.
  */
 export function parseArbaAmount(rawAmount) {
-    if (typeof rawAmount !== 'string' || rawAmount.length !== 14) {
+    if (typeof rawAmount !== 'string') {
+        return null;
+    }
+    const trimmed = rawAmount.trim();
+    if (trimmed.length !== 14) {
         return null;
     }
     
-    // ARBA montos suelen ser paddeados con 0 a la izquierda y usar coma decimal.
-    // Ejemplo: 0000000000150, => 150.00
-    // Opcional: Puede venir con decimales: "0000000000150,5"
-    if (!/^[0-9]+\,?[0-9]*$/.test(rawAmount)) {
-        return null; // Caracteres inválidos
+    if (!/^[0-9]+\,?[0-9]*$/.test(trimmed)) {
+        return null;
     }
     
-    // Normalizar a formato numérico (punto)
-    const normalized = rawAmount.replace(',', '.');
+    const normalized = trimmed.replace(',', '.');
     const floatVal = parseFloat(normalized);
     
     if (isNaN(floatVal)) return null;
