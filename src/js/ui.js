@@ -184,11 +184,16 @@ function getActiveCompanyCuit() {
 // 5. CONTROLADOR NAVEGACIÓN SPA E INTERFAZ (SOLID: Single Responsibility)
 export function switchTab(tabId) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-    document.getElementById(tabId).classList.remove('hidden');
+    document.getElementById(tabId)?.classList.remove('hidden');
 
     document.querySelectorAll('.sidebar-nav a').forEach(el => el.classList.remove('active-nav'));
-    const activeLink = document.querySelector(`[onclick="switchTab('${tabId}')"]`);
+    const activeLink = document.querySelector(`.sidebar-nav [onclick="switchTab('${tabId}')"]`);
     if (activeLink) activeLink.classList.add('active-nav');
+
+    // Resaltado de la barra mobile inferior
+    document.querySelectorAll('.mobile-nav-item').forEach(el => el.classList.remove('active-mobile-nav'));
+    const activeMobileNav = document.querySelector(`.mobile-nav-item[data-tab="${tabId}"]`);
+    if (activeMobileNav) activeMobileNav.classList.add('active-mobile-nav');
 
     const titleElement = document.getElementById('page-title');
     if (tabId === 'tab-conciliador') titleElement.innerText = "Conciliador CSV (Operaciones)";
@@ -210,6 +215,18 @@ export function switchTab(tabId) {
         renderClientDashboard();
     }
     else if (tabId === 'tab-client-ocr') titleElement.innerText = "Lector de Documentos (OCR)";
+}
+
+export function toggleMobileMoreSheet(show) {
+    const sheet = document.getElementById('mobile-more-sheet');
+    if (!sheet) return;
+    if (show === undefined) {
+        sheet.classList.toggle('hidden');
+    } else if (show) {
+        sheet.classList.remove('hidden');
+    } else {
+        sheet.classList.add('hidden');
+    }
 }
 
 // CONTROLADOR DE MÉTRICAS OPERATIVAS PARA EL GERENTE (DASHBOARD)
@@ -1136,13 +1153,13 @@ export class UIManager {
             const montoVal = (p.amount || p.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
             return `
                 <tr>
-                    <td><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; font-weight: 700;">${fuenteText}</span></td>
-                    <td>${p.fecha}</td>
-                    <td>${p.period || p.periodo || 'N/D'}</td>
-                    <td>${p.cuit}</td>
-                    <td><strong>${p.razonSocial || 'AGENTE PERCEPCION'}</strong></td>
-                    <td>${p.comprobante || 'N/D'}</td>
-                    <td style="font-weight: 600;">$ ${montoVal}</td>
+                    <td data-label="Fuente"><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; font-weight: 700;">${fuenteText}</span></td>
+                    <td data-label="Fecha">${p.fecha}</td>
+                    <td data-label="Período">${p.period || p.periodo || 'N/D'}</td>
+                    <td data-label="CUIT">${p.cuit}</td>
+                    <td data-label="Agente / Razón Social"><strong>${p.razonSocial || 'AGENTE PERCEPCION'}</strong></td>
+                    <td data-label="Comprobante">${p.comprobante || 'N/D'}</td>
+                    <td data-label="Importe" style="font-weight: 600;">$ ${montoVal}</td>
                 </tr>
             `;
         }).join('');
@@ -1171,12 +1188,12 @@ export class UIManager {
 
             return `
                 <tr>
-                    <td>${t.fecha}</td>
-                    <td><strong>${t.descripcion}</strong></td>
-                    <td style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
-                    <td><span class="badge ${badgeClass}">${badgeText}</span></td>
-                    <td><span style="color: var(--text-muted); font-size: 11px;">Pendiente</span></td>
-                    <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Conciliar</button></td>
+                    <td data-label="Fecha">${t.fecha}</td>
+                    <td data-label="Descripción"><strong>${t.descripcion}</strong></td>
+                    <td data-label="Importe" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
+                    <td data-label="Tipo"><span class="badge ${badgeClass}">${badgeText}</span></td>
+                    <td data-label="Estado"><span style="color: var(--text-muted); font-size: 11px;">Pendiente</span></td>
+                    <td data-label="Acción"><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Conciliar</button></td>
                 </tr>
             `;
         }).join('');
@@ -1234,14 +1251,14 @@ export class UIManager {
 
             return `
                 <tr>
-                    <td><span class="badge ${badgeClass}">${badgeText}</span></td>
-                    <td>${item.fecha}</td>
-                    <td>${item.comprobante}</td>
-                    <td>${item.cuit}</td>
-                    <td><strong>${item.razonSocial}</strong></td>
-                    <td>$ ${item.total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
-                    <td>${perceptionsHTML}</td>
-                    <td>
+                    <td data-label="Tipo"><span class="badge ${badgeClass}">${badgeText}</span></td>
+                    <td data-label="Fecha">${item.fecha}</td>
+                    <td data-label="Comprobante">${item.comprobante}</td>
+                    <td data-label="CUIT">${item.cuit}</td>
+                    <td data-label="Razón Social"><strong>${item.razonSocial}</strong></td>
+                    <td data-label="Total" style="font-weight: 700;">$ ${item.total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                    <td data-label="Desglose Percepciones">${perceptionsHTML}</td>
+                    <td data-label="Categoría">
                         <div class="category-cell">
                             <select class="select-category ${isSuggestedClass}" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
                                 ${optionsHTML}
@@ -1249,7 +1266,7 @@ export class UIManager {
                             ${suggestionIndicator}
                         </div>
                     </td>
-                    <td>${confirmButtonHTML}</td>
+                    <td data-label="Acción">${confirmButtonHTML}</td>
                 </tr>
             `;
         }).join('');
@@ -1259,6 +1276,8 @@ export class UIManager {
 // Exponer métodos globales en window para los event handlers del HTML
 window.switchTab = switchTab;
 window.appStore = appStore;
+window.toggleMobileMoreSheet = toggleMobileMoreSheet;
+window.logout = logout;
 
 // Suscribirse a los eventos del store para reactividad
 appStore.subscribe(() => {

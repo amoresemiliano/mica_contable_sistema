@@ -150,11 +150,19 @@
             </div>
 
             <div class="controls-row">
-                <div class="filter-buttons">
+                <div class="filter-buttons desktop-filter-buttons">
                     <button class="btn-filter active" onclick="appStore.setFilter('all')">Todos</button>
                     <button class="btn-filter" onclick="appStore.setFilter('recibidos')">Solo Compras</button>
                     <button class="btn-filter" onclick="appStore.setFilter('emitidos')">Solo Ventas</button>
                     <button class="btn-filter" onclick="appStore.setFilter('pending')">Sin Categorizar</button>
+                </div>
+                <div class="mobile-filter-select-wrapper">
+                    <select class="mobile-filter-select" onchange="appStore.setFilter(this.value)">
+                        <option value="all">🔍 Todos los comprobantes</option>
+                        <option value="recibidos">📥 Solo Compras (Recibidos)</option>
+                        <option value="emitidos">📤 Solo Ventas (Emitidos)</option>
+                        <option value="pending">⚠️ Sin Categorizar</option>
+                    </select>
                 </div>
                 <input type="text" class="search-input" id="search-box" placeholder="Buscar por CUIT, Razón Social..." oninput="appStore.setSearch(this.value)">
             </div>
@@ -808,6 +816,83 @@
             <div class="modal-footer">
                 <button class="btn-secondary" onclick="document.getElementById('modal-column-mapper').classList.add('hidden')">Cancelar</button>
                 <button class="btn-primary" id="btn-modal-mapper-submit">Aplicar y Guardar Plantilla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BOTTOM NAVIGATION BAR (Solo Mobile <= 768px) -->
+    <nav id="mobile-bottom-bar" class="mobile-bottom-bar">
+        <button class="mobile-nav-item active-mobile-nav" data-tab="tab-conciliador" onclick="switchTab('tab-conciliador')">
+            <span class="mobile-nav-icon">📊</span>
+            <span class="mobile-nav-label">Inicio</span>
+        </button>
+        <button class="mobile-nav-item" data-tab="tab-bancos" onclick="switchTab('tab-bancos')">
+            <span class="mobile-nav-icon">🏦</span>
+            <span class="mobile-nav-label">Bancos</span>
+        </button>
+        <button class="mobile-nav-item" data-tab="tab-sueldos" onclick="switchTab('tab-sueldos')">
+            <span class="mobile-nav-icon">👥</span>
+            <span class="mobile-nav-label">Sueldos</span>
+        </button>
+        <button class="mobile-nav-item" data-tab="tab-client-dashboard" onclick="switchTab('tab-client-dashboard')">
+            <span class="mobile-nav-icon">📈</span>
+            <span class="mobile-nav-label">Panel</span>
+        </button>
+        <button class="mobile-nav-item" id="btn-mobile-more-toggle" onclick="toggleMobileMoreSheet(true)">
+            <span class="mobile-nav-icon">📑</span>
+            <span class="mobile-nav-label">Más</span>
+        </button>
+    </nav>
+
+    <!-- BOTTOM SHEET MENÚ "MÁS" (Mobile) -->
+    <div id="mobile-more-sheet" class="mobile-more-sheet hidden" onclick="if(event.target === this) toggleMobileMoreSheet(false)">
+        <div class="mobile-more-content">
+            <div class="mobile-more-header">
+                <h3>Navegación y Más Opciones</h3>
+                <button class="btn-close-sheet" onclick="toggleMobileMoreSheet(false)">✕</button>
+            </div>
+            <ul class="mobile-more-list">
+                <li>
+                    <a onclick="switchTab('tab-movimientos-manuales'); toggleMobileMoreSheet(false);">
+                        <span class="sheet-icon">📝</span>
+                        <div class="sheet-text">
+                            <strong>Movimientos Manuales</strong>
+                            <p>Operaciones internas y compras REGINFO</p>
+                        </div>
+                    </a>
+                </li>
+                <li>
+                    <a onclick="switchTab('tab-ajustes-contadora'); toggleMobileMoreSheet(false);">
+                        <span class="sheet-icon">⚙️</span>
+                        <div class="sheet-text">
+                            <strong>Ajustes Tributarios</strong>
+                            <p>Parámetros impositivos y alícuotas</p>
+                        </div>
+                    </a>
+                </li>
+                <li>
+                    <a onclick="switchTab('tab-configuracion'); toggleMobileMoreSheet(false);">
+                        <span class="sheet-icon">👤</span>
+                        <div class="sheet-text">
+                            <strong>Configuración</strong>
+                            <p>Perfil de cliente y preferencias contables</p>
+                        </div>
+                    </a>
+                </li>
+                <li>
+                    <a onclick="switchTab('tab-client-ocr'); toggleMobileMoreSheet(false);">
+                        <span class="sheet-icon">📷</span>
+                        <div class="sheet-text">
+                            <strong>Cargar Documentos (OCR)</strong>
+                            <p>Digitalización de comprobantes físicos</p>
+                        </div>
+                    </a>
+                </li>
+            </ul>
+            <div class="mobile-more-footer">
+                <button id="mobile-logout-btn" class="btn-danger-outline" onclick="logout(); toggleMobileMoreSheet(false);">
+                    🚪 Cerrar Sesión
+                </button>
             </div>
         </div>
     </div>
