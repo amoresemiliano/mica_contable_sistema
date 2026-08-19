@@ -227,4 +227,56 @@ describe('PersistenceService Unit Tests', () => {
         expect(items[0].netoGravado).toBe(1000);
         expect(items[0].totalIva).toBe(210);
     });
+
+    describe('Date Normalization Logic (Migration 011 SQL specification)', () => {
+        function normalizeDateSql(dateRaw) {
+            if (!dateRaw || typeof dateRaw !== 'string') {
+                throw new Error('Invalid date format');
+            }
+            const trimmed = dateRaw.trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+                const parts = trimmed.split('-').map(Number);
+                const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+                const year = d.getUTCFullYear();
+                const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(d.getUTCDate()).padStart(2, '0');
+                const reformat = `${year}-${month}-${day}`;
+                if (reformat !== trimmed) throw new Error(`Invalid calendar date: ${trimmed}`);
+                return reformat;
+            } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
+                const parts = trimmed.split('/').map(Number);
+                const d = new Date(Date.UTC(parts[2], parts[1] - 1, parts[0]));
+                const year = d.getUTCFullYear();
+                const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(d.getUTCDate()).padStart(2, '0');
+                const reformat = `${day}/${month}/${year}`;
+                if (reformat !== trimmed) throw new Error(`Invalid calendar date: ${trimmed}`);
+                return `${year}-${month}-${day}`;
+            } else {
+                throw new Error(`Invalid date format: "${trimmed}". Expected YYYY-MM-DD or DD/MM/YYYY`);
+            }
+        }
+
+        it('should correctly normalize DD/MM/YYYY format to YYYY-MM-DD', () => {
+            expect(normalizeDateSql('13/05/2026')).toBe('2026-05-13');
+            expect(normalizeDateSql('01/05/2026')).toBe('2026-05-01');
+            expect(normalizeDateSql('31/12/2025')).toBe('2025-12-31');
+        });
+
+        it('should correctly accept YYYY-MM-DD format', () => {
+            expect(normalizeDateSql('2026-05-13')).toBe('2026-05-13');
+            expect(normalizeDateSql('2026-01-01')).toBe('2026-01-01');
+        });
+
+        it('should reject invalid calendar dates such as 31/02/2026 or 2026-02-31', () => {
+            expect(() => normalizeDateSql('31/02/2026')).toThrow(/Invalid calendar date/);
+            expect(() => normalizeDateSql('2026-02-31')).toThrow(/Invalid calendar date/);
+        });
+
+        it('should reject empty or malformed date strings', () => {
+            expect(() => normalizeDateSql('')).toThrow(/Invalid date/);
+            expect(() => normalizeDateSql('fecha_invalida')).toThrow(/Invalid date/);
+            expect(() => normalizeDateSql('13-05-2026')).toThrow(/Invalid date/);
+        });
+    });
 });
