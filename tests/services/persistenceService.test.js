@@ -1,0 +1,230 @@
+import { jest } from '@jest/globals';
+
+// 1. Mock de Supabase Client antes de importar persistenceService
+const mockRpc = jest.fn();
+const mockUpload = jest.fn();
+const mockRemove = jest.fn();
+
+jest.unstable_mockModule('../../src/js/core/services/supabaseClient.js', () => ({
+    supabase: {
+        rpc: mockRpc,
+        storage: {
+            from: jest.fn(() => ({
+                upload: mockUpload,
+                remove: mockRemove
+            }))
+        }
+    }
+}));
+
+// 2. Import dinámico de persistenceService con el module mock cargado
+const { persistenceService } = await import('../../src/js/core/services/persistenceService.js');
+const { supabase } = await import('../../src/js/core/services/supabaseClient.js');
+
+describe('PersistenceService Unit Tests', () => {
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
+    it('should calculate SHA-256 hash in hex lowercase format of 64 characters', async () => {
+        const dummyContent = 'Contenido de prueba para Hashing SHA-256';
+        const dummyBlob = new Blob([dummyContent], { type: 'text/plain' });
+
+        const hashHex = await persistenceService.sha256File(dummyBlob);
+
+        expect(typeof hashHex).toBe('string');
+        expect(hashHex).toHaveLength(64);
+        expect(hashHex).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it('should sanitize filename correctly using getSafeFilename', () => {
+        const unsafeName = '1.1 Mis Comprobantes Recibidos (CUIT 30-68992077-9) #1!.xlsx';
+        const safeName = persistenceService.getSafeFilename(unsafeName);
+
+        expect(safeName).toBe('1.1_Mis_Comprobantes_Recibidos_CUIT_30-68992077-9_1_.xlsx');
+        expect(safeName).not.toContain(' ');
+        expect(safeName).not.toContain('(');
+        expect(safeName).not.toContain('#');
+    });
+
+    it('should derive MIME fallback by extension when mimeType is empty', () => {
+        expect(persistenceService.getMimeTypeFallback('report.xls', '')).toBe('application/vnd.ms-excel');
+        expect(persistenceService.getMimeTypeFallback('data.xlsx', null)).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        expect(persistenceService.getMimeTypeFallback('list.csv', '  ')).toBe('text/csv');
+        expect(persistenceService.getMimeTypeFallback('log.txt', '')).toBe('text/plain');
+        expect(persistenceService.getMimeTypeFallback('doc.pdf', 'application/pdf')).toBe('application/pdf');
+    });
+
+    it('should call check_file_importable RPC and return normalized response when importable', async () => {
+        mockRpc.mockResolvedValueOnce({
+            data: { importable: true },
+            error: null
+        });
+
+        const hash = 'a'.repeat(64);
+        const result = await persistenceService.checkFileImportable(hash);
+
+        expect(mockRpc).toHaveBeenCalledWith('check_file_importable', { p_sha256_hash: hash });
+        expect(result.importable).toBe(true);
+    });
+
+    it('should handle check_file_importable duplicate response', async () => {
+        mockRpc.mockResolvedValueOnce({
+            data: { importable: false, reason: 'FILE_ALREADY_EXISTS', existing_file_id: 'uuid-123' },
+            error: null
+        });
+
+        const hash = 'b'.repeat(64);
+        const result = await persistenceService.checkFileImportable(hash);
+
+        expect(result.importable).toBe(false);
+        expect(result.reason).toBe('FILE_ALREADY_EXISTS');
+        expect(result.existing_file_id).toBe('uuid-123');
+    });
+
+    it('should call create_import RPC and return import metadata', async () => {
+        const mockReturn = {
+            import_id: 'imp-111',
+            organization_id: 'org-222',
+            storage_prefix: 'org-222/imp-111'
+        };
+
+        mockRpc.mockResolvedValueOnce({
+            data: mockReturn,
+            error: null
+        });
+
+        const result = await persistenceService.createImport('ARCA_RECIBIDOS', 'COMPRA');
+
+        expect(mockRpc).toHaveBeenCalledWith('create_import', {
+            p_source_type: 'ARCA_RECIBIDOS',
+            p_operation_type: 'COMPRA'
+        });
+        expect(result).toEqual(mockReturn);
+    });
+
+    it('should upload source file to private storage bucket', async () => {
+        mockUpload.mockResolvedValueOnce({
+            data: { path: 'org-222/imp-111/clean_file.xlsx' },
+            error: null
+        });
+
+        const dummyFile = new File(['content'], 'test.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+        const result = await persistenceService.uploadSourceFile({
+            file: dummyFile,
+            storagePrefix: 'org-222/imp-111',
+            safeFilename: 'clean_file.xlsx',
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+
+        expect(supabase.storage.from).toHaveBeenCalledWith('eco-imports-private-staging');
+        expect(mockUpload).toHaveBeenCalledWith(
+            'org-222/imp-111/clean_file.xlsx',
+            dummyFile,
+            { contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', upsert: false }
+        );
+        expect(result.path).toBe('org-222/imp-111/clean_file.xlsx');
+    });
+
+    it('should call storage remove during cleanupStorageFile', async () => {
+        mockRemove.mockResolvedValueOnce({ data: [], error: null });
+
+        await persistenceService.cleanupStorageFile('org-222/imp-111/failed_file.xlsx');
+
+        expect(supabase.storage.from).toHaveBeenCalledWith('eco-imports-private-staging');
+        expect(mockRemove).toHaveBeenCalledWith(['org-222/imp-111/failed_file.xlsx']);
+    });
+
+    it('should call persist_import_batch RPC with exact expected payload', async () => {
+        mockRpc.mockResolvedValueOnce({
+            data: { import_id: 'imp-111', accepted_rows: 1, status: 'COMPLETED' },
+            error: null
+        });
+
+        const fileInfo = {
+            original_name: 'recibidos.xlsx',
+            storage_path: 'org-222/imp-111/recibidos.xlsx',
+            mime_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            size_bytes: 1024,
+            sha256_hash: 'c'.repeat(64)
+        };
+
+        const stagedRows = [
+            {
+                sourceRowNumber: 1,
+                rawRow: ['2026-05-01', 'Factura A', '20111111112', '1000'],
+                normalizedData: { fecha: '2026-05-01', cuit: '20111111112', total: 1000 },
+                errors: [],
+                warnings: []
+            }
+        ];
+
+        const result = await persistenceService.persistImportBatch({
+            importId: 'imp-111',
+            fileInfo,
+            stagedRows
+        });
+
+        expect(mockRpc).toHaveBeenCalledWith('persist_import_batch', {
+            p_import_id: 'imp-111',
+            p_file_info: fileInfo,
+            p_staged_rows: [
+                {
+                    sourceRowNumber: 1,
+                    rawRow: ['2026-05-01', 'Factura A', '20111111112', '1000'],
+                    normalizedData: { fecha: '2026-05-01', cuit: '20111111112', total: 1000 },
+                    errors: [],
+                    warnings: []
+                }
+            ]
+        });
+        expect(result.status).toBe('COMPLETED');
+    });
+
+    it('should load active normalized records and map them to appStore format', async () => {
+        const mockDbRecords = [
+            {
+                id: 'rec-1',
+                organization_id: 'org-222',
+                record_type: 'ARCA_RECIBIDOS',
+                status: 'ACCEPTED',
+                fecha: '2026-05-15',
+                cuit: '30689920779',
+                razon_social: 'Proveedor Test S.A.',
+                comprobante: '1-1-100',
+                total: 1210,
+                tipo_operacion: 'COMPRA',
+                confirmada: false,
+                normalized_payload: {
+                    fecha: '2026-05-15',
+                    cuit: '30689920779',
+                    tipo_cbte: 1,
+                    pdv: 1,
+                    nroDesde: 100,
+                    total: 1210,
+                    totalIva: 210,
+                    netoGravado: 1000
+                }
+            }
+        ];
+
+        mockRpc.mockResolvedValueOnce({
+            data: mockDbRecords,
+            error: null
+        });
+
+        const items = await persistenceService.loadActiveNormalizedRecords();
+
+        expect(mockRpc).toHaveBeenCalledWith('get_active_normalized_records');
+        expect(items).toHaveLength(1);
+        expect(items[0].id).toBe('rec-1');
+        expect(items[0].tipo).toBe('recibido');
+        expect(items[0].tipoOperacion).toBe('COMPRA');
+        expect(items[0].cuit).toBe('30689920779');
+        expect(items[0].total).toBe(1210);
+        expect(items[0].netoGravado).toBe(1000);
+        expect(items[0].totalIva).toBe(210);
+    });
+});

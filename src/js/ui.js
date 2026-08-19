@@ -14,6 +14,7 @@ import { parseIvaPerceptions } from './core/parsers/ivaPerceptionParser.js';
 import { parseBankRows } from './core/parsers/bankParser.js';
 import { parseSalaryRows } from './core/parsers/salaryParser.js';
 import { stageImport } from './core/services/importService.js';
+import { persistenceService } from './core/services/persistenceService.js';
 
 async function loginWithGoogle() {
   const redirectUrl = window.location.origin + window.location.pathname;
@@ -138,6 +139,17 @@ async function checkUserProfile(session) {
   loginContainer.style.display = 'none';
   appContainer.classList.remove('hidden');
   if (fallbackBtn) fallbackBtn.style.display = 'none';
+
+  // Rehidratar registros persistidos en Supabase Staging para la sesión activa
+  try {
+    const loadedItems = await persistenceService.loadActiveNormalizedRecords();
+    if (loadedItems && loadedItems.length > 0) {
+      appStore.addItems(loadedItems);
+      UIManager.render();
+    }
+  } catch (rehydrateErr) {
+    console.error("Error al rehidratar registros desde Supabase:", rehydrateErr);
+  }
 }
 
 supabase.auth.getSession().then(({ data: { session } }) => {
@@ -709,12 +721,13 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
     
     const confirmBtn = overlay.querySelector('.btn-confirm-modal');
     if (confirmBtn) {
-        confirmBtn.onclick = () => {
-            closeAndRemove();
+        confirmBtn.onclick = async () => {
+            const isCompra = (context && context.tipoOperacion === 'COMPRA') || (validRows.length > 0 && validRows[0].tipoOperacion === 'COMPRA');
+            const rawFile = context && context.rawFile;
+
             // Transformar las filas staged al modelo de la UI garantizando el contrato de identidad fiscal
             const toImport = validRows.map(r => {
                 const item = r.normalizedData;
-                const isCompra = (context && context.tipoOperacion === 'COMPRA') || r.tipoOperacion === 'COMPRA';
                 const netoGravadoVal = item.netoGravado !== undefined 
                     ? item.netoGravado 
                     : (item.alicuotas && item.alicuotas.length > 0 
@@ -754,6 +767,70 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                     rawRecord: item
                 };
             });
+
+            // SI ES ARCA RECIBIDOS (COMPRA) Y TENEMOS UN ARCHIVO REAL -> APLICAR PERSISTENCIA SUPABASE
+            if (isCompra && rawFile) {
+                confirmBtn.disabled = true;
+                confirmBtn.innerText = "Guardando importación...";
+
+                try {
+                    // 1. Hash SHA-256
+                    const hashHex = await persistenceService.sha256File(rawFile);
+
+                    // 2. Pre-check de idempotencia
+                    const checkResult = await persistenceService.checkFileImportable(hashHex);
+                    if (checkResult && checkResult.importable === false) {
+                        alert("Este archivo ya fue importado anteriormente.");
+                        closeAndRemove();
+                        return;
+                    }
+
+                    // 3. Crear importación en DB
+                    const importInfo = await persistenceService.createImport('ARCA_RECIBIDOS', 'COMPRA');
+
+                    // 4. Safe filename y MIME fallback
+                    const safeFilename = persistenceService.getSafeFilename(rawFile.name);
+
+                    // 5. Upload a Storage privado
+                    const uploadResult = await persistenceService.uploadSourceFile({
+                        file: rawFile,
+                        storagePrefix: importInfo.storage_prefix,
+                        safeFilename: safeFilename,
+                        mimeType: rawFile.type
+                    });
+
+                    // 6. Persistencia del Lote mediante RPC transaccional
+                    try {
+                        await persistenceService.persistImportBatch({
+                            importId: importInfo.import_id,
+                            fileInfo: {
+                                original_name: rawFile.name,
+                                storage_path: uploadResult.path,
+                                mime_type: uploadResult.mimeType,
+                                size_bytes: rawFile.size,
+                                sha256_hash: hashHex
+                            },
+                            stagedRows: stagedRows
+                        });
+                    } catch (persistErr) {
+                        // Cleanup compensatorio de storage en caso de fallo
+                        await persistenceService.cleanupStorageFile(uploadResult.path);
+                        throw persistErr;
+                    }
+
+                    closeAndRemove();
+                    onConfirm(toImport);
+
+                } catch (err) {
+                    console.error("Error durante la persistencia de la importación:", err);
+                    alert(`Error al guardar importación: ${err.message || 'Error desconocido'}`);
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerText = `Confirmar Importación (${validRows.length})`;
+                }
+                return;
+            }
+
+            closeAndRemove();
             onConfirm(toImport);
         };
     }
@@ -977,7 +1054,7 @@ export class UIManager {
             const fingerprintProvider = createBrowserFingerprintProvider();
             const tenant = getActiveCompanyCuit();
             let parsedItems = [];
-            let context = { batchId: Date.now(), tenant };
+            let context = { batchId: Date.now(), tenant, rawFile: file };
 
             if (type === 'recibido' || type === 'emitido') {
                 context.tipoOperacion = type === 'recibido' ? 'COMPRA' : 'VENTA';
