@@ -183,19 +183,24 @@ export class PersistenceService {
         if (!Array.isArray(data)) return [];
 
         return data
-            .filter(r => r.record_type === 'ARCA_RECIBIDOS' || r.tipo_operacion === 'COMPRA')
+            .filter(r => 
+                r.record_type === 'ARCA_RECIBIDOS' || r.record_type === 'ARCA_EMITIDOS' || 
+                r.tipo_operacion === 'COMPRA' || r.tipo_operacion === 'VENTA'
+            )
             .map(r => {
                 const d = r.normalized_payload || {};
+                const isCompra = r.tipo_operacion === 'COMPRA' || r.record_type === 'ARCA_RECIBIDOS';
                 const cuitVal = r.cuit || d.cuit || '';
+                const razonVal = r.razon_social || d.razonSocial || '';
                 return {
                     id: r.id,
                     fecha: d.fecha || r.fecha,
-                    tipo: 'recibido',
-                    tipoOperacion: 'COMPRA',
+                    tipo: isCompra ? 'recibido' : 'emitido',
+                    tipoOperacion: isCompra ? 'COMPRA' : 'VENTA',
                     tenant: cuitVal,
                     cuit: cuitVal,
-                    razonSocial: r.razon_social || d.razonSocial || '',
-                    proveedor: d.razonSocial || ("CUIT " + cuitVal),
+                    razonSocial: razonVal,
+                    proveedor: isCompra ? (razonVal || ("CUIT " + cuitVal)) : (razonVal || ("CUIT " + cuitVal)),
                     comprobante: r.comprobante || `${d.tipo_cbte}-${d.pdv}-${d.nroDesde}`,
                     tipo_cbte: d.tipo_cbte,
                     pdv: d.pdv,

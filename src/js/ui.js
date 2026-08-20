@@ -723,6 +723,8 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
     if (confirmBtn) {
         confirmBtn.onclick = async () => {
             const isCompra = (context && context.tipoOperacion === 'COMPRA') || (validRows.length > 0 && validRows[0].tipoOperacion === 'COMPRA');
+            const isVenta = (context && context.tipoOperacion === 'VENTA') || (validRows.length > 0 && validRows[0].tipoOperacion === 'VENTA');
+            const isArca = isCompra || isVenta;
             const rawFile = context && context.rawFile;
 
             // Transformar las filas staged al modelo de la UI garantizando el contrato de identidad fiscal
@@ -768,8 +770,8 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                 };
             });
 
-            // SI ES ARCA RECIBIDOS (COMPRA) Y TENEMOS UN ARCHIVO REAL -> APLICAR PERSISTENCIA SUPABASE
-            if (isCompra && rawFile) {
+            // SI ES ARCA RECIBIDOS (COMPRA) O ARCA EMITIDOS (VENTA) Y TENEMOS UN ARCHIVO REAL -> APLICAR PERSISTENCIA SUPABASE
+            if (isArca && rawFile) {
                 confirmBtn.disabled = true;
                 confirmBtn.innerText = "Guardando importación...";
 
@@ -785,8 +787,10 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                         return;
                     }
 
-                    // 3. Crear importación en DB
-                    const importInfo = await persistenceService.createImport('ARCA_RECIBIDOS', 'COMPRA');
+                    // 3. Crear importación en DB (ARCA_RECIBIDOS / COMPRA o ARCA_EMITIDOS / VENTA)
+                    const sourceType = isCompra ? 'ARCA_RECIBIDOS' : 'ARCA_EMITIDOS';
+                    const operationType = isCompra ? 'COMPRA' : 'VENTA';
+                    const importInfo = await persistenceService.createImport(sourceType, operationType);
 
                     // 4. Safe filename y MIME fallback
                     const safeFilename = persistenceService.getSafeFilename(rawFile.name);

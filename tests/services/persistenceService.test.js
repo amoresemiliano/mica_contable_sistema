@@ -228,6 +228,93 @@ describe('PersistenceService Unit Tests', () => {
         expect(items[0].totalIva).toBe(210);
     });
 
+    it('should call create_import RPC for ARCA_EMITIDOS / VENTA', async () => {
+        const mockReturn = {
+            import_id: 'imp-333',
+            organization_id: 'org-222',
+            storage_prefix: 'org-222/imp-333'
+        };
+
+        mockRpc.mockResolvedValueOnce({
+            data: mockReturn,
+            error: null
+        });
+
+        const result = await persistenceService.createImport('ARCA_EMITIDOS', 'VENTA');
+
+        expect(mockRpc).toHaveBeenCalledWith('create_import', {
+            p_source_type: 'ARCA_EMITIDOS',
+            p_operation_type: 'VENTA'
+        });
+        expect(result).toEqual(mockReturn);
+    });
+
+    it('should load active normalized records and discriminate ARCA_RECIBIDOS (COMPRA) vs ARCA_EMITIDOS (VENTA) while ignoring non-ARCA types', async () => {
+        const mockDbRecords = [
+            {
+                id: 'rec-1',
+                organization_id: 'org-222',
+                record_type: 'ARCA_RECIBIDOS',
+                status: 'ACCEPTED',
+                fecha: '2026-05-15',
+                cuit: '30689920779',
+                razon_social: 'Proveedor Test S.A.',
+                comprobante: '1-1-100',
+                total: 1210,
+                tipo_operacion: 'COMPRA',
+                confirmada: false,
+                normalized_payload: { fecha: '2026-05-15', cuit: '30689920779', razonSocial: 'Proveedor Test S.A.' }
+            },
+            {
+                id: 'rec-2',
+                organization_id: 'org-222',
+                record_type: 'ARCA_EMITIDOS',
+                status: 'ACCEPTED',
+                fecha: '2026-05-16',
+                cuit: '20333333339',
+                razon_social: 'Cliente Receptor S.R.L.',
+                comprobante: '6-1-50',
+                total: 5000,
+                tipo_operacion: 'VENTA',
+                confirmada: true,
+                normalized_payload: { fecha: '2026-05-16', cuit: '20333333339', razonSocial: 'Cliente Receptor S.R.L.' }
+            },
+            {
+                id: 'rec-3',
+                organization_id: 'org-222',
+                record_type: 'PERCEPCIONES_ARBA',
+                status: 'ACCEPTED',
+                fecha: '2026-05-17',
+                cuit: '30999999999',
+                total: 300,
+                tipo_operacion: 'PERCEPCION',
+                normalized_payload: { fecha: '2026-05-17' }
+            }
+        ];
+
+        mockRpc.mockResolvedValueOnce({
+            data: mockDbRecords,
+            error: null
+        });
+
+        const items = await persistenceService.loadActiveNormalizedRecords();
+
+        expect(mockRpc).toHaveBeenCalledWith('get_active_normalized_records');
+        expect(items).toHaveLength(2); // PERCEPCIONES IGNORED FROM PERSISTENCE REHYDRATION
+        
+        expect(items[0].id).toBe('rec-1');
+        expect(items[0].tipo).toBe('recibido');
+        expect(items[0].tipoOperacion).toBe('COMPRA');
+        expect(items[0].razonSocial).toBe('Proveedor Test S.A.');
+
+        expect(items[1].id).toBe('rec-2');
+        expect(items[1].tipo).toBe('emitido');
+        expect(items[1].tipoOperacion).toBe('VENTA');
+        expect(items[1].cuit).toBe('20333333339');
+        expect(items[1].razonSocial).toBe('Cliente Receptor S.R.L.');
+        expect(items[1].confirmada).toBe(true);
+    });
+
     describe('Date Normalization Logic (Migration 011 SQL specification)', () => {
         function normalizeDateSql(dateRaw) {
             if (!dateRaw || typeof dateRaw !== 'string') {
