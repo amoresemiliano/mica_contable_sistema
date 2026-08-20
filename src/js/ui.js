@@ -1077,12 +1077,11 @@ export class UIManager {
                     UIManager.render();
                 });
             } else if (type === 'percepcion') {
-                const jurisdiction = (document.getElementById('percep-jurisdiccion')?.value || 'ARBA').toUpperCase();
-                context.jurisdiccion = jurisdiction;
-
                 if (isExcelFormat) {
+                    context.jurisdiccion = 'IVA';
                     parsedItems = parseIvaPerceptions(rows, context);
                 } else {
+                    context.jurisdiccion = 'ARBA';
                     parsedItems = parseArbaText(text, context);
                 }
                 
@@ -1206,15 +1205,33 @@ export class UIManager {
         `;
     }
 
+    static updateJurisdictionFilterSelects() {
+        const sel = document.getElementById('filter-jurisdiccion');
+        if (!sel) return;
+
+        const available = appStore.getAvailableJurisdictions();
+        const currentSelected = appStore.currentJurisdiction || 'all';
+
+        let html = `<option value="all" ${currentSelected === 'all' ? 'selected' : ''}>Todas las Percepciones</option>`;
+        available.forEach(j => {
+            html += `<option value="${j}" ${currentSelected === j ? 'selected' : ''}>${j}</option>`;
+        });
+        sel.innerHTML = html;
+    }
+
     static renderPerceptionsTable() {
+        UIManager.updateJurisdictionFilterSelects();
+
         const tbody = document.getElementById('table-percepciones-body');
         const badge = document.getElementById('percepciones-summary-badge');
-        const list = appStore.perceptions || [];
+        const list = appStore.getFilteredPerceptions();
+        const totalList = appStore.perceptions || [];
 
         if (badge) {
             const total = list.reduce((sum, p) => sum + (p.amount || p.monto || 0), 0);
             const totalFormatted = total.toLocaleString('es-AR', {minimumFractionDigits: 2});
-            badge.innerText = `${list.length} Percepciones | Total $ ${totalFormatted}`;
+            const filterLabel = appStore.currentJurisdiction !== 'all' ? ` (${appStore.currentJurisdiction})` : '';
+            badge.innerText = `${list.length} Percepciones${filterLabel} | Total $ ${totalFormatted}`;
         }
 
         if (!tbody) return;
@@ -1223,7 +1240,7 @@ export class UIManager {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
-                        No se han cargado percepciones para este período.
+                        ${totalList.length > 0 ? 'No hay percepciones para la jurisdicción seleccionada.' : 'No se han cargado percepciones para este período.'}
                     </td>
                 </tr>`;
             return;

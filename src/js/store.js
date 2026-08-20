@@ -38,6 +38,7 @@ export class AppStore {
 
         this.bankTemplates = getLocalJSON('mica_bank_templates') || {};
         this.currentFilter = 'all';
+        this.currentJurisdiction = 'all';
         this.searchQuery = '';
         this.listeners = [];
     }
@@ -57,6 +58,51 @@ export class AppStore {
             }
         });
         this.notify();
+    }
+
+    normalizeJurisdictionName(raw) {
+        if (!raw) return '';
+        const str = String(raw).trim().toUpperCase();
+        if (str.includes('ARBA') || str.includes('BUENOS AIRES') || str.includes('BS. AS')) return 'Buenos Aires (ARBA)';
+        if (str.includes('AGIP') || str.includes('CABA') || str.includes('CAPITAL')) return 'CABA (AGIP)';
+        if (str.includes('CBA') || str.includes('CORDOBA')) return 'Córdoba';
+        if (str.includes('SANTA FE')) return 'Santa Fe';
+        if (str.includes('IVA') || str.includes('NACIONAL')) return 'IVA (Nacional)';
+        return str.charAt(0) + str.slice(1).toLowerCase();
+    }
+
+    getAvailableJurisdictions() {
+        const set = new Set();
+        (this.perceptions || []).forEach(p => {
+            const raw = p.jurisdiction || p.jurisdiccion || p.fuente || '';
+            if (raw) {
+                const norm = this.normalizeJurisdictionName(raw);
+                if (norm) set.add(norm);
+            }
+        });
+        return Array.from(set).sort();
+    }
+
+    setJurisdictionFilter(jurisdiction) {
+        this.currentJurisdiction = jurisdiction || 'all';
+        this.notify();
+    }
+
+    getFilteredPerceptions() {
+        return (this.perceptions || []).filter(p => {
+            if (this.currentJurisdiction !== 'all') {
+                const normP = this.normalizeJurisdictionName(p.jurisdiction || p.jurisdiccion || p.fuente || '');
+                if (normP !== this.currentJurisdiction) return false;
+            }
+            if (this.searchQuery) {
+                const cuitStr = String(p.cuit || '');
+                const razonStr = String(p.razonSocial || p.agente || '').toLowerCase();
+                const compStr = String(p.comprobante || '').toLowerCase();
+                const matchesSearch = cuitStr.includes(this.searchQuery) || razonStr.includes(this.searchQuery) || compStr.includes(this.searchQuery);
+                if (!matchesSearch) return false;
+            }
+            return true;
+        });
     }
 
     // Cargar Percepciones Provinciales
@@ -136,13 +182,15 @@ export class AppStore {
 
     setFilter(filter) {
         this.currentFilter = filter;
-        document.querySelectorAll('.btn-filter').forEach(btn => {
-            btn.classList.toggle('active', btn.innerText.toLowerCase().includes(
-                filter === 'recibidos' ? 'compras' : 
-                filter === 'emitidos' ? 'ventas' : 
-                filter === 'pending' ? 'sin' : 'todos'
-            ));
-        });
+        if (typeof document !== 'undefined' && document.querySelectorAll) {
+            document.querySelectorAll('.btn-filter').forEach(btn => {
+                btn.classList.toggle('active', btn.innerText.toLowerCase().includes(
+                    filter === 'recibidos' ? 'compras' : 
+                    filter === 'emitidos' ? 'ventas' : 
+                    filter === 'pending' ? 'sin' : 'todos'
+                ));
+            });
+        }
         this.notify();
     }
 

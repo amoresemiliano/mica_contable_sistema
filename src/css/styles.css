@@ -507,7 +507,36 @@ tr:hover {
     border-radius: 4px;
 }
 
+/* BOTÓN CERRAR SESIÓN EN SIDEBAR DESKTOP */
+.btn-sidebar-logout {
+    width: 100%;
+    padding: 10px 14px;
+    background-color: transparent;
+    color: #f87171;
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.2s ease;
+}
+
+.btn-sidebar-logout:hover {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border-color: #ef4444;
+}
+
 /* ADAPTABILIDAD MÓVIL (Sidebars, Bottom Navigation y Tablas) */
+@media (min-width: 769px) {
+    .mobile-bottom-bar {
+        display: none !important;
+    }
+}
+
 @media (min-width: 769px) and (max-width: 1024px) {
     aside {
         width: 70px;

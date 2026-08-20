@@ -80,7 +80,10 @@
             <li><a onclick="switchTab('tab-client-ocr')">📷 <span class="nav-text">Cargar Documentos</span></a></li>
         </ul>
 
-        <div style="margin-top: auto; padding: 20px;">
+        <div style="margin-top: auto; padding: 16px 24px; border-top: 1px solid #1e293b;" class="sidebar-footer">
+            <button id="sidebar-logout-btn" class="btn-sidebar-logout" onclick="logout()">
+                🚪 <span class="nav-text">Cerrar Sesión</span>
+            </button>
         </div>
     </aside>
 
@@ -113,15 +116,8 @@
                 </div>
                 <!-- Carga de Percepciones Provinciales -->
                 <div class="drop-zone" id="zone-percepciones" style="border-color: #38bdf8;">
-                    <h3>Percepciones Provinciales</h3>
-                    <p>Subir percepciones provinciales (CSV/TXT)</p>
-                    <div style="margin: 8px 0;">
-                        <select id="percep-jurisdiccion" class="form-control" style="width: auto; display: inline-block; padding: 4px 8px; font-size: 11px;" onclick="event.stopPropagation()">
-                            <option value="ARBA">ARBA (Buenos Aires)</option>
-                            <option value="AGIP">AGIP (CABA)</option>
-                            <option value="DGR-CBA">DGR (Córdoba)</option>
-                        </select>
-                    </div>
+                    <h3>Percepciones Provinciales y Nacionales</h3>
+                    <p>Subir percepciones (ARBA TXT / IVA XLS)</p>
                     <input type="file" id="file-percepciones" accept=".csv,.txt,.xls,.xlsx">
                 </div>
             </div>
@@ -194,13 +190,18 @@
 
             <!-- BANDEJA DE PERCEPCIONES INCORPORADAS -->
             <div class="card" style="margin-top: 24px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                     <div>
                         <h3 style="margin: 0;">Bandeja de Percepciones Incorporadas</h3>
                         <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">Percepciones provinciales (ARBA) y nacionales (IVA) procesadas.</p>
                     </div>
-                    <div id="percepciones-summary-badge" style="font-size: 12px; font-weight: 600; background: rgba(56, 189, 248, 0.15); color: #0284c7; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.3);">
-                        0 Percepciones | Total $ 0,00
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <select id="filter-jurisdiccion" class="form-control" style="width: auto; padding: 6px 10px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--primary);" onchange="appStore.setJurisdictionFilter(this.value)">
+                            <option value="all">Todas las Percepciones</option>
+                        </select>
+                        <div id="percepciones-summary-badge" style="font-size: 12px; font-weight: 600; background: rgba(56, 189, 248, 0.15); color: #0284c7; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.3);">
+                            0 Percepciones | Total $ 0,00
+                        </div>
                     </div>
                 </div>
                 <div class="data-table-container" style="max-height: 350px; overflow-y: auto;">

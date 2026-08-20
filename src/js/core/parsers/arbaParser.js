@@ -78,6 +78,7 @@ export function parseArbaText(text, context = {}) {
                     cuit: cleanCuit,
                     fecha: fechaStr,
                     period: period,
+                    regimen: codigoInicial.trim(),
                     sucursal: sucursal.trim(),
                     comprobante: comprobante.trim(),
                     monto: parsedAmount,
