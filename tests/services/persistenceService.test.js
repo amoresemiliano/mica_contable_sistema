@@ -183,7 +183,7 @@ describe('PersistenceService Unit Tests', () => {
         expect(result.status).toBe('COMPLETED');
     });
 
-    it('should load active normalized records and map them to appStore format', async () => {
+    it('should load active fiscal records and map them to appStore format', async () => {
         const mockDbRecords = [
             {
                 id: 'rec-1',
@@ -215,7 +215,7 @@ describe('PersistenceService Unit Tests', () => {
             error: null
         });
 
-        const items = await persistenceService.loadActiveNormalizedRecords();
+        const items = await persistenceService.loadActiveFiscalRecords();
 
         expect(mockRpc).toHaveBeenCalledWith('get_active_normalized_records');
         expect(items).toHaveLength(1);
@@ -249,7 +249,7 @@ describe('PersistenceService Unit Tests', () => {
         expect(result).toEqual(mockReturn);
     });
 
-    it('should load active normalized records and discriminate ARCA_RECIBIDOS (COMPRA) vs ARCA_EMITIDOS (VENTA) while ignoring non-ARCA types', async () => {
+    it('should load active fiscal records and discriminate ARCA_RECIBIDOS (COMPRA) vs ARCA_EMITIDOS (VENTA) while ignoring non-ARCA types', async () => {
         const mockDbRecords = [
             {
                 id: 'rec-1',
@@ -297,7 +297,7 @@ describe('PersistenceService Unit Tests', () => {
             error: null
         });
 
-        const items = await persistenceService.loadActiveNormalizedRecords();
+        const items = await persistenceService.loadActiveFiscalRecords();
 
         expect(mockRpc).toHaveBeenCalledWith('get_active_normalized_records');
         expect(items).toHaveLength(2); // PERCEPCIONES IGNORED FROM PERSISTENCE REHYDRATION
@@ -364,6 +364,81 @@ describe('PersistenceService Unit Tests', () => {
             expect(() => normalizeDateSql('')).toThrow(/Invalid date/);
             expect(() => normalizeDateSql('fecha_invalida')).toThrow(/Invalid date/);
             expect(() => normalizeDateSql('13-05-2026')).toThrow(/Invalid date/);
+        });
+    });
+
+    describe('persistPerceptionsBatch RPC Integration', () => {
+        it('should invoke public.persist_perceptions_batch with formatted payload', async () => {
+            const mockReturn = {
+                import_id: 'import-percep-123',
+                total_rows: 1,
+                accepted_rows: 1,
+                invalid_rows: 0,
+                duplicate_rows: 0,
+                issue_rows: 0,
+                status: 'COMPLETED'
+            };
+
+            mockRpc.mockResolvedValueOnce({
+                data: mockReturn,
+                error: null
+            });
+
+            const result = await persistenceService.persistPerceptionsBatch({
+                importId: 'import-percep-123',
+                fileInfo: {
+                    original_name: 'percepciones_arba.txt',
+                    storage_path: 'org-1/import-percep-123/percepciones_arba.txt',
+                    mime_type: 'text/plain',
+                    size_bytes: 1024,
+                    sha256_hash: 'a'.repeat(64)
+                },
+                stagedRows: [
+                    {
+                        sourceRowNumber: 1,
+                        rawRow: '006230-68992077-9 15/05/2026000100000000000000000000010000000001000,00',
+                        normalizedData: {
+                            cuit: '30689920779',
+                            fecha: '15/05/2026',
+                            regimen: '0062',
+                            sucursal: '0001',
+                            comprobante: '000000000000000000000100',
+                            monto: 1000
+                        },
+                        errors: [],
+                        warnings: []
+                    }
+                ]
+            });
+
+            expect(mockRpc).toHaveBeenCalledWith('persist_perceptions_batch', {
+                p_import_id: 'import-percep-123',
+                p_file_info: {
+                    original_name: 'percepciones_arba.txt',
+                    storage_path: 'org-1/import-percep-123/percepciones_arba.txt',
+                    mime_type: 'text/plain',
+                    size_bytes: 1024,
+                    sha256_hash: 'a'.repeat(64)
+                },
+                p_staged_rows: [
+                    {
+                        sourceRowNumber: 1,
+                        rawRow: '006230-68992077-9 15/05/2026000100000000000000000000010000000001000,00',
+                        normalizedData: {
+                            cuit: '30689920779',
+                            fecha: '15/05/2026',
+                            regimen: '0062',
+                            sucursal: '0001',
+                            comprobante: '000000000000000000000100',
+                            monto: 1000
+                        },
+                        errors: [],
+                        warnings: []
+                    }
+                ]
+            });
+
+            expect(result).toEqual(mockReturn);
         });
     });
 });

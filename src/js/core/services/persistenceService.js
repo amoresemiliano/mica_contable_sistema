@@ -171,9 +171,42 @@ export class PersistenceService {
     }
 
     /**
-     * Rehidrata los registros normalizados activos del usuario desde DB.
+     * Persiste el lote de percepciones (ARBA / IVA) en la base de datos mediante la RPC transaccional.
      */
-    async loadActiveNormalizedRecords() {
+    async persistPerceptionsBatch({ importId, fileInfo, stagedRows }) {
+        const p_file_info = {
+            original_name: fileInfo.original_name,
+            storage_path: fileInfo.storage_path,
+            mime_type: fileInfo.mime_type,
+            size_bytes: fileInfo.size_bytes,
+            sha256_hash: fileInfo.sha256_hash
+        };
+
+        const p_staged_rows = stagedRows.map(r => ({
+            sourceRowNumber: r.sourceRowNumber,
+            rawRow: r.rawRow || [],
+            normalizedData: r.normalizedData || null,
+            errors: r.errors || [],
+            warnings: r.warnings || []
+        }));
+
+        const { data, error } = await supabase.rpc('persist_perceptions_batch', {
+            p_import_id: importId,
+            p_file_info: p_file_info,
+            p_staged_rows: p_staged_rows
+        });
+
+        if (error) {
+            throw new Error(`Error en RPC persist_perceptions_batch: ${error.message}`);
+        }
+
+        return data;
+    }
+
+    /**
+     * Rehidrata los comprobantes fiscales (ARCA) activos del usuario desde DB.
+     */
+    async loadActiveFiscalRecords() {
         const { data, error } = await supabase.rpc('get_active_normalized_records');
 
         if (error) {
@@ -222,6 +255,41 @@ export class PersistenceService {
                     categoria: r.categoria || null,
                     sugerida: false,
                     confirmada: r.confirmada || false,
+                    rawRecord: d
+                };
+            });
+    }
+
+    /**
+     * Rehidrata las percepciones impositivas activas del usuario desde DB.
+     */
+    async loadActivePerceptions() {
+        const { data, error } = await supabase.rpc('get_active_normalized_records');
+
+        if (error) {
+            throw new Error(`Error en RPC get_active_normalized_records: ${error.message}`);
+        }
+
+        if (!Array.isArray(data)) return [];
+
+        return data
+            .filter(r => r.record_type === 'PERCEPCIONES_ARBA' || r.record_type === 'PERCEPCIONES_IVA')
+            .map(r => {
+                const d = r.normalized_payload || {};
+                return {
+                    id: r.id,
+                    cuit: r.cuit || d.cuit || '',
+                    razonSocial: r.razon_social || d.razonSocial || 'AGENTE PERCEPCION',
+                    fecha: d.fecha || r.fecha,
+                    period: d.period || d.periodo,
+                    regimen: d.regimen,
+                    sucursal: d.sucursal,
+                    comprobante: r.comprobante || d.comprobante,
+                    monto: typeof r.total === 'number' ? r.total : (d.monto || d.amount || 0),
+                    amount: typeof r.total === 'number' ? r.total : (d.amount || d.monto || 0),
+                    jurisdiction: d.jurisdiction || (r.record_type === 'PERCEPCIONES_ARBA' ? 'ARBA' : 'NACIONAL (IVA)'),
+                    fuente: d.fuente || (r.record_type === 'PERCEPCIONES_ARBA' ? 'ARBA' : 'IVA'),
+                    tipo: 'percepcion',
                     rawRecord: d
                 };
             });

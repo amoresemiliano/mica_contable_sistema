@@ -142,9 +142,17 @@ async function checkUserProfile(session) {
 
   // Rehidratar registros persistidos en Supabase Staging para la sesión activa
   try {
-    const loadedItems = await persistenceService.loadActiveNormalizedRecords();
+    const loadedItems = await persistenceService.loadActiveFiscalRecords();
     if (loadedItems && loadedItems.length > 0) {
       appStore.addItems(loadedItems);
+    }
+
+    const loadedPerceptions = await persistenceService.loadActivePerceptions();
+    if (loadedPerceptions && loadedPerceptions.length > 0) {
+      appStore.addPerceptions(loadedPerceptions);
+    }
+
+    if ((loadedItems && loadedItems.length > 0) || (loadedPerceptions && loadedPerceptions.length > 0)) {
       UIManager.render();
     }
   } catch (rehydrateErr) {
@@ -1077,12 +1085,25 @@ export class UIManager {
                     UIManager.render();
                 });
             } else if (type === 'percepcion') {
+                const ext = file.name.split('.').pop().toLowerCase();
+                let sourceType = null;
+
                 if (isExcelFormat) {
+                    if (!['xls', 'xlsx', 'csv'].includes(ext)) {
+                        alert(`Contradicción detectada: El contenido parece Excel/CSV pero la extensión es .${ext}. Importación rechazada.`);
+                        return;
+                    }
                     context.jurisdiccion = 'IVA';
                     parsedItems = parseIvaPerceptions(rows, context);
+                    sourceType = 'PERCEPCIONES_IVA';
                 } else {
+                    if (ext !== 'txt') {
+                        alert(`Contradicción detectada: El contenido parece ARBA TXT pero la extensión es .${ext}. Importación rechazada.`);
+                        return;
+                    }
                     context.jurisdiccion = 'ARBA';
                     parsedItems = parseArbaText(text, context);
+                    sourceType = 'PERCEPCIONES_ARBA';
                 }
                 
                 const validPerceptions = parsedItems.filter(r => r.normalizedData !== null).map(r => r.normalizedData);
@@ -1091,10 +1112,60 @@ export class UIManager {
                 if (validPerceptions.length === 0) {
                     alert("No se encontraron percepciones válidas en el archivo.");
                 } else {
-                    showPerceptionsPreviewModal(validPerceptions, invalidRows.length, file.name, (acceptedItems) => {
-                        appStore.addPerceptions(acceptedItems);
-                        Reconciler.runCrossMatching();
-                        UIManager.render();
+                    showPerceptionsPreviewModal(validPerceptions, invalidRows.length, file.name, async (acceptedItems) => {
+                        const btnConfirm = document.querySelector('.btn-confirm-modal');
+                        if (btnConfirm) {
+                            btnConfirm.disabled = true;
+                            btnConfirm.innerText = "Guardando importación...";
+                        }
+                        try {
+                            const hashHex = await persistenceService.sha256File(file);
+                            
+                            const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            if (checkResult && checkResult.importable === false) {
+                                alert("Este archivo de percepciones ya fue importado anteriormente.");
+                                return;
+                            }
+                            
+                            const importInfo = await persistenceService.createImport(sourceType, 'PERCEPCION');
+                            const safeFilename = persistenceService.getSafeFilename(file.name);
+                            
+                            const uploadResult = await persistenceService.uploadSourceFile({
+                                file: file,
+                                storagePrefix: importInfo.storage_prefix,
+                                safeFilename: safeFilename,
+                                mimeType: file.type || 'text/plain'
+                            });
+                            
+                            try {
+                                await persistenceService.persistPerceptionsBatch({
+                                    importId: importInfo.import_id,
+                                    fileInfo: {
+                                        original_name: file.name,
+                                        storage_path: uploadResult.path,
+                                        mime_type: uploadResult.mimeType,
+                                        size_bytes: file.size,
+                                        sha256_hash: hashHex
+                                    },
+                                    stagedRows: parsedItems.filter(r => r.normalizedData !== null)
+                                });
+                            } catch (persistErr) {
+                                await persistenceService.cleanupStorageFile(uploadResult.path);
+                                throw persistErr;
+                            }
+                            
+                            appStore.addPerceptions(acceptedItems);
+                            Reconciler.runCrossMatching();
+                            UIManager.render();
+                        } catch (err) {
+                            console.error("Error durante la persistencia de percepciones:", err);
+                            alert("Error al guardar percepciones: " + (err.message || 'Error desconocido'));
+                        } finally {
+                            if (btnConfirm) {
+                                btnConfirm.disabled = false;
+                                btnConfirm.innerText = "Confirmar Importación";
+                            }
+                        }
                     });
                 }
             } else if (type === 'banco') {
