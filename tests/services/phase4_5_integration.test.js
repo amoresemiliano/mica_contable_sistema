@@ -63,4 +63,60 @@ describe('Phase 4.5 - Percepciones Integration', () => {
         expect(data.comprobante).toBe("000000000000000000000100");
         expect(typeof data.comprobante).toBe("string");
     });
+
+    test('persistPerceptionsBatch recibe TODAS las filas (válidas e inválidas), y appStore solo las válidas', async () => {
+        const stagedRows = [
+            {
+                sourceRowNumber: 1,
+                rawRow: 'Fila Valida',
+                normalizedData: { cuit: '30111111118', amount: 100, period: '2026-05', jurisdiction: 'ARBA' },
+                errors: [],
+                warnings: []
+            },
+            {
+                sourceRowNumber: 2,
+                rawRow: 'Fila Invalida Corta',
+                normalizedData: null,
+                errors: ['Longitud de línea inválida'],
+                warnings: []
+            }
+        ];
+
+        // Mocks for persistenceService
+        const spyPersist = jest.spyOn(persistenceService, 'persistPerceptionsBatch').mockResolvedValue({
+            import_id: 'imp-123',
+            total_rows: 2,
+            accepted_rows: 1,
+            invalid_rows: 1,
+            duplicate_rows: 0,
+            issue_rows: 1,
+            status: 'COMPLETED'
+        });
+
+        // Act
+        const result = await persistenceService.persistPerceptionsBatch({
+            importId: 'imp-123',
+            fileInfo: {},
+            stagedRows: stagedRows
+        });
+
+        // Verification 1: persistPerceptionsBatch received both rows (length === 2)
+        expect(spyPersist).toHaveBeenCalledWith(expect.objectContaining({
+            stagedRows: expect.arrayContaining([
+                expect.objectContaining({ normalizedData: expect.anything() }),
+                expect.objectContaining({ normalizedData: null, errors: expect.arrayContaining(['Longitud de línea inválida']) })
+            ])
+        }));
+        expect(spyPersist.mock.calls[0][0].stagedRows.length).toBe(2);
+
+        // Act 2: Simulate what the UI does: appStore.addPerceptions(acceptedItems)
+        // acceptedItems ONLY contains the valid items (normalizedData !== null).
+        const acceptedItems = stagedRows.filter(r => r.normalizedData !== null).map(r => r.normalizedData);
+        appStore.addPerceptions(acceptedItems);
+
+        // Verification 2: appStore only has 1 perception
+        expect(appStore.perceptions.length).toBe(1);
+        expect(appStore.perceptions[0].cuit).toBe('30111111118');
+        expect(appStore.perceptions[0].amount).toBe(100);
+    });
 });

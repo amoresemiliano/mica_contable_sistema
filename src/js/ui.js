@@ -1147,7 +1147,7 @@ export class UIManager {
                                         size_bytes: file.size,
                                         sha256_hash: hashHex
                                     },
-                                    stagedRows: parsedItems.filter(r => r.normalizedData !== null)
+                                    stagedRows: parsedItems
                                 });
                             } catch (persistErr) {
                                 await persistenceService.cleanupStorageFile(uploadResult.path);
