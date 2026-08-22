@@ -204,6 +204,75 @@ export class PersistenceService {
     }
 
     /**
+     * Persiste el lote de movimientos financieros (Banco / Sueldos) en la base de datos mediante la RPC transaccional.
+     */
+    async persistFinancialMovementsBatch({ importId, fileInfo, stagedRows }) {
+        const p_file_info = fileInfo ? {
+            original_name: fileInfo.original_name || fileInfo.name,
+            storage_path: fileInfo.storage_path || fileInfo.storagePath,
+            mime_type: fileInfo.mime_type || fileInfo.type,
+            size_bytes: fileInfo.size_bytes || fileInfo.size,
+            sha256_hash: fileInfo.sha256_hash || fileInfo.sha256Hash
+        } : null;
+
+        const p_staged_rows = stagedRows.map(r => ({
+            sourceRowNumber: r.sourceRowNumber,
+            rawRow: r.rawRow || [],
+            normalizedData: r.normalizedData || null,
+            errors: r.errors || [],
+            warnings: r.warnings || [],
+            identityKey: r.identityKey,
+            financialFingerprint: r.financialFingerprint
+        }));
+
+        const { data, error } = await supabase.rpc('persist_financial_movements_batch', {
+            p_import_id: importId,
+            p_file_info: p_file_info,
+            p_staged_rows: p_staged_rows
+        });
+
+        if (error) {
+            throw new Error(`Error en RPC persist_financial_movements_batch: ${error.message}`);
+        }
+
+        return data;
+    }
+
+    /**
+     * Rehidrata los movimientos financieros activos del usuario desde DB.
+     */
+    async loadActiveFinancialMovements() {
+        const { data, error } = await supabase.rpc('get_active_financial_movements');
+
+        if (error) {
+            throw new Error(`Error en RPC get_active_financial_movements: ${error.message}`);
+        }
+
+        if (!Array.isArray(data)) return [];
+
+        return data.map(r => {
+            const d = r.normalized_payload || {};
+            return {
+                id: r.id,
+                sourceType: r.source_type,
+                operationType: r.operation_type,
+                fecha: r.fecha,
+                fechaValor: r.fecha_valor,
+                periodo: r.periodo,
+                descripcion: r.descripcion,
+                referencia: r.referencia,
+                accountIdentifier: r.account_identifier,
+                movementType: r.movement_type,
+                monto: r.monto,
+                saldo: r.saldo,
+                identityKey: r.identity_key,
+                financialFingerprint: r.financial_fingerprint,
+                rawRecord: d
+            };
+        });
+    }
+
+    /**
      * Rehidrata los comprobantes fiscales (ARCA) activos del usuario desde DB.
      */
     async loadActiveFiscalRecords() {

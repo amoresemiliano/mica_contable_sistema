@@ -42,15 +42,18 @@ export function parseBankRows(rows, context = {}) {
     }
 
     headers.forEach((clean, idx) => {
-        if (clean.includes('fec.')) mapping.fecha = idx;
+        if (clean === 'fec. valor' || clean === 'fecha valor') mapping.fechaValor = idx;
+        else if (clean.includes('fec.')) mapping.fecha = idx;
         else if (clean === 'fecha') mapping.fecha = idx;
         else if (clean.includes('concepto') || clean.includes('descripcion')) {
             if (mapping.concepto === undefined) mapping.concepto = idx;
         }
         else if (clean.includes('detalle')) mapping.detalle = idx;
+        else if (clean === 'referencia' || clean === 'ref.') mapping.referencia = idx;
         else if (clean.includes('importe') || clean.includes('monto')) mapping.importe = idx;
         else if (clean.includes('debito') || clean.includes('egreso') || clean.includes('salida')) mapping.debito = idx;
         else if (clean.includes('credito') || clean.includes('ingreso') || clean.includes('entrada')) mapping.credito = idx;
+        else if (clean === 'saldo') mapping.saldo = idx;
     });
 
     const checkStrictNumber = (val) => {
@@ -68,6 +71,10 @@ export function parseBankRows(rows, context = {}) {
         if (!row || !Array.isArray(row) || row.length === 0) continue;
 
         const dateVal = mapping.fecha !== undefined ? row[mapping.fecha] : null;
+        const fechaValorVal = mapping.fechaValor !== undefined ? row[mapping.fechaValor] : null;
+        const referenciaVal = mapping.referencia !== undefined ? String(row[mapping.referencia] || '').trim() : '';
+        const saldoVal = mapping.saldo !== undefined ? checkStrictNumber(row[mapping.saldo]) : null;
+        
         const conceptoVal = mapping.concepto !== undefined ? String(row[mapping.concepto] || '').trim() : '';
         const detalleVal = mapping.detalle !== undefined ? String(row[mapping.detalle] || '').trim() : '';
         const descVal = [conceptoVal, detalleVal].filter(Boolean).join(' - ');
@@ -125,7 +132,10 @@ export function parseBankRows(rows, context = {}) {
             warnings: [],
             normalizedData: {
                 fecha: dateVal,
+                fechaValor: fechaValorVal,
                 descripcion: descVal,
+                referencia: referenciaVal,
+                saldo: saldoVal,
                 monto: amount,
                 tipo: isDebit ? 'debit' : (isCredit ? 'credit' : 'unknown'),
                 signals

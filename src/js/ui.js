@@ -151,8 +151,21 @@ async function checkUserProfile(session) {
     if (loadedPerceptions && loadedPerceptions.length > 0) {
       appStore.addPerceptions(loadedPerceptions);
     }
+    
+    const loadedFinancials = await persistenceService.loadActiveFinancialMovements();
+    if (loadedFinancials && loadedFinancials.length > 0) {
+      const bankMovements = loadedFinancials.filter(f => f.operation_type === 'BANCO').map(f => f.normalized_payload);
+      const salaries = loadedFinancials.filter(f => f.operation_type === 'SUELDO').map(f => f.normalized_payload);
+      
+      if (bankMovements.length > 0) {
+        appStore.addBankTransactions(bankMovements);
+      }
+      if (salaries.length > 0) {
+        appStore.addSalary(salaries[0]); // Por ahora guardamos 1 como estaba.
+      }
+    }
 
-    if ((loadedItems && loadedItems.length > 0) || (loadedPerceptions && loadedPerceptions.length > 0)) {
+    if ((loadedItems && loadedItems.length > 0) || (loadedPerceptions && loadedPerceptions.length > 0) || (loadedFinancials && loadedFinancials.length > 0)) {
       UIManager.render();
     }
   } catch (rehydrateErr) {
@@ -1173,13 +1186,64 @@ export class UIManager {
                 context.banco = bankName;
                 const result = parseBankRows(rows, context);
                 const validTransactions = result.filter(r => r.errors.length === 0).map(r => r.normalizedData);
+                const invalidRows = result.filter(r => r.errors.length > 0);
 
                 if (validTransactions.length === 0) {
                     alert("No se encontraron movimientos bancarios válidos en el archivo.");
                 } else {
-                    showBankPreviewModal(validTransactions, file.name, (accepted) => {
-                        appStore.addBankTransactions(accepted);
-                        UIManager.render();
+                    showBankPreviewModal(validTransactions, file.name, async (accepted) => {
+                        const btnConfirm = document.querySelector('.btn-confirm-modal');
+                        if (btnConfirm) {
+                            btnConfirm.disabled = true;
+                            btnConfirm.innerText = "Guardando importación...";
+                        }
+                        try {
+                            const hashHex = await persistenceService.sha256File(file);
+                            
+                            const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            if (checkResult && checkResult.importable === false) {
+                                alert("Este archivo bancario ya fue importado anteriormente.");
+                                return;
+                            }
+                            
+                            const importInfo = await persistenceService.createImport('BANK_STATEMENT_BBVA', 'BANCO');
+                            const safeFilename = persistenceService.getSafeFilename(file.name);
+                            
+                            const uploadResult = await persistenceService.uploadSourceFile({
+                                file: file,
+                                storagePrefix: importInfo.storage_prefix,
+                                safeFilename: safeFilename,
+                                mimeType: file.type || 'text/csv'
+                            });
+                            
+                            try {
+                                await persistenceService.persistFinancialMovementsBatch({
+                                    importId: importInfo.import_id,
+                                    fileInfo: {
+                                        original_name: file.name,
+                                        storage_path: uploadResult.path,
+                                        mime_type: uploadResult.mimeType,
+                                        size_bytes: file.size,
+                                        sha256_hash: hashHex
+                                    },
+                                    stagedRows: result
+                                });
+                            } catch (persistErr) {
+                                await persistenceService.cleanupStorageFile(uploadResult.path);
+                                throw persistErr;
+                            }
+                            
+                            appStore.addBankTransactions(accepted);
+                            UIManager.render();
+                        } catch (err) {
+                            console.error("Error durante la persistencia bancaria:", err);
+                            alert("Error al guardar extracto bancario: " + (err.message || 'Error desconocido'));
+                        } finally {
+                            if (btnConfirm) {
+                                btnConfirm.disabled = false;
+                                btnConfirm.innerText = `Confirmar Importación (${validTransactions.length})`;
+                            }
+                        }
                     });
                 }
             } else if (type === 'sueldo') {
@@ -1189,9 +1253,49 @@ export class UIManager {
                 if (firstRes && firstRes.errors && firstRes.errors.length > 0) {
                     alert("Error en el archivo de sueldos: " + firstRes.errors.join(', '));
                 } else if (firstRes && firstRes.normalizedData) {
-                    appStore.addSalary(firstRes.normalizedData);
-                    if (typeof updateSalaryFormFields === 'function') updateSalaryFormFields();
-                    alert(`Sueldos Acompy importados correctamente (Período: ${firstRes.normalizedData.periodo || 'N/D'}).`);
+                    try {
+                        const hashHex = await persistenceService.sha256File(file);
+                        
+                        const checkResult = await persistenceService.checkFileImportable(hashHex);
+                        if (checkResult && checkResult.importable === false) {
+                            alert("Este archivo de sueldos ya fue importado anteriormente.");
+                            return;
+                        }
+                        
+                        const importInfo = await persistenceService.createImport('PAYROLL_ACONPY', 'SUELDO');
+                        const safeFilename = persistenceService.getSafeFilename(file.name);
+                        
+                        const uploadResult = await persistenceService.uploadSourceFile({
+                            file: file,
+                            storagePrefix: importInfo.storage_prefix,
+                            safeFilename: safeFilename,
+                            mimeType: file.type || 'text/plain'
+                        });
+                        
+                        try {
+                            await persistenceService.persistFinancialMovementsBatch({
+                                importId: importInfo.import_id,
+                                fileInfo: {
+                                    original_name: file.name,
+                                    storage_path: uploadResult.path,
+                                    mime_type: uploadResult.mimeType,
+                                    size_bytes: file.size,
+                                    sha256_hash: hashHex
+                                },
+                                stagedRows: results
+                            });
+                        } catch (persistErr) {
+                            await persistenceService.cleanupStorageFile(uploadResult.path);
+                            throw persistErr;
+                        }
+                        
+                        appStore.addSalary(firstRes.normalizedData);
+                        if (typeof updateSalaryFormFields === 'function') updateSalaryFormFields();
+                        alert(`Sueldos Acompy importados correctamente (Período: ${firstRes.normalizedData.periodo || 'N/D'}).`);
+                    } catch (err) {
+                        console.error("Error durante la persistencia de sueldos:", err);
+                        alert("Error al guardar sueldos: " + (err.message || 'Error desconocido'));
+                    }
                 } else {
                     alert("No se pudo extraer el resumen de sueldos.");
                 }
