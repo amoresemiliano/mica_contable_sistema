@@ -220,9 +220,7 @@ export class PersistenceService {
             rawRow: r.rawRow || [],
             normalizedData: r.normalizedData || null,
             errors: r.errors || [],
-            warnings: r.warnings || [],
-            identityKey: r.identityKey,
-            financialFingerprint: r.financialFingerprint
+            warnings: r.warnings || []
         }));
 
         const { data, error } = await supabase.rpc('persist_financial_movements_batch', {
