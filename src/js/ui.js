@@ -154,8 +154,12 @@ async function checkUserProfile(session) {
     
     const loadedFinancials = await persistenceService.loadActiveFinancialMovements();
     if (loadedFinancials && loadedFinancials.length > 0) {
-      const bankMovements = loadedFinancials.filter(f => f.operation_type === 'BANCO').map(f => f.normalized_payload);
-      const salaries = loadedFinancials.filter(f => f.operation_type === 'SUELDO').map(f => f.normalized_payload);
+      const bankMovements = loadedFinancials
+        .filter(f => f.operationType === 'BANCO')
+        .map(f => ({ ...f.rawRecord, id: f.id }));
+      const salaries = loadedFinancials
+        .filter(f => f.operationType === 'SUELDO')
+        .map(f => ({ ...f.rawRecord, id: f.id }));
       
       if (bankMovements.length > 0) {
         appStore.addBankTransactions(bankMovements);

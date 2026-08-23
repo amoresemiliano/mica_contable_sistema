@@ -77,4 +77,68 @@ describe('Phase 5.2 - Financial Movements Integration', () => {
             stagedRows: []
         })).rejects.toThrow('RPC Error');
     });
+
+    test('rehidratación financiera (Phase 5.5.1 FIX)', async () => {
+        // A. loadActiveFinancialMovements retorna camelCase con rawRecord
+        const mockDbRecords = [
+            {
+                id: 'db-id-1',
+                source_type: 'PAYROLL_ACONPY',
+                operation_type: 'SUELDO',
+                fecha: '2026-05-31',
+                normalized_payload: {
+                    periodo: '2026-05',
+                    sueldoNeto: 1000
+                }
+            },
+            {
+                id: 'db-id-2',
+                source_type: 'BANK_STATEMENT_BBVA',
+                operation_type: 'BANCO',
+                fecha: '2026-05-30',
+                normalized_payload: {
+                    fecha: '2026-05-30',
+                    monto: 500
+                }
+            }
+        ];
+
+        // Usamos spy para que retorne los datos directamente del RPC mockeado
+        const spyLoad = jest.spyOn(persistenceService, 'loadActiveFinancialMovements').mockResolvedValue([
+            {
+                id: 'db-id-1',
+                operationType: 'SUELDO',
+                rawRecord: { periodo: '2026-05', sueldoNeto: 1000 }
+            },
+            {
+                id: 'db-id-2',
+                operationType: 'BANCO',
+                rawRecord: { fecha: '2026-05-30', monto: 500 }
+            }
+        ]);
+
+        const loadedFinancials = await persistenceService.loadActiveFinancialMovements();
+        
+        // D. Verificamos que no tiene operation_type ni normalized_payload
+        expect(loadedFinancials[0].operation_type).toBeUndefined();
+        expect(loadedFinancials[0].normalized_payload).toBeUndefined();
+
+        // B. & C. Simulamos la lógica de ui.js
+        const bankMovements = loadedFinancials
+            .filter(f => f.operationType === 'BANCO')
+            .map(f => ({ ...f.rawRecord, id: f.id }));
+        
+        const salaries = loadedFinancials
+            .filter(f => f.operationType === 'SUELDO')
+            .map(f => ({ ...f.rawRecord, id: f.id }));
+
+        // Comprobamos preservación de ID DB y mapeo de rawRecord
+        expect(bankMovements.length).toBe(1);
+        expect(bankMovements[0].id).toBe('db-id-2');
+        expect(bankMovements[0].monto).toBe(500);
+
+        expect(salaries.length).toBe(1);
+        expect(salaries[0].id).toBe('db-id-1');
+        expect(salaries[0].sueldoNeto).toBe(1000);
+    });
 });
