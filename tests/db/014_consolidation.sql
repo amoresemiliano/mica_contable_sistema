@@ -35,4 +35,10 @@ BEGIN;
 -- 10. Activity CRUD
 -- As ADMIN, create_global_economic_activity(), update_global_economic_activity(), assign_economic_activity_to_org(), unassign_economic_activity_from_org(). Verify tables are correctly updated and audit events are generated.
 
+-- 11. Bulk Update Classification
+-- Use bulk_update_record_classification() to update all active records for a given CUIT within a date range. Verify it updates both category and activity, ignores soft-deleted records, correctly handles unauthorized users, validates category/activity assignments, and creates an audit event.
+
+-- 12. IIBB Rates
+-- Insert a rate into eco_org_activity_iibb_rates for an organization and activity. Verify RLS policies prevent access by other organizations.
+
 ROLLBACK;

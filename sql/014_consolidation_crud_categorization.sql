@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.eco_org_tax_categories (
 CREATE TABLE IF NOT EXISTS public.eco_economic_activities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
-  afip_code TEXT,
+  arca_code TEXT,
   description TEXT,
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -47,6 +47,20 @@ CREATE TABLE IF NOT EXISTS public.eco_org_economic_activities (
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(organization_id, activity_id)
+);
+
+-- E. Activity IIBB Rates Configuration (Organization specific)
+CREATE TABLE IF NOT EXISTS public.eco_org_activity_iibb_rates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.eco_organizations(id),
+  activity_id UUID NOT NULL REFERENCES public.eco_economic_activities(id),
+  jurisdiction TEXT NOT NULL,
+  rate NUMERIC(5,2) NOT NULL,
+  valid_from DATE,
+  valid_to DATE,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- RLS
@@ -65,6 +79,10 @@ CREATE POLICY "Org categories viewable by org" ON public.eco_org_tax_categories 
 ALTER TABLE public.eco_org_economic_activities ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Org activities viewable by org" ON public.eco_org_economic_activities;
 CREATE POLICY "Org activities viewable by org" ON public.eco_org_economic_activities FOR SELECT TO authenticated USING (organization_id = private.org_id());
+
+ALTER TABLE public.eco_org_activity_iibb_rates ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Org IIBB rates viewable by org" ON public.eco_org_activity_iibb_rates;
+CREATE POLICY "Org IIBB rates viewable by org" ON public.eco_org_activity_iibb_rates FOR SELECT TO authenticated USING (organization_id = private.org_id());
 
 
 -- ============================================================
@@ -711,5 +729,72 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.unassign_economic_activity_from_org(UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.unassign_economic_activity_from_org(UUID) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.bulk_update_record_classification(
+  p_cuit TEXT,
+  p_date_from DATE,
+  p_date_to DATE,
+  p_category_id UUID,
+  p_activity_id UUID
+)
+RETURNS INT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO ''
+AS $$
+DECLARE
+  v_org_id UUID;
+  v_caller_role TEXT;
+  v_caller_id UUID;
+  v_rows_affected INT := 0;
+  v_valid BOOLEAN;
+BEGIN
+  v_org_id := private.org_id();
+  v_caller_role := private.func_role();
+  
+  IF v_org_id IS NULL THEN RAISE EXCEPTION 'Unauthorized: Invalid organization'; END IF;
+  IF v_caller_role NOT IN ('REVIEWER', 'ADMIN') THEN RAISE EXCEPTION 'Unauthorized: Requires REVIEWER or ADMIN role'; END IF;
+  
+  SELECT id INTO v_caller_id FROM public.eco_user_profiles WHERE auth_user_id = auth.uid() AND is_active = TRUE;
+
+  IF p_category_id IS NOT NULL THEN
+    SELECT EXISTS(
+      SELECT 1 FROM public.eco_org_tax_categories WHERE organization_id = v_org_id AND category_id = p_category_id AND is_active = TRUE
+    ) INTO v_valid;
+    IF NOT v_valid THEN RAISE EXCEPTION 'Category ID is not assigned to this organization or is inactive'; END IF;
+  END IF;
+
+  IF p_activity_id IS NOT NULL THEN
+    SELECT EXISTS(
+      SELECT 1 FROM public.eco_org_economic_activities WHERE organization_id = v_org_id AND activity_id = p_activity_id AND is_active = TRUE
+    ) INTO v_valid;
+    IF NOT v_valid THEN RAISE EXCEPTION 'Activity ID is not assigned to this organization or is inactive'; END IF;
+  END IF;
+
+  WITH updated AS (
+    UPDATE public.eco_normalized_records
+    SET category_id = p_category_id,
+        activity_id = p_activity_id,
+        updated_at = now(),
+        updated_by = v_caller_id
+    WHERE organization_id = v_org_id
+      AND deleted_at IS NULL
+      AND (normalized_payload->>'cuitEmisor' = p_cuit OR normalized_payload->>'cuitReceptor' = p_cuit)
+      AND fecha >= p_date_from
+      AND fecha <= p_date_to
+    RETURNING id
+  )
+  SELECT COUNT(*) INTO v_rows_affected FROM updated;
+
+  IF v_rows_affected > 0 THEN
+    INSERT INTO public.eco_audit_events (organization_id, event_type, details)
+    VALUES (v_org_id, 'BULK_UPDATE_RECORDS_CLASSIFICATION', jsonb_build_object('cuit', p_cuit, 'date_from', p_date_from, 'date_to', p_date_to, 'rows_affected', v_rows_affected));
+  END IF;
+
+  RETURN v_rows_affected;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.bulk_update_record_classification(TEXT, DATE, DATE, UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.bulk_update_record_classification(TEXT, DATE, DATE, UUID, UUID) TO authenticated;
 
 COMMIT;

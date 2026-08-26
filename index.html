@@ -68,7 +68,7 @@
         <ul class="sidebar-nav">
             <li><a class="active-nav" onclick="switchTab('tab-conciliador')">📊 <span class="nav-text">Conciliador CSV</span></a></li>
             <li><a onclick="switchTab('tab-bancos')">🏦 <span class="nav-text">Extracto Bancario</span></a></li>
-            <li><a onclick="switchTab('tab-sueldos')">👥 <span class="nav-text">Sueldos (Acompy)</span></a></li>
+            <li><a onclick="switchTab('tab-sueldos')">👥 <span class="nav-text">Sueldos</span></a></li>
             <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Movimientos Manuales</span></a></li>
             <li><a onclick="switchTab('tab-ajustes-contadora')">⚙️ <span class="nav-text">Ajustes Tributarios</span></a></li>
             <li><a onclick="switchTab('tab-configuracion')">👥 <span class="nav-text">Configuración</span></a></li>
@@ -299,8 +299,8 @@
         <section id="tab-sueldos" class="tab-content hidden">
             <div class="import-section">
                 <div class="drop-zone" id="zone-sueldos" style="border-color: #8b5cf6;">
-                    <h3>Cargar Reporte de Sueldos (Acompy)</h3>
-                    <p>Arrastrá el Excel de Acompy o haz clic para buscar</p>
+                    <h3>Cargar Reporte de Sueldos</h3>
+                    <p>Arrastrá el Excel o haz clic para buscar</p>
                     <input type="file" id="file-sueldos" accept=".xlsx,.xls">
                 </div>
             </div>
@@ -311,7 +311,7 @@
                     <h3>Datos Consolidados del Reporte</h3>
                     <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
                         <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
-                            <span>Sueldo Bruto (Total Remunerativo)</span>
+                            <span>Sueldo Bruto</span>
                             <strong id="lbl-sueldo-bruto">$ 0,00</strong>
                         </div>
                         <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
@@ -359,19 +359,19 @@
                     </div>
                 </div>
 
-                <!-- DETALLE DE LIQUIDACIÓN IMPORTADA ACOMPY -->
-                <div class="card" style="grid-column: span 3; margin-top: 16px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                        <div>
-                            <h3 style="margin: 0;">Detalle de Liquidación Importada (ACOMPY)</h3>
+                <!-- DETALLE DE LIQUIDACIÓN IMPORTADA -->
+                <div class="card fade-in">
+                    <div class="card-header" style="justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <h3 style="margin: 0;">Detalle de Liquidación Importada</h3>
                             <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">Desglose de conceptos de la nómina procesada.</p>
                         </div>
                         <div id="salary-source-badge" style="font-size: 12px; font-weight: 600; background: rgba(139, 92, 246, 0.15); color: #7c3aed; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.3);">
-                            Fuente: ACOMPY | Período: Sin Cargar
+                            Fuente: PAYROLL | Período: Sin Cargar
                         </div>
                     </div>
                     <div id="salary-detail-container" style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px; border: 1px dashed var(--border-color); border-radius: 6px;">
-                        Aún no se ha importado reporte de sueldos Acompy para este período.
+                        Aún no se ha importado reporte de sueldos para este período.
                     </div>
                 </div>
                 <button class="btn-primary" id="btn-save-payroll" style="width: 100%; margin-top: 16px;">✓ Confirmar y Liquidar Período</button>

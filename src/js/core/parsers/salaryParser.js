@@ -117,7 +117,7 @@ export function parseSalaryRows(rows, context = {}) {
     const faecys = mapping.faecys !== undefined ? parseNumberSafe(row[mapping.faecys]) : 0;
     const sueldoNeto = mapping.sueldoNeto !== undefined ? parseNumberSafe(row[mapping.sueldoNeto]) : 0;
 
-    const sueldoBrutoCalculado = remunerativo + noRemunerativo + anticipoSueldo;
+    const sueldoBrutoCalculado = remunerativo + noRemunerativo;
     const aporteSindicalCalculado = aporteSindicalObligatorio + faecys;
 
     results.push({
@@ -139,7 +139,7 @@ export function parseSalaryRows(rows, context = {}) {
             sueldoBruto: sueldoBrutoCalculado,
             anticipos: anticipoSueldo,
             sindicatoAporte: aporteSindicalCalculado,
-            fuente: 'ACOMPY',
+            fuente: 'PAYROLL',
             tipo: 'sueldo'
         },
         batchId

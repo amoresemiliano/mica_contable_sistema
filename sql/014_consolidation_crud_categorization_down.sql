@@ -10,6 +10,8 @@ DROP FUNCTION IF EXISTS public.assign_tax_category_to_org(UUID, TEXT);
 DROP FUNCTION IF EXISTS public.update_global_tax_category(UUID, TEXT, TEXT, BOOLEAN);
 DROP FUNCTION IF EXISTS public.create_global_tax_category(TEXT, TEXT, TEXT);
 
+DROP FUNCTION IF EXISTS public.bulk_update_record_classification(TEXT, DATE, DATE, UUID, UUID);
+
 DROP FUNCTION IF EXISTS public.update_movement_classification(UUID, UUID, UUID);
 DROP FUNCTION IF EXISTS public.update_record_classification(UUID, UUID, UUID);
 
@@ -68,6 +70,7 @@ ALTER TABLE public.eco_normalized_records
   DROP COLUMN IF EXISTS deleted_at,
   DROP COLUMN IF EXISTS legacy_categoria_text;
 
+DROP TABLE IF EXISTS public.eco_org_activity_iibb_rates;
 DROP TABLE IF EXISTS public.eco_org_tax_categories;
 DROP TABLE IF EXISTS public.eco_org_economic_activities;
 DROP TABLE IF EXISTS public.eco_tax_categories;

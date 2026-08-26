@@ -311,7 +311,7 @@ describe('First Real Import - Fase 1', () => {
         expect(norm.sueldoNeto).toBe(496000);
         expect(norm.sueldoBrutoCalculado).toBe(620000);
         expect(norm.sueldoBruto).toBe(620000);
-        expect(norm.fuente).toBe('ACOMPY');
+        expect(norm.fuente).toBe('PAYROLL');
     });
 
     test('N. Percepciones IVA XLS parsea CUIT, fecha, certificado y monto correctamente', () => {
