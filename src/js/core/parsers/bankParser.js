@@ -49,11 +49,11 @@ export function parseBankRows(rows, context = {}) {
             if (mapping.concepto === undefined) mapping.concepto = idx;
         }
         else if (clean.includes('detalle')) mapping.detalle = idx;
-        else if (clean === 'referencia' || clean === 'ref.') mapping.referencia = idx;
+        else if (clean === 'referencia' || clean === 'ref.' || clean.includes('referencia')) mapping.referencia = idx;
         else if (clean.includes('importe') || clean.includes('monto')) mapping.importe = idx;
         else if (clean.includes('debito') || clean.includes('egreso') || clean.includes('salida')) mapping.debito = idx;
         else if (clean.includes('credito') || clean.includes('ingreso') || clean.includes('entrada')) mapping.credito = idx;
-        else if (clean === 'saldo') mapping.saldo = idx;
+        else if (clean === 'saldo' || clean.includes('saldo')) mapping.saldo = idx;
     });
 
     const checkStrictNumber = (val) => {
