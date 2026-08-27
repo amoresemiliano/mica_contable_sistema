@@ -12,6 +12,11 @@ DROP FUNCTION IF EXISTS public.create_global_tax_category(TEXT, TEXT, TEXT);
 
 DROP FUNCTION IF EXISTS public.bulk_update_record_classification(TEXT, DATE, DATE, UUID, UUID);
 
+DROP FUNCTION IF EXISTS public.get_active_org_iibb_rates();
+DROP FUNCTION IF EXISTS public.create_org_activity_iibb_rate(UUID, TEXT, NUMERIC, DATE, DATE);
+DROP FUNCTION IF EXISTS public.update_org_activity_iibb_rate(UUID, NUMERIC, DATE, DATE, BOOLEAN);
+DROP FUNCTION IF EXISTS public.upsert_arca_activity_catalog(JSONB);
+
 DROP FUNCTION IF EXISTS public.update_movement_classification(UUID, UUID, UUID);
 DROP FUNCTION IF EXISTS public.update_record_classification(UUID, UUID, UUID);
 

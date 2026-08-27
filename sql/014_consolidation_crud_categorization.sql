@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.eco_org_tax_categories (
 CREATE TABLE IF NOT EXISTS public.eco_economic_activities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
-  arca_code TEXT,
+  arca_code TEXT UNIQUE,
   description TEXT,
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -796,5 +796,206 @@ END;
 $$;
 REVOKE ALL ON FUNCTION public.bulk_update_record_classification(TEXT, DATE, DATE, UUID, UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.bulk_update_record_classification(TEXT, DATE, DATE, UUID, UUID) TO authenticated;
+
+-- ============================================================
+-- 6. IIBB RATES (ORG-SPECIFIC) CRUD
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.get_active_org_iibb_rates()
+RETURNS SETOF public.eco_org_activity_iibb_rates
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO ''
+AS $$
+  SELECT *
+  FROM public.eco_org_activity_iibb_rates
+  WHERE organization_id = private.org_id()
+    AND is_active = TRUE;
+$$;
+REVOKE ALL ON FUNCTION public.get_active_org_iibb_rates() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_active_org_iibb_rates() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.create_org_activity_iibb_rate(
+  p_activity_id UUID,
+  p_jurisdiction TEXT,
+  p_rate NUMERIC(5,2),
+  p_valid_from DATE DEFAULT NULL,
+  p_valid_to DATE DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO ''
+AS $$
+DECLARE
+  v_org_id UUID;
+  v_caller_role TEXT;
+  v_rate_id UUID;
+  v_valid BOOLEAN;
+BEGIN
+  v_org_id := private.org_id();
+  v_caller_role := private.func_role();
+  
+  IF v_org_id IS NULL THEN RAISE EXCEPTION 'Unauthorized: Invalid organization'; END IF;
+  IF v_caller_role != 'ADMIN' THEN RAISE EXCEPTION 'Unauthorized: ADMIN role required'; END IF;
+
+  IF p_rate < 0 THEN RAISE EXCEPTION 'Rate must be >= 0'; END IF;
+  IF p_valid_from IS NOT NULL AND p_valid_to IS NOT NULL AND p_valid_from > p_valid_to THEN
+    RAISE EXCEPTION 'valid_from must be <= valid_to';
+  END IF;
+
+  SELECT EXISTS(
+    SELECT 1 FROM public.eco_org_economic_activities 
+    WHERE organization_id = v_org_id AND activity_id = p_activity_id AND is_active = TRUE
+  ) INTO v_valid;
+  IF NOT v_valid THEN RAISE EXCEPTION 'Activity ID is not assigned to this organization or is inactive'; END IF;
+
+  SELECT EXISTS(
+    SELECT 1 FROM public.eco_org_activity_iibb_rates
+    WHERE organization_id = v_org_id 
+      AND activity_id = p_activity_id 
+      AND jurisdiction = p_jurisdiction 
+      AND is_active = TRUE
+      AND (
+        (p_valid_from IS NULL AND valid_to IS NULL) OR
+        (p_valid_from IS NOT NULL AND valid_to IS NULL AND p_valid_from >= COALESCE(valid_from, '1900-01-01'::date)) OR
+        (p_valid_to IS NOT NULL AND valid_from IS NULL AND p_valid_to <= COALESCE(valid_to, '2100-01-01'::date)) OR
+        (p_valid_from IS NOT NULL AND p_valid_to IS NOT NULL AND p_valid_from <= COALESCE(valid_to, '2100-01-01'::date) AND p_valid_to >= COALESCE(valid_from, '1900-01-01'::date))
+      )
+  ) INTO v_valid;
+  IF v_valid THEN RAISE EXCEPTION 'Conflicting active period for the same organization, activity, and jurisdiction'; END IF;
+
+  INSERT INTO public.eco_org_activity_iibb_rates (
+    organization_id, activity_id, jurisdiction, rate, valid_from, valid_to
+  ) VALUES (
+    v_org_id, p_activity_id, p_jurisdiction, p_rate, p_valid_from, p_valid_to
+  ) RETURNING id INTO v_rate_id;
+
+  INSERT INTO public.eco_audit_events (organization_id, event_type, details)
+  VALUES (v_org_id, 'IIBB_RATE_CREATED', jsonb_build_object('rate_id', v_rate_id, 'activity_id', p_activity_id, 'jurisdiction', p_jurisdiction));
+
+  RETURN v_rate_id;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.create_org_activity_iibb_rate(UUID, TEXT, NUMERIC, DATE, DATE) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.create_org_activity_iibb_rate(UUID, TEXT, NUMERIC, DATE, DATE) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.update_org_activity_iibb_rate(
+  p_rate_id UUID,
+  p_rate NUMERIC(5,2),
+  p_valid_from DATE DEFAULT NULL,
+  p_valid_to DATE DEFAULT NULL,
+  p_is_active BOOLEAN DEFAULT TRUE
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO ''
+AS $$
+DECLARE
+  v_org_id UUID;
+  v_caller_role TEXT;
+  v_activity_id UUID;
+  v_jurisdiction TEXT;
+  v_valid BOOLEAN;
+BEGIN
+  v_org_id := private.org_id();
+  v_caller_role := private.func_role();
+  
+  IF v_org_id IS NULL THEN RAISE EXCEPTION 'Unauthorized: Invalid organization'; END IF;
+  IF v_caller_role != 'ADMIN' THEN RAISE EXCEPTION 'Unauthorized: ADMIN role required'; END IF;
+
+  IF p_rate < 0 THEN RAISE EXCEPTION 'Rate must be >= 0'; END IF;
+  IF p_valid_from IS NOT NULL AND p_valid_to IS NOT NULL AND p_valid_from > p_valid_to THEN
+    RAISE EXCEPTION 'valid_from must be <= valid_to';
+  END IF;
+
+  SELECT activity_id, jurisdiction INTO v_activity_id, v_jurisdiction
+  FROM public.eco_org_activity_iibb_rates
+  WHERE id = p_rate_id AND organization_id = v_org_id;
+
+  IF NOT FOUND THEN RAISE EXCEPTION 'Rate not found or unauthorized'; END IF;
+
+  IF p_is_active THEN
+    SELECT EXISTS(
+      SELECT 1 FROM public.eco_org_activity_iibb_rates
+      WHERE organization_id = v_org_id 
+        AND activity_id = v_activity_id 
+        AND jurisdiction = v_jurisdiction 
+        AND is_active = TRUE
+        AND id != p_rate_id
+        AND (
+          (p_valid_from IS NULL AND valid_to IS NULL) OR
+          (p_valid_from IS NOT NULL AND valid_to IS NULL AND p_valid_from >= COALESCE(valid_from, '1900-01-01'::date)) OR
+          (p_valid_to IS NOT NULL AND valid_from IS NULL AND p_valid_to <= COALESCE(valid_to, '2100-01-01'::date)) OR
+          (p_valid_from IS NOT NULL AND p_valid_to IS NOT NULL AND p_valid_from <= COALESCE(valid_to, '2100-01-01'::date) AND p_valid_to >= COALESCE(valid_from, '1900-01-01'::date))
+        )
+    ) INTO v_valid;
+    IF v_valid THEN RAISE EXCEPTION 'Conflicting active period for the same organization, activity, and jurisdiction'; END IF;
+  END IF;
+
+  UPDATE public.eco_org_activity_iibb_rates
+  SET rate = p_rate,
+      valid_from = p_valid_from,
+      valid_to = p_valid_to,
+      is_active = p_is_active,
+      updated_at = now()
+  WHERE id = p_rate_id AND organization_id = v_org_id;
+
+  INSERT INTO public.eco_audit_events (organization_id, event_type, details)
+  VALUES (v_org_id, 'IIBB_RATE_UPDATED', jsonb_build_object('rate_id', p_rate_id, 'is_active', p_is_active));
+END;
+$$;
+REVOKE ALL ON FUNCTION public.update_org_activity_iibb_rate(UUID, NUMERIC, DATE, DATE, BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.update_org_activity_iibb_rate(UUID, NUMERIC, DATE, DATE, BOOLEAN) TO authenticated;
+
+-- ============================================================
+-- 7. ARCA CATALOG UPSERT
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.upsert_arca_activity_catalog(
+  p_activities JSONB
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO ''
+AS $$
+DECLARE
+  v_org_id UUID;
+  v_caller_role TEXT;
+  v_act JSONB;
+BEGIN
+  v_org_id := private.org_id();
+  v_caller_role := private.func_role();
+  
+  IF v_org_id IS NULL THEN RAISE EXCEPTION 'Unauthorized: Invalid organization'; END IF;
+  IF v_caller_role != 'ADMIN' THEN RAISE EXCEPTION 'Unauthorized: ADMIN role required'; END IF;
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Unauthorized: Must be authenticated'; END IF;
+
+  FOR v_act IN SELECT * FROM jsonb_array_elements(p_activities)
+  LOOP
+    IF v_act->>'arca_code' IS NULL OR v_act->>'name' IS NULL THEN
+      RAISE EXCEPTION 'Invalid activity format: arca_code and name are required';
+    END IF;
+
+    INSERT INTO public.eco_economic_activities (name, arca_code, description, is_active)
+    VALUES (
+      v_act->>'name', 
+      v_act->>'arca_code', 
+      v_act->>'description', 
+      COALESCE((v_act->>'is_active')::BOOLEAN, TRUE)
+    )
+    ON CONFLICT (arca_code) DO UPDATE
+    SET name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        is_active = EXCLUDED.is_active,
+        updated_at = now();
+  END LOOP;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.upsert_arca_activity_catalog(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.upsert_arca_activity_catalog(JSONB) TO authenticated;
 
 COMMIT;
