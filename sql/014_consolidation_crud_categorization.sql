@@ -841,6 +841,10 @@ BEGIN
   IF v_caller_role != 'ADMIN' THEN RAISE EXCEPTION 'Unauthorized: ADMIN role required'; END IF;
 
   IF p_rate < 0 THEN RAISE EXCEPTION 'Rate must be >= 0'; END IF;
+  
+  p_jurisdiction := TRIM(p_jurisdiction);
+  IF p_jurisdiction = '' THEN RAISE EXCEPTION 'Jurisdiction cannot be empty'; END IF;
+
   IF p_valid_from IS NOT NULL AND p_valid_to IS NOT NULL AND p_valid_from > p_valid_to THEN
     RAISE EXCEPTION 'valid_from must be <= valid_to';
   END IF;
@@ -857,12 +861,8 @@ BEGIN
       AND activity_id = p_activity_id 
       AND jurisdiction = p_jurisdiction 
       AND is_active = TRUE
-      AND (
-        (p_valid_from IS NULL AND valid_to IS NULL) OR
-        (p_valid_from IS NOT NULL AND valid_to IS NULL AND p_valid_from >= COALESCE(valid_from, '1900-01-01'::date)) OR
-        (p_valid_to IS NOT NULL AND valid_from IS NULL AND p_valid_to <= COALESCE(valid_to, '2100-01-01'::date)) OR
-        (p_valid_from IS NOT NULL AND p_valid_to IS NOT NULL AND p_valid_from <= COALESCE(valid_to, '2100-01-01'::date) AND p_valid_to >= COALESCE(valid_from, '1900-01-01'::date))
-      )
+      AND COALESCE(p_valid_from, '-infinity'::date) <= COALESCE(valid_to, 'infinity'::date)
+      AND COALESCE(p_valid_to, 'infinity'::date) >= COALESCE(valid_from, '-infinity'::date)
   ) INTO v_valid;
   IF v_valid THEN RAISE EXCEPTION 'Conflicting active period for the same organization, activity, and jurisdiction'; END IF;
 
@@ -925,12 +925,8 @@ BEGIN
         AND jurisdiction = v_jurisdiction 
         AND is_active = TRUE
         AND id != p_rate_id
-        AND (
-          (p_valid_from IS NULL AND valid_to IS NULL) OR
-          (p_valid_from IS NOT NULL AND valid_to IS NULL AND p_valid_from >= COALESCE(valid_from, '1900-01-01'::date)) OR
-          (p_valid_to IS NOT NULL AND valid_from IS NULL AND p_valid_to <= COALESCE(valid_to, '2100-01-01'::date)) OR
-          (p_valid_from IS NOT NULL AND p_valid_to IS NOT NULL AND p_valid_from <= COALESCE(valid_to, '2100-01-01'::date) AND p_valid_to >= COALESCE(valid_from, '1900-01-01'::date))
-        )
+        AND COALESCE(p_valid_from, '-infinity'::date) <= COALESCE(valid_to, 'infinity'::date)
+        AND COALESCE(p_valid_to, 'infinity'::date) >= COALESCE(valid_from, '-infinity'::date)
     ) INTO v_valid;
     IF v_valid THEN RAISE EXCEPTION 'Conflicting active period for the same organization, activity, and jurisdiction'; END IF;
   END IF;

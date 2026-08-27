@@ -41,4 +41,20 @@ BEGIN;
 -- 12. IIBB Rates
 -- Insert a rate into eco_org_activity_iibb_rates for an organization and activity. Verify RLS policies prevent access by other organizations.
 
+-- 13. IIBB Range Regression Matrix
+-- 1. closed overlapping closed => REJECT
+-- 2. closed adjacent/non-overlapping closed => ACCEPT
+-- 3. old closed + future open => ACCEPT
+-- 4. future open + past closed => ACCEPT
+-- 5. open-start ending before existing begins => ACCEPT
+-- 6. open-end beginning after existing ends => ACCEPT
+-- 7. open-start overlapping existing => REJECT
+-- 8. open-end overlapping existing => REJECT
+-- 9. fully open + any active same org/activity/jurisdiction => REJECT
+-- 10. inactive historical rate does not block new active rate
+-- 11. update excludes itself
+-- 12. different jurisdiction does not conflict
+-- 13. different activity does not conflict
+-- 14. different organization does not conflict
+
 ROLLBACK;
