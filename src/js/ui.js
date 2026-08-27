@@ -233,19 +233,34 @@ export function switchTab(tabId) {
     if (activeMobileNav) activeMobileNav.classList.add('active-mobile-nav');
 
     const titleElement = document.getElementById('page-title');
-    if (tabId === 'tab-conciliador') titleElement.innerText = "Conciliador CSV (Operaciones)";
+    if (tabId === 'tab-conciliador') {
+        titleElement.innerText = "Comprobantes (Compras y Ventas)";
+        if (appStore.loadImportIssues) appStore.loadImportIssues();
+        if (appStore.taxCategories.length === 0 && appStore.loadTaxCategories) appStore.loadTaxCategories();
+        if (appStore.economicActivities.length === 0 && appStore.loadEconomicActivities) appStore.loadEconomicActivities();
+    }
+    else if (tabId === 'tab-percepciones') {
+        titleElement.innerText = "Percepciones (Retenciones)";
+    }
     else if (tabId === 'tab-bancos') {
-        titleElement.innerText = "Extracto Bancario (Finanzas)";
-        renderBancosGrid();
+        titleElement.innerText = "Extractos Bancarios";
+        if (appStore.taxCategories.length === 0 && appStore.loadTaxCategories) appStore.loadTaxCategories();
+        if (appStore.economicActivities.length === 0 && appStore.loadEconomicActivities) appStore.loadEconomicActivities();
+        UIManager.renderBancosGrid();
     }
     else if (tabId === 'tab-sueldos') {
-        titleElement.innerText = "Liquidación de Sueldos (Acompy)";
+        titleElement.innerText = "Liquidación de Sueldos";
         updateSalaryFormFields();
     }
     else if (tabId === 'tab-movimientos-manuales') {
         titleElement.innerText = "Registrar Movimientos Manuales";
     }
-    else if (tabId === 'tab-ajustes-contadora') titleElement.innerText = "Ajustes Tributarios (Contadora)";
+    else if (tabId === 'tab-categorizacion') {
+        titleElement.innerText = "Categorización (Catálogos y Tasas)";
+        if (appStore.loadTaxCategories) appStore.loadTaxCategories();
+        if (appStore.loadEconomicActivities) appStore.loadEconomicActivities();
+        if (appStore.loadIibbRates) appStore.loadIibbRates();
+    }
     else if (tabId === 'tab-configuracion') titleElement.innerText = "Configuración del Sistema";
     else if (tabId === 'tab-client-dashboard') {
         titleElement.innerText = "Panel Gerencial (Dashboard)";
@@ -1446,31 +1461,60 @@ export class UIManager {
         const tbody = document.getElementById('table-bancos-body');
         if (!tbody) return;
 
-        const transactions = appStore.bankTransactions || [];
+        let transactions = appStore.bankTransactions || [];
+        
+        if (appStore.currentBankFilter !== 'all') {
+            transactions = transactions.filter(t => t.tipo === appStore.currentBankFilter);
+        }
+
         if (transactions.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
                         No hay extractos bancarios procesados para este período.
                     </td>
                 </tr>`;
             return;
         }
 
+        const taxCategoriesHTML = `
+            <option value="">-- Seleccionar Categoría --</option>
+            ${(appStore.taxCategories || []).map(cat => `
+                <option value="${cat.id}">${cat.name}</option>
+            `).join('')}
+        `;
+
+        const activitiesHTML = `
+            <option value="">-- Seleccionar Actividad --</option>
+            ${(appStore.economicActivities || []).map(act => `
+                <option value="${act.id}">${act.arca_activity_code} - ${act.name}</option>
+            `).join('')}
+        `;
+
         tbody.innerHTML = transactions.map(t => {
             const isDebit = t.tipo === 'debit';
-            const badgeClass = isDebit ? 'badge-recibido' : 'badge-emitido';
+            const badgeClass = isDebit ? 'badge-emitido' : 'badge-recibido'; // Debit is usually red, credit is green
             const badgeText = isDebit ? 'DÉBITO' : 'CRÉDITO';
             const montoVal = (t.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
 
             return `
-                <tr>
+                <tr data-item-id="${t.id}">
+                    <td><input type="checkbox" class="banco-checkbox" value="${t.id}" onchange="appStore.updateBankBulkSelectionBar()"></td>
                     <td data-label="Fecha">${t.fecha}</td>
                     <td data-label="Descripción"><strong>${t.descripcion}</strong></td>
                     <td data-label="Importe" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
                     <td data-label="Tipo"><span class="badge ${badgeClass}">${badgeText}</span></td>
-                    <td data-label="Estado"><span style="color: var(--text-muted); font-size: 11px;">Pendiente</span></td>
-                    <td data-label="Acción"><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Conciliar</button></td>
+                    <td data-label="Categoría Tributaria">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankCategory('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
+                            ${taxCategoriesHTML.replace(`value="${t.category_id || ''}"`, `value="${t.category_id || ''}" selected`)}
+                        </select>
+                    </td>
+                    <td data-label="Actividad">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankActivity('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
+                            ${activitiesHTML.replace(`value="${t.activity_id || ''}"`, `value="${t.activity_id || ''}" selected`)}
+                        </select>
+                    </td>
+                    <td data-label="Estado">${t.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
                 </tr>
             `;
         }).join('');
@@ -1485,68 +1529,220 @@ export class UIManager {
         if (items.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                    <td colspan="16" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                         Ningún comprobante coincide con los filtros aplicados.
                     </td>
                 </tr>`;
             return;
         }
 
+        const taxCategoriesHTML = `
+            <option value="">-- Seleccionar Categoría --</option>
+            ${(appStore.taxCategories || []).map(cat => `
+                <option value="${cat.id}">${cat.name}</option>
+            `).join('')}
+        `;
+
+        const activitiesHTML = `
+            <option value="">-- Seleccionar Actividad --</option>
+            ${(appStore.economicActivities || []).map(act => `
+                <option value="${act.id}">${act.arca_activity_code} - ${act.name}</option>
+            `).join('')}
+        `;
+
         tbody.innerHTML = items.map(item => {
             const isRecibido = item.tipo === 'recibido';
             const badgeClass = isRecibido ? 'badge-recibido' : 'badge-emitido';
             const badgeText = isRecibido ? 'Compra' : 'Venta';
-            const categoriesList = isRecibido ? CATEGORIES_RECIBIDOS : CATEGORIES_EMITIDOS;
-
-            const optionsHTML = `
-                <option value="">-- Seleccionar Categoría --</option>
-                ${categoriesList.map(cat => `
-                    <option value="${cat}" ${item.categoria === cat ? 'selected' : ''}>${cat}</option>
-                `).join('')}
-            `;
-
-            const isSuggestedClass = (item.sugerida && !item.confirmada) ? 'suggested' : '';
-            const suggestionIndicator = (item.sugerida && !item.confirmada) 
-                ? `<span class="badge-suggested">Sugerido</span>` 
-                : '';
 
             const confirmButtonHTML = item.confirmada
                 ? `<button class="btn-confirm confirmed" disabled>✓ Confirmado</button>`
-                : `<button class="btn-confirm" onclick="appStore.confirmItem('${item.id}')" ${!item.categoria ? 'disabled' : ''}>✓ Confirmar</button>`;
+                : `<button class="btn-confirm" onclick="appStore.confirmItem('${item.id}')" ${!item.category_id ? 'disabled' : ''}>✓ Confirmar</button>`;
 
-            // Renderizar desglose de percepciones mapeadas
-            let perceptionsHTML = '<span style="color:var(--text-muted);">Sin Desglose</span>';
-            if (item.percepcionesMapeadas && item.percepcionesMapeadas.length > 0) {
-                perceptionsHTML = item.percepcionesMapeadas.map(p => `
-                    <span style="font-size: 11px; display: block;">
-                        <strong>${p.jurisdiction}</strong>: $ ${p.amount.toFixed(2)}
-                    </span>
-                `).join('');
-            } else if (item.otrosTributos > 0) {
-                perceptionsHTML = `<span style="color:var(--warning); font-weight:600;">Otros Trib. $ ${item.otrosTributos.toFixed(2)}</span>`;
-            }
+            const formatMoney = (val) => `$ ${(val || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
 
             return `
-                <tr>
-                    <td data-label="Tipo"><span class="badge ${badgeClass}">${badgeText}</span></td>
+                <tr data-item-id="${item.id}">
+                    <td><input type="checkbox" class="comprobante-checkbox" value="${item.id}" onchange="appStore.updateBulkSelectionBar()"></td>
+                    <td data-label="Origen"><span class="badge ${badgeClass}">${badgeText}</span></td>
                     <td data-label="Fecha">${item.fecha}</td>
                     <td data-label="Comprobante">${item.comprobante}</td>
                     <td data-label="CUIT">${item.cuit}</td>
                     <td data-label="Razón Social"><strong>${item.razonSocial}</strong></td>
-                    <td data-label="Total" style="font-weight: 700;">$ ${item.total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
-                    <td data-label="Desglose Percepciones">${perceptionsHTML}</td>
-                    <td data-label="Categoría">
-                        <div class="category-cell">
-                            <select class="select-category ${isSuggestedClass}" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
-                                ${optionsHTML}
-                            </select>
-                            ${suggestionIndicator}
-                        </div>
+                    <td data-label="Neto Gravado">${formatMoney(item.netoGravado)}</td>
+                    <td data-label="Exentas">${formatMoney(item.exento)}</td>
+                    <td data-label="Otros Tributos">${formatMoney(item.otrosTributos)}</td>
+                    <td data-label="IVA">${formatMoney(item.iva)}</td>
+                    <td data-label="Perc. IVA">${formatMoney(item.percepcionIva || 0)}</td>
+                    <td data-label="Perc. IIBB">${formatMoney(item.percepcionIibb || 0)}</td>
+                    <td data-label="Total" style="font-weight: 700;">${formatMoney(item.total)}</td>
+                    <td data-label="Categoría Tributaria">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
+                            ${taxCategoriesHTML.replace(`value="${item.category_id || ''}"`, `value="${item.category_id || ''}" selected`)}
+                        </select>
                     </td>
-                    <td data-label="Acción">${confirmButtonHTML}</td>
+                    <td data-label="Actividad">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateActivity('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
+                            ${activitiesHTML.replace(`value="${item.activity_id || ''}"`, `value="${item.activity_id || ''}" selected`)}
+                        </select>
+                    </td>
+                    <td data-label="Estado">${item.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
                 </tr>
             `;
         }).join('');
+    }
+
+    static renderBancosGrid() {
+        const tbody = document.getElementById('table-bancos-body');
+        if (!tbody) return;
+
+        let transactions = appStore.bankTransactions || [];
+        
+        if (appStore.currentBankFilter !== 'all') {
+            transactions = transactions.filter(t => t.tipo === appStore.currentBankFilter);
+        }
+
+        if (transactions.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                        No hay extractos bancarios procesados para este período.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        const taxCategoriesHTML = `
+            <option value="">-- Seleccionar Categoría --</option>
+            ${(appStore.taxCategories || []).map(cat => `
+                <option value="${cat.id}">${cat.name}</option>
+            `).join('')}
+        `;
+
+        const activitiesHTML = `
+            <option value="">-- Seleccionar Actividad --</option>
+            ${(appStore.economicActivities || []).map(act => `
+                <option value="${act.id}">${act.arca_activity_code} - ${act.name}</option>
+            `).join('')}
+        `;
+
+        tbody.innerHTML = transactions.map(t => {
+            const isDebit = t.tipo === 'debit';
+            const badgeClass = isDebit ? 'badge-emitido' : 'badge-recibido'; // Debit is usually red, credit is green
+            const badgeText = isDebit ? 'DÉBITO' : 'CRÉDITO';
+            const montoVal = (t.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+
+            return `
+                <tr data-item-id="${t.id}">
+                    <td><input type="checkbox" class="banco-checkbox" value="${t.id}" onchange="appStore.updateBankBulkSelectionBar()"></td>
+                    <td data-label="Fecha">${t.fecha}</td>
+                    <td data-label="Descripción"><strong>${t.descripcion}</strong></td>
+                    <td data-label="Importe" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
+                    <td data-label="Tipo"><span class="badge ${badgeClass}">${badgeText}</span></td>
+                    <td data-label="Categoría Tributaria">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankCategory('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
+                            ${taxCategoriesHTML.replace(`value="${t.category_id || ''}"`, `value="${t.category_id || ''}" selected`)}
+                        </select>
+                    </td>
+                    <td data-label="Actividad">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankActivity('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
+                            ${activitiesHTML.replace(`value="${t.activity_id || ''}"`, `value="${t.activity_id || ''}" selected`)}
+                        </select>
+                    </td>
+                    <td data-label="Estado">${t.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    static renderCategorization() {
+        // Tax Categories
+        const tcTbody = document.getElementById('table-tax-categories-body');
+        if (tcTbody) {
+            const taxCats = appStore.taxCategories || [];
+            if (taxCats.length === 0) {
+                tcTbody.innerHTML = `<tr><td colspan="4" style="text-align: center;">No hay categorías tributarias configuradas.</td></tr>`;
+            } else {
+                tcTbody.innerHTML = taxCats.map(c => `
+                    <tr>
+                        <td><strong>${c.name}</strong></td>
+                        <td>${c.description || '-'}</td>
+                        <td><span style="color:var(--success);">Activo</span></td>
+                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Editar</button></td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // Economic Activities
+        const eaTbody = document.getElementById('table-economic-activities-body');
+        if (eaTbody) {
+            const activities = appStore.economicActivities || [];
+            if (activities.length === 0) {
+                eaTbody.innerHTML = `<tr><td colspan="4" style="text-align: center;">No hay actividades económicas configuradas.</td></tr>`;
+            } else {
+                eaTbody.innerHTML = activities.map(a => `
+                    <tr>
+                        <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">${a.arca_activity_code}</span></td>
+                        <td><strong>${a.name}</strong></td>
+                        <td><span style="color:var(--success);">Activo</span></td>
+                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Editar</button></td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // IIBB Rates
+        const irTbody = document.getElementById('table-iibb-rates-body');
+        if (irTbody) {
+            const rates = appStore.iibbRates || [];
+            if (rates.length === 0) {
+                irTbody.innerHTML = `<tr><td colspan="7" style="text-align: center;">No hay tasas IIBB configuradas.</td></tr>`;
+            } else {
+                irTbody.innerHTML = rates.map(r => `
+                    <tr>
+                        <td>${r.activity_id ? r.activity_id.substring(0,8) : 'General'}</td>
+                        <td>${r.jurisdiction}</td>
+                        <td style="font-weight: 600;">${r.rate_percent}%</td>
+                        <td>${r.valid_from ? new Date(r.valid_from).toLocaleDateString() : '-'}</td>
+                        <td>${r.valid_to ? new Date(r.valid_to).toLocaleDateString() : 'Indefinido'}</td>
+                        <td>${r.is_active ? '<span style="color:var(--success);">Vigente</span>' : '<span style="color:var(--text-muted);">Inactivo</span>'}</td>
+                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Modificar</button></td>
+                    </tr>
+                `).join('');
+            }
+        }
+    }
+
+    static renderImportIssues() {
+        const tbody = document.getElementById('table-import-issues-body');
+        if (!tbody) return;
+
+        const issues = appStore.importIssues || [];
+        if (issues.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--success); padding: 20px;">No se registran errores de importación pendientes.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = issues.map(iss => {
+            return `
+                <tr>
+                    <td><span class="badge badge-emitido">Fila ${iss.source_row_number}</span></td>
+                    <td style="color: var(--danger); font-size: 12px;">${JSON.stringify(iss.errors)}</td>
+                    <td style="font-size: 11px; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${JSON.stringify(iss.raw_row_data)}</td>
+                    <td><span style="color:var(--warning);">Pendiente</span></td>
+                    <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Revisar</button></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    static openModal(modalId) {
+        document.getElementById(modalId)?.classList.remove('hidden');
+    }
+
+    static closeModal(modalId) {
+        document.getElementById(modalId)?.classList.add('hidden');
     }
 }
 
@@ -1555,6 +1751,57 @@ window.switchTab = switchTab;
 window.appStore = appStore;
 window.toggleMobileMoreSheet = toggleMobileMoreSheet;
 window.logout = logout;
+window.UIManager = UIManager;
+
+window.submitIibbRateForm = async () => {
+    const activityId = document.getElementById('iibb-rate-activity').value || null;
+    const jurisdiction = document.getElementById('iibb-rate-jurisdiction').value;
+    const ratePercent = parseFloat(document.getElementById('iibb-rate-percent').value);
+    const validFrom = document.getElementById('iibb-rate-from').value;
+
+    if (!jurisdiction || isNaN(ratePercent) || !validFrom) {
+        alert("Completar todos los campos requeridos.");
+        return;
+    }
+
+    try {
+        await persistenceService.createIibbRate({
+            activity_id: activityId,
+            jurisdiction: jurisdiction,
+            rate_percent: ratePercent,
+            valid_from: validFrom,
+            valid_to: null,
+            is_active: true
+        });
+        alert("Tasa IIBB creada exitosamente.");
+        UIManager.closeModal('modal-iibb-rate');
+        document.getElementById('form-iibb-rate').reset();
+        appStore.loadIibbRates();
+    } catch (e) {
+        alert("Error al crear Tasa IIBB: " + e.message);
+    }
+};
+
+window.submitArcaCatalogForm = async () => {
+    const jsonStr = document.getElementById('arca-catalog-json').value;
+    try {
+        const parsed = JSON.parse(jsonStr);
+        if (!Array.isArray(parsed)) {
+            throw new Error("El JSON debe ser un arreglo de actividades.");
+        }
+        if (parsed.length > 0 && (!parsed[0].arca_activity_code || !parsed[0].name)) {
+            throw new Error("Las actividades deben contener al menos 'arca_activity_code' y 'name'.");
+        }
+
+        await persistenceService.upsertArcaCatalog(parsed);
+        alert("Catálogo ARCA importado con éxito");
+        UIManager.closeModal('modal-arca-catalog');
+        document.getElementById('form-arca-catalog').reset();
+        appStore.loadEconomicActivities();
+    } catch (e) {
+        alert("Error al importar: " + e.message);
+    }
+};
 
 // Suscribirse a los eventos del store para reactividad
 appStore.subscribe(() => {
@@ -1562,7 +1809,9 @@ appStore.subscribe(() => {
     renderClientDashboard();
     renderOcrHistory();
     renderResolucionManual();
-    renderBancosGrid();
+    UIManager.renderBancosGrid();
+    UIManager.renderCategorization();
+    UIManager.renderImportIssues();
 });
 
 // Inicialización de componentes al cargar el documento

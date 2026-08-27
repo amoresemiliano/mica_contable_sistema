@@ -361,6 +361,134 @@ export class PersistenceService {
                 };
             });
     }
+
+    /**
+     * Obtiene registros eliminados lógicamente (Papelera)
+     */
+    async loadDeletedRecords() {
+        const { data, error } = await supabase.rpc('get_deleted_normalized_records');
+        if (error) throw new Error(`Error get_deleted_normalized_records: ${error.message}`);
+        return data || [];
+    }
+
+    /**
+     * Obtiene movimientos financieros eliminados lógicamente (Papelera)
+     */
+    async loadDeletedFinancialMovements() {
+        const { data, error } = await supabase.rpc('get_deleted_financial_movements');
+        if (error) throw new Error(`Error get_deleted_financial_movements: ${error.message}`);
+        return data || [];
+    }
+
+    /**
+     * Soft delete masivo de registros normalizados
+     */
+    async bulkSoftDeleteRecords(recordIds) {
+        if (!recordIds || recordIds.length === 0) return;
+        const { error } = await supabase.rpc('bulk_soft_delete_records', {
+            p_record_ids: recordIds
+        });
+        if (error) throw new Error(`Error bulk_soft_delete_records: ${error.message}`);
+    }
+
+    /**
+     * Restauración masiva de registros normalizados
+     */
+    async bulkRestoreRecords(recordIds) {
+        if (!recordIds || recordIds.length === 0) return;
+        const { error } = await supabase.rpc('bulk_restore_records', {
+            p_record_ids: recordIds
+        });
+        if (error) throw new Error(`Error bulk_restore_records: ${error.message}`);
+    }
+
+    /**
+     * Clasificación masiva
+     */
+    async bulkUpdateRecordClassification(recordIds, cuit, categoryId, activityId = null) {
+        if (!recordIds || recordIds.length === 0) return;
+        const { error } = await supabase.rpc('bulk_update_record_classification', {
+            p_record_ids: recordIds,
+            p_cuit: cuit,
+            p_category_id: categoryId,
+            p_activity_id: activityId
+        });
+        if (error) throw new Error(`Error bulk_update_record_classification: ${error.message}`);
+    }
+
+    /**
+     * Cargar categorías tributarias activas
+     */
+    async loadActiveTaxCategories() {
+        const { data, error } = await supabase.rpc('get_active_tax_categories');
+        if (error) throw new Error(`Error get_active_tax_categories: ${error.message}`);
+        return data || [];
+    }
+
+    /**
+     * Cargar actividades económicas activas
+     */
+    async loadActiveEconomicActivities() {
+        const { data, error } = await supabase.rpc('get_active_economic_activities');
+        if (error) throw new Error(`Error get_active_economic_activities: ${error.message}`);
+        return data || [];
+    }
+
+    /**
+     * Cargar tasas IIBB activas
+     */
+    async loadActiveIibbRates() {
+        const { data, error } = await supabase.rpc('get_active_iibb_rates');
+        if (error) throw new Error(`Error get_active_iibb_rates: ${error.message}`);
+        return data || [];
+    }
+
+    /**
+     * Importar catálogo ARCA
+     */
+    async upsertArcaCatalog(activitiesJson) {
+        const { error } = await supabase.rpc('upsert_arca_activity_catalog', {
+            p_activities: activitiesJson
+        });
+        if (error) throw new Error(`Error upsert_arca_activity_catalog: ${error.message}`);
+    }
+
+    /**
+     * CRUD IIBB Rates (Creation handled via generic insert to eco_org_activity_iibb_rates or via RPC if created, we'll assume direct Supabase table insert/update since RLS handles it, but let's provide wrappers)
+     */
+    async createIibbRate(payload) {
+        const { data, error } = await supabase.rpc('create_org_activity_iibb_rate', {
+            p_activity_id: payload.activity_id,
+            p_jurisdiction: payload.jurisdiction,
+            p_rate: payload.rate_percent,
+            p_valid_from: payload.valid_from,
+            p_valid_to: payload.valid_to
+        });
+        if (error) throw new Error(`Error createIibbRate: ${error.message}`);
+        return data;
+    }
+
+    async updateIibbRate(id, payload) {
+        const { data, error } = await supabase
+            .from('eco_org_activity_iibb_rates')
+            .update(payload)
+            .eq('id', id)
+            .select();
+        if (error) throw new Error(`Error updateIibbRate: ${error.message}`);
+        return data;
+    }
+
+    /**
+     * Cargar errores de importación pendientes
+     */
+    async loadImportIssues() {
+        const { data, error } = await supabase
+            .from('eco_import_issues')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (error) throw new Error(`Error loadImportIssues: ${error.message}`);
+        return data || [];
+    }
 }
 
 export const persistenceService = new PersistenceService();

@@ -64,20 +64,15 @@
             <p>SISTEMA CONTABLE E IMPOSITIVO</p>
         </div>
 
-        <div class="sidebar-section-title">Admin / Contadora</div>
+        <div class="sidebar-section-title">Navegación</div>
         <ul class="sidebar-nav">
-            <li><a class="active-nav" onclick="switchTab('tab-conciliador')">📊 <span class="nav-text">Conciliador CSV</span></a></li>
-            <li><a onclick="switchTab('tab-bancos')">🏦 <span class="nav-text">Extracto Bancario</span></a></li>
+            <li><a class="active-nav" onclick="switchTab('tab-conciliador')">🧾 <span class="nav-text">Comprobantes</span></a></li>
+            <li><a onclick="switchTab('tab-percepciones')">💸 <span class="nav-text">Percepciones</span></a></li>
+            <li><a onclick="switchTab('tab-bancos')">🏦 <span class="nav-text">Extractos</span></a></li>
             <li><a onclick="switchTab('tab-sueldos')">👥 <span class="nav-text">Sueldos</span></a></li>
             <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Movimientos Manuales</span></a></li>
-            <li><a onclick="switchTab('tab-ajustes-contadora')">⚙️ <span class="nav-text">Ajustes Tributarios</span></a></li>
-            <li><a onclick="switchTab('tab-configuracion')">👥 <span class="nav-text">Configuración</span></a></li>
-        </ul>
-
-        <div class="sidebar-section-title">Hub de Clientes</div>
-        <ul class="sidebar-nav">
-            <li><a onclick="switchTab('tab-client-dashboard')">🏠 <span class="nav-text">Panel Gerencial</span></a></li>
-            <li><a onclick="switchTab('tab-client-ocr')">📷 <span class="nav-text">Cargar Documentos</span></a></li>
+            <li><a onclick="switchTab('tab-categorizacion')">🏷️ <span class="nav-text">Categorización</span></a></li>
+            <li><a onclick="switchTab('tab-configuracion')">⚙️ <span class="nav-text">Configuración</span></a></li>
         </ul>
 
         <div style="margin-top: auto; padding: 16px 24px; border-top: 1px solid #1e293b;" class="sidebar-footer">
@@ -114,12 +109,6 @@
                     <p>Arrastrá el CSV de ARCA o hacé clic para buscar</p>
                     <input type="file" id="file-emitidos" accept=".csv">
                 </div>
-                <!-- Carga de Percepciones Provinciales -->
-                <div class="drop-zone" id="zone-percepciones" style="border-color: #38bdf8;">
-                    <h3>Percepciones Provinciales y Nacionales</h3>
-                    <p>Subir percepciones (ARBA TXT / IVA XLS)</p>
-                    <input type="file" id="file-percepciones" accept=".csv,.txt,.xls,.xlsx">
-                </div>
             </div>
 
             <!-- Panel de Resolución Manual de Descuadres ("Otros Tributos") -->
@@ -145,6 +134,32 @@
                 </div>
             </div>
 
+            <!-- Panel de Import Issues -->
+            <div class="card hidden" id="card-import-issues" style="margin-bottom: 24px; border-color: var(--error);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3 style="color: var(--error); margin: 0;">❌ Errores de Importación (Issues)</h3>
+                    <button class="btn-secondary" onclick="appStore.resolveAllImportIssues()">Marcar todos como resueltos</button>
+                </div>
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Los siguientes registros fallaron durante la importación y requieren atención manual.</p>
+                <div class="data-table-container" style="max-height: 250px; overflow-y: auto;">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Archivo</th>
+                                <th>Fila</th>
+                                <th>Error</th>
+                                <th>Datos Crudos</th>
+                                <th>Estado</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-import-issues-body">
+                            <!-- Inyectado dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="controls-row">
                 <div class="filter-buttons desktop-filter-buttons">
                     <button class="btn-filter active" onclick="appStore.setFilter('all')">Todos</button>
@@ -163,29 +178,60 @@
                 <input type="text" class="search-input" id="search-box" placeholder="Buscar por CUIT, Razón Social..." oninput="appStore.setSearch(this.value)">
             </div>
 
+            <!-- Acciones por lote (Bulk Actions) -->
+            <div id="bulk-actions-bar" class="card hidden" style="margin-bottom: 12px; padding: 12px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-hover);">
+                <div>
+                    <span id="bulk-selection-count" style="font-weight: 600; color: var(--primary);">0 seleccionados</span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn-secondary" onclick="appStore.bulkSoftDeleteSelected()">🗑️ Eliminar</button>
+                    <button class="btn-primary" onclick="appStore.promptBulkClassification()">🏷️ Clasificar a mismo proveedor (CUIT)</button>
+                </div>
+            </div>
+
             <div class="data-table-container">
                 <table>
                     <thead>
                         <tr>
+                            <th><input type="checkbox" id="check-all-comprobantes" onclick="appStore.toggleSelectAllComprobantes(this)"></th>
                             <th>Origen</th>
                             <th>Fecha</th>
                             <th>Comprobante</th>
                             <th>CUIT</th>
                             <th>Razón Social</th>
+                            <th>Neto Gravado</th>
+                            <th>Exentas</th>
+                            <th>Otros Tributos</th>
+                            <th>IVA</th>
+                            <th>Perc. IVA</th>
+                            <th>Perc. IIBB</th>
                             <th>Total</th>
-                            <th>Desglose Percepciones</th>
                             <th>Categoría Tributaria</th>
+                            <th>Actividad</th>
                             <th>Estado</th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
                         <tr>
-                            <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                            <td colspan="16" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                                 Aún no se han importado archivos CSV de ARCA para este período.
                             </td>
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+        </section>
+
+        <!-- SECCIÓN 1.B: PERCEPCIONES -->
+        <section id="tab-percepciones" class="tab-content hidden">
+            <div class="import-section">
+                <!-- Carga de Percepciones Provinciales -->
+                <div class="drop-zone" id="zone-percepciones" style="border-color: #38bdf8;">
+                    <h3>Percepciones Provinciales y Nacionales</h3>
+                    <p>Subir percepciones (ARBA TXT / IVA XLS)</p>
+                    <input type="file" id="file-percepciones" accept=".csv,.txt,.xls,.xlsx">
+                </div>
             </div>
 
             <!-- BANDEJA DE PERCEPCIONES INCORPORADAS -->
@@ -242,25 +288,55 @@
                 </div>
             </div>
 
-            <div class="grid-inputs">
+            <div class="grid-inputs" style="display: block;">
                 <!-- Panel de Verificación de Movimientos -->
-                <div class="card" style="grid-column: span 2;">
-                    <h3>Bandeja de Conciliación Bancaria</h3>
+                <div class="card" style="margin-bottom: 24px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                        <h3>Extractos Bancarios</h3>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button class="btn-secondary" onclick="appStore.exportBankMovements()">📥 Exportar a Excel</button>
+                        </div>
+                    </div>
+                    
+                    <div class="controls-row" style="margin-bottom: 12px; display: flex; gap: 12px; flex-wrap: wrap;">
+                        <div class="filter-buttons desktop-filter-buttons">
+                            <button class="btn-filter active" onclick="appStore.setBankFilter('all')">Todos</button>
+                            <button class="btn-filter" onclick="appStore.setBankFilter('pending')">Sin Categorizar</button>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="date" id="bank-filter-date-from" class="form-control" onchange="appStore.applyBankDateFilters()" style="width: auto;">
+                            <span style="font-size: 13px; color: var(--text-muted);">hasta</span>
+                            <input type="date" id="bank-filter-date-to" class="form-control" onchange="appStore.applyBankDateFilters()" style="width: auto;">
+                        </div>
+                    </div>
+
+                    <!-- Acciones por lote (Bulk Actions) -->
+                    <div id="bank-bulk-actions-bar" class="card hidden" style="margin-bottom: 12px; padding: 12px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-hover);">
+                        <div>
+                            <span id="bank-bulk-selection-count" style="font-weight: 600; color: var(--primary);">0 seleccionados</span>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn-secondary" onclick="appStore.bulkSoftDeleteBankMovements()">🗑️ Eliminar</button>
+                            <button class="btn-primary" onclick="appStore.promptBankBulkClassification()">🏷️ Clasificar (Categoría Tributaria)</button>
+                        </div>
+                    </div>
+
                     <div class="data-table-container" style="max-height: 400px; overflow-y: auto;">
                         <table class="simple-table">
                             <thead>
                                 <tr>
+                                    <th><input type="checkbox" id="check-all-bancos" onclick="appStore.toggleSelectAllBankMovements(this)"></th>
                                     <th>Fecha</th>
                                     <th>Descripción / Concepto</th>
                                     <th>Importe</th>
                                     <th>Tipo</th>
-                                    <th>Clasificación / Cuenta</th>
+                                    <th>Clasificación / Categoría</th>
                                     <th>Acción</th>
                                 </tr>
                             </thead>
                             <tbody id="table-bancos-body">
                                 <tr>
-                                    <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
                                         No hay extractos bancarios procesados para este período.
                                     </td>
                                 </tr>
@@ -286,8 +362,10 @@
                             <input type="text" id="rule-pattern" class="form-control" placeholder="Ej: EDESUR, MERCADOPAGO">
                         </div>
                         <div class="form-group">
-                            <label>Cuenta / Categoría Destino</label>
-                            <input type="text" id="rule-category" class="form-control" placeholder="Ej: Servicios Públicos, Ventas">
+                            <label>Categoría Tributaria Destino</label>
+                            <select id="rule-category" class="form-control">
+                                <option value="">Seleccione Categoría Tributaria</option>
+                            </select>
                         </div>
                         <button class="btn-primary" id="btn-add-rule" style="margin-top: 8px;">Agregar Regla</button>
                     </div>
@@ -513,65 +591,84 @@
             </div>
         </section>
 
-        <!-- SECCIÓN 5: AJUSTES TRIBUTARIOS (CONTADORA) -->
-        <section id="tab-ajustes-contadora" class="tab-content hidden">
+        <!-- SECCIÓN 5: CATEGORIZACIÓN -->
+        <section id="tab-categorizacion" class="tab-content hidden">
+            <!-- A. Categorías Tributarias -->
             <div class="card">
-                <h3>Parámetros de Liquidación de Impuestos</h3>
-                <div class="grid-inputs">
-                    <div class="form-group">
-                        <label>Alícuota IVA General (%)</label>
-                        <input type="number" class="form-control" id="tax-iva-general" value="21">
-                    </div>
-                    <div class="form-group">
-                        <label>Alícuota IVA Reducido (%)</label>
-                        <input type="number" class="form-control" id="tax-iva-reducido" value="10.5">
-                    </div>
-                    <div class="form-group">
-                        <label>Alícuota IIBB ARBA (Prov. Bs As %)</label>
-                        <input type="number" class="form-control" id="tax-iibb-arba" value="3.5">
-                    </div>
-                    <div class="form-group">
-                        <label>Alícuota IIBB AGIP (CABA %)</label>
-                        <input type="number" class="form-control" id="tax-iibb-agip" value="3.0">
-                    </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3>Categorías Tributarias</h3>
+                    <button class="btn-secondary" onclick="appStore.loadTaxCategories()">🔄 Actualizar</button>
                 </div>
-                <button class="btn-primary" onclick="alert('Parámetros guardados y actualizados para el cálculo de reportes.')">Guardar Configuración Impositiva</button>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Asignación de categorías globales a la organización.</p>
+                <div class="data-table-container">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Descripción</th>
+                                <th>Estado en Org.</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-tax-categories-body">
+                            <tr><td colspan="4" style="text-align: center;">Cargando categorías...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
-            <div class="card">
-                <h3>Reglas de Deducción (Caja Gris de Vinculación)</h3>
-                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Definición de qué porcentaje de cada gasto es computable para Ganancias y el Impuesto sobre los Débitos y Créditos Bancarios.</p>
-                <table class="simple-table">
-                    <thead>
-                        <tr>
-                            <th>Categoría de Gasto</th>
-                            <th>Deducción Ganancias</th>
-                            <th>Impacto IVA Cred. Fiscal</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Mercaderías / Insumos</td>
-                            <td>Computable 100%</td>
-                            <td>Pleno (100%)</td>
-                        </tr>
-                        <tr>
-                            <td>Medicina Prepaga</td>
-                            <td>Sujeto a tope del 5% ganancia neta</td>
-                            <td>Exento</td>
-                        </tr>
-                        <tr>
-                            <td>Movilidad y Viáticos</td>
-                            <td>Computable hasta tope legal</td>
-                            <td>Pleno (100%)</td>
-                        </tr>
-                        <tr>
-                            <td>Servicios Públicos</td>
-                            <td>Computable 100%</td>
-                            <td>Diferencial (27%)</td>
-                        </tr>
-                    </tbody>
-                </table>
+            <!-- B. Actividades Económicas -->
+            <div class="card" style="margin-top: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3>Actividades Económicas (ARCA)</h3>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-secondary" onclick="appStore.loadEconomicActivities()">🔄 Actualizar</button>
+                        <button class="btn-primary" onclick="appStore.promptUpsertArcaCatalog()">📥 Importar Catálogo ARCA</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Catálogo oficial ARCA y asignación a la organización.</p>
+                <div class="data-table-container" style="max-height: 400px; overflow-y: auto;">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Código ARCA</th>
+                                <th>Actividad</th>
+                                <th>Estado en Org.</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-economic-activities-body">
+                            <tr><td colspan="4" style="text-align: center;">Cargando actividades...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- C. Tasas IIBB por Actividad/Jurisdicción -->
+            <div class="card" style="margin-top: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3>Tasas IIBB por Actividad y Jurisdicción</h3>
+                    <button class="btn-primary" onclick="appStore.promptCreateIibbRate()">+ Nueva Tasa IIBB</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Gestión de alícuotas vigentes para la organización.</p>
+                <div class="data-table-container">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Actividad</th>
+                                <th>Jurisdicción</th>
+                                <th>Tasa (%)</th>
+                                <th>Vigencia Desde</th>
+                                <th>Vigencia Hasta</th>
+                                <th>Estado</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-iibb-rates-body">
+                            <tr><td colspan="7" style="text-align: center;">Cargando tasas IIBB...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </section>
 
@@ -897,6 +994,72 @@
             </div>
         </div>
     </div>
+
+    </div>
+
+    <!-- MODALES DE CATEGORIZACIÓN -->
+    <div id="modal-iibb-rate" class="modal hidden">
+        <div class="modal-content card" style="max-width: 400px; margin: 50px auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3>Nueva Tasa IIBB</h3>
+                <button class="btn-close" onclick="UIManager.closeModal('modal-iibb-rate')" style="background: none; border: none; font-size: 16px; cursor: pointer;">✕</button>
+            </div>
+            <form id="form-iibb-rate" onsubmit="event.preventDefault(); window.submitIibbRateForm();">
+                <div class="form-group">
+                    <label>Actividad Económica (Dejar vacío para General)</label>
+                    <select id="iibb-rate-activity" class="form-control">
+                        <option value="">-- General --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Jurisdicción</label>
+                    <input type="text" id="iibb-rate-jurisdiction" class="form-control" placeholder="Ej: CABA (AGIP)" required>
+                </div>
+                <div class="form-group">
+                    <label>Tasa (%)</label>
+                    <input type="number" id="iibb-rate-percent" class="form-control" placeholder="Ej: 3.5" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label>Vigente Desde</label>
+                    <input type="date" id="iibb-rate-from" class="form-control" required>
+                </div>
+                <button type="submit" class="btn-primary" style="width: 100%; margin-top: 16px;">Guardar Tasa</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-arca-catalog" class="modal hidden">
+        <div class="modal-content card" style="max-width: 500px; margin: 50px auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3>Importar Catálogo ARCA</h3>
+                <button class="btn-close" onclick="UIManager.closeModal('modal-arca-catalog')" style="background: none; border: none; font-size: 16px; cursor: pointer;">✕</button>
+            </div>
+            <form id="form-arca-catalog" onsubmit="event.preventDefault(); window.submitArcaCatalogForm();">
+                <div class="form-group">
+                    <label>JSON del Catálogo (Array de Actividades)</label>
+                    <textarea id="arca-catalog-json" class="form-control" rows="8" placeholder='[{"arca_activity_code": "620100", "name": "Servicios de programación", "description": "..."}]' required></textarea>
+                </div>
+                <button type="submit" class="btn-primary" style="width: 100%; margin-top: 16px;">Importar Actividades</button>
+            </form>
+        </div>
+    </div>
+    
+    <style>
+        .modal {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal.hidden { display: none !important; }
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 20px;
+            width: 100%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+    </style>
 
     <!-- Script inicializador cargado como módulo ES -->
     <script type="module" src="src/js/ui.js"></script>
