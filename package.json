@@ -26,5 +26,10 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "jest": {
+    "moduleNameMapper": {
+      "^https://esm\\.sh/@supabase/supabase-js@2$": "<rootDir>/tests/mocks/supabaseMock.js"
+    }
   }
 }

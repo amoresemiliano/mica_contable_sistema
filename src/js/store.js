@@ -44,6 +44,7 @@ export class AppStore {
         this.bankTemplates = getLocalJSON('mica_bank_templates') || {};
         this.currentFilter = 'all';
         this.currentBankFilter = 'all';
+        this.currentJurisdiction = 'all';
         this.searchQuery = '';
         this.listeners = [];
     }
