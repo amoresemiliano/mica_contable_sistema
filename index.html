@@ -4,514 +4,99 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mica Contable - Sistema Integral</title>
-    <style>
-        /* Paleta de colores e identidad visual: Slate Blue, Charcoal y Teal */
-        :root {
-            --bg-primary: #f8fafc;
-            --bg-card: #ffffff;
-            --text-main: #1e293b;
-            --text-muted: #64748b;
-            --primary: #0f172a;
-            --primary-hover: #1e293b;
-            --accent: #0d9488;
-            --accent-light: #ccfbf1;
-            --success: #16a34a;
-            --success-light: #dcfce7;
-            --warning: #ea580c;
-            --warning-light: #ffedd5;
-            --border-color: #e2e8f0;
-            --sidebar-width: 260px;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        }
-
-        body {
-            background-color: var(--bg-primary);
-            color: var(--text-main);
-            display: flex;
-            min-height: 100vh;
-        }
-
-        /* DISEÑO DE SIDEBAR DE NAVEGACIÓN */
-        aside {
-            width: var(--sidebar-width);
-            background-color: var(--primary);
-            color: #ffffff;
-            display: flex;
-            flex-direction: column;
-            position: fixed;
-            height: 100vh;
-            left: 0;
-            top: 0;
-            z-index: 100;
-            transition: all 0.3s ease;
-        }
-
-        .sidebar-brand {
-            padding: 24px;
-            border-bottom: 1px solid #1e293b;
-        }
-
-        .sidebar-brand h2 {
-            font-size: 20px;
-            color: #ffffff;
-        }
-
-        .sidebar-brand p {
-            font-size: 11px;
-            color: #94a3b8;
-        }
-
-        .sidebar-section-title {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #64748b;
-            padding: 20px 24px 8px 24px;
-            font-weight: 700;
-        }
-
-        .sidebar-nav {
-            list-style: none;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            padding: 0 12px;
-        }
-
-        .sidebar-nav a {
-            color: #94a3b8;
-            text-decoration: none;
-            padding: 10px 16px;
-            border-radius: 6px;
-            font-size: 13px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .sidebar-nav a:hover, .sidebar-nav a.active-nav {
-            background-color: #1e293b;
-            color: #ffffff;
-        }
-
-        .sidebar-nav a.active-nav {
-            border-left: 4px solid var(--accent);
-        }
-
-        /* ÁREA DE CONTENIDO PRINCIPAL */
-        .wrapper {
-            margin-left: var(--sidebar-width);
-            flex-grow: 1;
-            padding: 24px;
-            max-width: calc(100vw - var(--sidebar-width));
-        }
-
-        header {
-            margin-bottom: 24px;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        header h1 {
-            font-size: 24px;
-            color: var(--primary);
-        }
-
-        /* CONTENEDORES DE SECCIÓN (SPA) */
-        .tab-content {
-            display: block;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        /* CARDS Y CONTENEDORES */
-        .card {
-            background-color: var(--bg-card);
-            border-radius: 12px;
-            padding: 24px;
-            border: 1px solid var(--border-color);
-            margin-bottom: 24px;
-        }
-
-        .card h3 {
-            font-size: 16px;
-            margin-bottom: 16px;
-            color: var(--primary);
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 8px;
-        }
-
-        /* FORMULARIOS Y CONFIGURACIONES (Ajustes impositivos y Admin) */
-        .grid-inputs {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-            margin-bottom: 16px;
-        }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .form-group label {
-            font-size: 12px;
-            font-weight: 600;
-            color: var(--text-muted);
-        }
-
-        .form-control {
-            padding: 8px 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            font-size: 13px;
-            outline: none;
-        }
-
-        .form-control:focus {
-            border-color: var(--accent);
-        }
-
-        .btn-primary {
-            background-color: var(--accent);
-            color: #ffffff;
-            border: none;
-            padding: 10px 16px;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .btn-primary:hover {
-            background-color: #0b7a70;
-        }
-
-        /* TABLA DE USUARIOS Y EMPRESAS */
-        .simple-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 13px;
-        }
-
-        .simple-table th {
-            background-color: #f8fafc;
-            color: var(--text-muted);
-            padding: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .simple-table td {
-            padding: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        /* SECCIÓN OCR (MOCK ESCANER) */
-        .ocr-zone {
-            border: 2px dashed var(--accent);
-            background-color: #f0fdfa;
-            border-radius: 12px;
-            padding: 40px;
-            text-align: center;
-            cursor: pointer;
-            position: relative;
-        }
-
-        .ocr-progress-container {
-            margin-top: 20px;
-            background-color: var(--border-color);
-            border-radius: 10px;
-            overflow: hidden;
-            display: none;
-        }
-
-        .ocr-progress-bar {
-            width: 0%;
-            height: 10px;
-            background-color: var(--accent);
-            transition: width 0.3s ease;
-        }
-
-        /* METRICAS DEL CLIENTE (GERENTE DE NEGOCIOS) */
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 16px;
-            margin-bottom: 24px;
-        }
-
-        .metric-card {
-            background: var(--bg-card);
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-
-        .metric-card h4 {
-            font-size: 12px;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        .metric-card .value {
-            font-size: 24px;
-            font-weight: 700;
-            color: var(--primary);
-        }
-
-        .progress-list {
-            list-style: none;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .progress-item {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-
-        .progress-item-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            font-weight: 600;
-        }
-
-        .progress-track {
-            height: 8px;
-            background-color: #f1f5f9;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            height: 100%;
-            background-color: var(--accent);
-            border-radius: 4px;
-        }
-
-        /* DISEÑO DE LA GRILLA DEL CONCILIADOR (IGUAL AL VALIDADO) */
-        .import-section {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            margin-bottom: 24px;
-        }
-
-        .drop-zone {
-            border: 2px dashed var(--border-color);
-            border-radius: 8px;
-            padding: 30px;
-            text-align: center;
-            cursor: pointer;
-            position: relative;
-        }
-
-        .drop-zone:hover {
-            border-color: var(--accent);
-            background-color: #f0fdfa;
-        }
-
-        .drop-zone input[type="file"] {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            opacity: 0; cursor: pointer;
-        }
-
-        .controls-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
-            background: var(--bg-card);
-            padding: 16px;
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-            margin-bottom: 16px;
-        }
-
-        .filter-buttons {
-            display: flex;
-            gap: 8px;
-        }
-
-        .btn-filter {
-            background: #f1f5f9;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-muted);
-            cursor: pointer;
-        }
-
-        .btn-filter.active, .btn-filter:hover {
-            background: var(--primary);
-            color: #fff;
-        }
-
-        .search-input {
-            padding: 8px 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            font-size: 13px;
-            min-width: 240px;
-            outline: none;
-        }
-
-        .data-table-container {
-            background-color: var(--bg-card);
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-            overflow-x: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            text-align: left;
-            font-size: 13px;
-        }
-
-        th {
-            background-color: #f8fafc;
-            color: var(--text-muted);
-            padding: 14px 16px;
-            font-weight: 600;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        td {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .badge-recibido { background-color: var(--warning-light); color: var(--warning); }
-        .badge-emitido { background-color: var(--accent-light); color: var(--accent); }
-
-        .category-cell {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            min-width: 250px;
-        }
-
-        .select-category {
-            flex-grow: 1;
-            padding: 6px;
-            border-radius: 6px;
-            border: 1px solid var(--border-color);
-            font-size: 12px;
-        }
-
-        .select-category.suggested {
-            border-color: var(--accent);
-            background-color: #f0fdfa;
-        }
-
-        .badge-suggested {
-            background-color: var(--accent-light);
-            color: var(--accent);
-            font-size: 10px;
-            padding: 1px 6px;
-            border-radius: 12px;
-            font-weight: bold;
-        }
-
-        .btn-confirm {
-            background-color: #f1f5f9;
-            color: var(--text-muted);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 11px;
-            cursor: pointer;
-        }
-
-        .btn-confirm.confirmed {
-            background-color: var(--success-light);
-            color: var(--success);
-            border-color: var(--success);
-        }
-
-        @media (max-width: 992px) {
-            aside {
-                width: 70px;
-            }
-            aside .sidebar-brand p, aside .sidebar-section-title, aside .nav-text {
-                display: none;
-            }
-            .wrapper {
-                margin-left: 70px;
-                max-width: calc(100vw - 70px);
-            }
-        }
-    </style>
+    <!-- Estilos externalizados -->
+    <link rel="stylesheet" href="src/css/styles.css">
+    <!-- Biblioteca SheetJS para parsear planillas Excel (.xlsx/.xls) en el cliente -->
+    <script src="src/js/vendor/xlsx.full.min.js"></script>
 </head>
 <body>
 
-    <!-- MENÚ LATERAL (SIDEBAR) -->
-    <aside>
+    <!-- PANTALLA DE ACCESO (LOGIN) -->
+    <div id="login-container" class="login-wrapper">
+        <div class="login-card">
+            <!-- PANEL IZQUIERDO: FORMULARIO E IDENTIDAD -->
+            <div class="login-panel-form">
+                <div class="login-brand">
+                    <span class="login-logo-badge">M</span>
+                    <div>
+                        <h1 class="login-title">MICA</h1>
+                        <p class="login-subtitle">Sistema de Gestión Contable</p>
+                    </div>
+                </div>
+
+                <div class="login-body">
+                    <h2 class="login-welcome-title">Bienvenido</h2>
+                    <p class="login-description">
+                        Centralizá comprobantes, percepciones, movimientos e información contable en un único espacio.
+                    </p>
+
+                    <div id="auth-status-message" class="auth-status-banner" style="display: none;"></div>
+
+                    <button id="google-login-btn" class="btn-google-login">
+                        <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                        <span>Ingresar con Google</span>
+                    </button>
+                </div>
+
+                <div class="login-footer-note">
+                    Acceso autorizado para usuarios de MICA
+                </div>
+            </div>
+
+            <!-- PANEL DERECHO: HERO ILLUSTRATION -->
+            <div class="login-panel-hero">
+                <img src="src/assets/images/mica-login-accounting.png" alt="MICA Sistema de Gestión Contable" class="login-hero-img">
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTENEDOR PRINCIPAL DE LA APP (Oculto por defecto) -->
+    <div id="app-container" class="hidden">
+        <!-- MENÚ LATERAL (SIDEBAR) -->
+        <aside>
         <div class="sidebar-brand">
             <h2>Mica</h2>
             <p>SISTEMA CONTABLE E IMPOSITIVO</p>
         </div>
 
-        <div class="sidebar-section-title">Admin / Contadora</div>
+        <div class="sidebar-section-title">Navegación</div>
         <ul class="sidebar-nav">
-            <li><a class="active-nav" onclick="switchTab('tab-conciliador')">📊 <span class="nav-text">Conciliador CSV</span></a></li>
-            <li><a onclick="switchTab('tab-ajustes-contadora')">⚙️ <span class="nav-text">Ajustes Tributarios</span></a></li>
-            <li><a onclick="switchTab('tab-configuracion')">👥 <span class="nav-text">Configuración</span></a></li>
+            <li><a class="active-nav" onclick="switchTab('tab-conciliador')">🧾 <span class="nav-text">Comprobantes</span></a></li>
+            <li><a onclick="switchTab('tab-percepciones')">💸 <span class="nav-text">Percepciones</span></a></li>
+            <li><a onclick="switchTab('tab-bancos')">🏦 <span class="nav-text">Extractos</span></a></li>
+            <li><a onclick="switchTab('tab-sueldos')">👥 <span class="nav-text">Sueldos</span></a></li>
+            <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Movimientos Manuales</span></a></li>
+            <li><a onclick="switchTab('tab-categorizacion')">🏷️ <span class="nav-text">Categorización</span></a></li>
+            <li><a onclick="switchTab('tab-configuracion')">⚙️ <span class="nav-text">Configuración</span></a></li>
         </ul>
 
-        <div class="sidebar-section-title">Hub de Clientes</div>
-        <ul class="sidebar-nav">
-            <li><a onclick="switchTab('tab-client-dashboard')">🏠 <span class="nav-text">Panel Gerencial</span></a></li>
-            <li><a onclick="switchTab('tab-client-ocr')">📷 <span class="nav-text">Cargar Documentos</span></a></li>
-        </ul>
+        <div style="margin-top: auto; padding: 16px 24px; border-top: 1px solid #1e293b;" class="sidebar-footer">
+            <button id="sidebar-logout-btn" class="btn-sidebar-logout" onclick="logout()">
+                🚪 <span class="nav-text">Cerrar Sesión</span>
+            </button>
+        </div>
     </aside>
 
     <div class="wrapper">
         <header>
-            <h1 id="page-title">Conciliador CSV (Operaciones)</h1>
-            <div style="font-size: 13px; font-weight: 600; color: var(--text-muted);" id="current-entity-label">
-                Empresa Activa: VARONE VANESA PAOLA
+            <div>
+                <h1 id="page-title">Conciliador CSV (Operaciones)</h1>
+                <div style="font-size: 13px; font-weight: 600; color: var(--text-muted);" id="current-entity-label">
+                    Empresa Activa: VARONE VANESA PAOLA
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div id="user-header-info" style="font-size: 13px; font-weight: 600; color: var(--primary); background: var(--bg-card); padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border-color);"></div>
+                <button id="logout-btn" class="btn-secondary" style="padding: 6px 12px; font-size: 12px;">🚪 Cerrar Sesión</button>
             </div>
         </header>
 
-        <!-- SECCIÓN 1: CONCILIADOR CSV (NÚCLEO EXISTENTE) -->
+        <!-- SECCIÓN 1: CONCILIADOR CSV Y PERCEPCIONES -->
         <section id="tab-conciliador" class="tab-content">
             <div class="import-section">
                 <div class="drop-zone" id="zone-recibidos">
@@ -526,104 +111,568 @@
                 </div>
             </div>
 
+            <!-- Panel de Resolución Manual de Descuadres ("Otros Tributos") -->
+            <div class="card hidden" id="card-resolucion-manual">
+                <h3 style="color: var(--warning); border-color: var(--warning);">⚠️ Comprobantes con Saldo Pendiente por Explicar</h3>
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Se requiere asignar manualmente el descuadre de otros tributos de las siguientes compras a una jurisdicción o cuenta contable.</p>
+                <div class="data-table-container">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Comprobante</th>
+                                <th>Proveedor (CUIT)</th>
+                                <th>Otros Tributos</th>
+                                <th>Asignar a Jurisdicción</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-descuadres-body">
+                            <!-- Inyectado dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Panel de Import Issues -->
+            <div class="card hidden" id="card-import-issues" style="margin-bottom: 24px; border-color: var(--error);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3 style="color: var(--error); margin: 0;">❌ Errores de Importación (Issues)</h3>
+                    <button class="btn-secondary" onclick="appStore.resolveAllImportIssues()">Marcar todos como resueltos</button>
+                </div>
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Los siguientes registros fallaron durante la importación y requieren atención manual.</p>
+                <div class="data-table-container" style="max-height: 250px; overflow-y: auto;">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Archivo</th>
+                                <th>Fila</th>
+                                <th>Error</th>
+                                <th>Datos Crudos</th>
+                                <th>Estado</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-import-issues-body">
+                            <!-- Inyectado dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="controls-row">
-                <div class="filter-buttons">
+                <div class="filter-buttons desktop-filter-buttons">
                     <button class="btn-filter active" onclick="appStore.setFilter('all')">Todos</button>
                     <button class="btn-filter" onclick="appStore.setFilter('recibidos')">Solo Compras</button>
                     <button class="btn-filter" onclick="appStore.setFilter('emitidos')">Solo Ventas</button>
                     <button class="btn-filter" onclick="appStore.setFilter('pending')">Sin Categorizar</button>
                 </div>
+                <div class="mobile-filter-select-wrapper">
+                    <select class="mobile-filter-select" onchange="appStore.setFilter(this.value)">
+                        <option value="all">🔍 Todos los comprobantes</option>
+                        <option value="recibidos">📥 Solo Compras (Recibidos)</option>
+                        <option value="emitidos">📤 Solo Ventas (Emitidos)</option>
+                        <option value="pending">⚠️ Sin Categorizar</option>
+                    </select>
+                </div>
                 <input type="text" class="search-input" id="search-box" placeholder="Buscar por CUIT, Razón Social..." oninput="appStore.setSearch(this.value)">
+            </div>
+
+            <!-- Acciones por lote (Bulk Actions) -->
+            <div id="bulk-actions-bar" class="card hidden" style="margin-bottom: 12px; padding: 12px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-hover);">
+                <div>
+                    <span id="bulk-selection-count" style="font-weight: 600; color: var(--primary);">0 seleccionados</span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn-secondary" onclick="appStore.bulkSoftDeleteSelected()">🗑️ Eliminar</button>
+                    <button class="btn-primary" onclick="appStore.promptBulkClassification()">🏷️ Clasificar a mismo proveedor (CUIT)</button>
+                </div>
             </div>
 
             <div class="data-table-container">
                 <table>
                     <thead>
                         <tr>
+                            <th><input type="checkbox" id="check-all-comprobantes" onclick="appStore.toggleSelectAllComprobantes(this)"></th>
                             <th>Origen</th>
                             <th>Fecha</th>
                             <th>Comprobante</th>
                             <th>CUIT</th>
                             <th>Razón Social</th>
+                            <th>Neto Gravado</th>
+                            <th>Exentas</th>
+                            <th>Otros Tributos</th>
+                            <th>IVA</th>
+                            <th>Perc. IVA</th>
+                            <th>Perc. IIBB</th>
                             <th>Total</th>
                             <th>Categoría Tributaria</th>
+                            <th>Actividad</th>
                             <th>Estado</th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
                         <tr>
-                            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                            <td colspan="16" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
                                 Aún no se han importado archivos CSV de ARCA para este período.
                             </td>
                         </tr>
                     </tbody>
                 </table>
             </div>
+
         </section>
 
-        <!-- SECCIÓN 2: AJUSTES TRIBUTARIOS (CONTADORA) -->
-        <section id="tab-ajustes-contadora" class="tab-content hidden">
-            <div class="card">
-                <h3>Parámetros de Liquidación de Impuestos</h3>
-                <div class="grid-inputs">
-                    <div class="form-group">
-                        <label>Alícuota IVA General (%)</label>
-                        <input type="number" class="form-control" id="tax-iva-general" value="21">
+        <!-- SECCIÓN 1.B: PERCEPCIONES -->
+        <section id="tab-percepciones" class="tab-content hidden">
+            <div class="import-section">
+                <!-- Carga de Percepciones Provinciales -->
+                <div class="drop-zone" id="zone-percepciones" style="border-color: #38bdf8;">
+                    <h3>Percepciones Provinciales y Nacionales</h3>
+                    <p>Subir percepciones (ARBA TXT / IVA XLS)</p>
+                    <input type="file" id="file-percepciones" accept=".csv,.txt,.xls,.xlsx">
+                </div>
+            </div>
+
+            <!-- BANDEJA DE PERCEPCIONES INCORPORADAS -->
+            <div class="card" style="margin-top: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3 style="margin: 0;">Bandeja de Percepciones Incorporadas</h3>
+                        <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">Percepciones provinciales (ARBA) y nacionales (IVA) procesadas.</p>
                     </div>
-                    <div class="form-group">
-                        <label>Alícuota IVA Reducido (%)</label>
-                        <input type="number" class="form-control" id="tax-iva-reducido" value="10.5">
-                    </div>
-                    <div class="form-group">
-                        <label>Alícuota IIBB ARBA (Prov. Bs As %)</label>
-                        <input type="number" class="form-control" id="tax-iibb-arba" value="3.5">
-                    </div>
-                    <div class="form-group">
-                        <label>Alícuota IIBB AGIP (CABA %)</label>
-                        <input type="number" class="form-control" id="tax-iibb-agip" value="3.0">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <select id="filter-jurisdiccion" class="form-control" style="width: auto; padding: 6px 10px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--primary);" onchange="appStore.setJurisdictionFilter(this.value)">
+                            <option value="all">Todas las Percepciones</option>
+                        </select>
+                        <div id="percepciones-summary-badge" style="font-size: 12px; font-weight: 600; background: rgba(56, 189, 248, 0.15); color: #0284c7; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.3);">
+                            0 Percepciones | Total $ 0,00
+                        </div>
                     </div>
                 </div>
-                <button class="btn-primary" onclick="alert('Parámetros guardados y actualizados para el cálculo de reportes.')">Guardar Configuración Impositiva</button>
-            </div>
-
-            <div class="card">
-                <h3>Reglas de Deducción (Caja Gris de Vinculación)</h3>
-                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Definición de qué porcentaje de cada gasto es computable para Ganancias y el Impuesto sobre los Débitos y Créditos Bancarios.</p>
-                <table class="simple-table">
-                    <thead>
-                        <tr>
-                            <th>Categoría de Gasto</th>
-                            <th>Deducción Ganancias</th>
-                            <th>Impacto IVA Cred. Fiscal</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>Mercaderías / Insumos</td>
-                            <td>Computable 100%</td>
-                            <td>Pleno (100%)</td>
-                        </tr>
-                        <tr>
-                            <td>Medicina Prepaga</td>
-                            <td>Sujeto a tope del 5% ganancia neta</td>
-                            <td>Exento</td>
-                        </tr>
-                        <tr>
-                            <td>Movilidad y Viáticos</td>
-                            <td>Computable hasta tope legal</td>
-                            <td>Pleno (100%)</td>
-                        </tr>
-                        <tr>
-                            <td>Servicios Públicos</td>
-                            <td>Computable 100%</td>
-                            <td>Diferencial (27%)</td>
-                        </tr>
-                    </tbody>
-                </table>
+                <div class="data-table-container" style="max-height: 350px; overflow-y: auto;">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Fuente</th>
+                                <th>Fecha</th>
+                                <th>Período</th>
+                                <th>CUIT Agente</th>
+                                <th>Agente / Razón Social</th>
+                                <th>Comprobante / Certificado</th>
+                                <th>Importe</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-percepciones-body">
+                            <tr>
+                                <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                    No se han cargado percepciones para este período.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </section>
 
-        <!-- SECCIÓN 3: CONFIGURACIÓN GENERAL (ADMIN) -->
+        <!-- SECCIÓN 2: CONCILIADOR BANCARIO -->
+        <section id="tab-bancos" class="tab-content hidden">
+            <div class="import-section">
+                <div class="drop-zone" id="zone-bancos" style="border-color: var(--accent);">
+                    <h3>Cargar Extracto Bancario</h3>
+                    <p>Arrastrá el Excel del banco (.xlsx / .xls) o hacé clic para buscar</p>
+                    <div style="margin: 8px 0;">
+                        <input type="text" id="bank-name" class="form-control" placeholder="Nombre del Banco (ej. Galicia, Santander)" style="width: 250px; display: inline-block; padding: 4px 8px; font-size: 11px;" onclick="event.stopPropagation()">
+                    </div>
+                    <input type="file" id="file-bancos" accept=".xlsx,.xls,.csv">
+                </div>
+            </div>
+
+            <div class="grid-inputs" style="display: block;">
+                <!-- Panel de Verificación de Movimientos -->
+                <div class="card" style="margin-bottom: 24px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                        <h3>Extractos Bancarios</h3>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button class="btn-secondary" onclick="appStore.exportBankMovements()">📥 Exportar a Excel</button>
+                        </div>
+                    </div>
+
+                    <div class="controls-row" style="margin-bottom: 12px; display: flex; gap: 12px; flex-wrap: wrap;">
+                        <div class="filter-buttons desktop-filter-buttons">
+                            <button class="btn-filter active" onclick="appStore.setBankFilter('all')">Todos</button>
+                            <button class="btn-filter" onclick="appStore.setBankFilter('pending')">Sin Categorizar</button>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input type="date" id="bank-filter-date-from" class="form-control" onchange="appStore.applyBankDateFilters()" style="width: auto;">
+                            <span style="font-size: 13px; color: var(--text-muted);">hasta</span>
+                            <input type="date" id="bank-filter-date-to" class="form-control" onchange="appStore.applyBankDateFilters()" style="width: auto;">
+                        </div>
+                    </div>
+
+                    <!-- Acciones por lote (Bulk Actions) -->
+                    <div id="bank-bulk-actions-bar" class="card hidden" style="margin-bottom: 12px; padding: 12px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-hover);">
+                        <div>
+                            <span id="bank-bulk-selection-count" style="font-weight: 600; color: var(--primary);">0 seleccionados</span>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn-secondary" onclick="appStore.bulkSoftDeleteBankMovements()">🗑️ Eliminar</button>
+                            <button class="btn-primary" onclick="appStore.promptBankBulkClassification()">🏷️ Clasificar (Categoría Tributaria)</button>
+                        </div>
+                    </div>
+
+                    <div class="data-table-container" style="max-height: 400px; overflow-y: auto;">
+                        <table class="simple-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="check-all-bancos" onclick="appStore.toggleSelectAllBankMovements(this)"></th>
+                                    <th>Fecha</th>
+                                    <th>Descripción / Concepto</th>
+                                    <th>Importe</th>
+                                    <th>Tipo</th>
+                                    <th>Clasificación / Categoría</th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-bancos-body">
+                                <tr>
+                                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                        No hay extractos bancarios procesados para este período.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Gestor de Reglas de Clasificación -->
+                <div class="card">
+                    <h3>Reglas de Clasificación Automática</h3>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Agrega palabras clave para pre-clasificar automáticamente egresos y cobros del banco.</p>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <div class="form-group">
+                            <label>Tipo de Movimiento</label>
+                            <select id="rule-type" class="form-control">
+                                <option value="debit">DÉBITO (Egreso)</option>
+                                <option value="credit">CRÉDITO (Ingreso)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Palabra Clave (Keyword)</label>
+                            <input type="text" id="rule-pattern" class="form-control" placeholder="Ej: EDESUR, MERCADOPAGO">
+                        </div>
+                        <div class="form-group">
+                            <label>Categoría Tributaria Destino</label>
+                            <select id="rule-category" class="form-control">
+                                <option value="">Seleccione Categoría Tributaria</option>
+                            </select>
+                        </div>
+                        <button class="btn-primary" id="btn-add-rule" style="margin-top: 8px;">Agregar Regla</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 3: LIQUIDACIÓN DE SUELDOS -->
+        <section id="tab-sueldos" class="tab-content hidden">
+            <div class="import-section">
+                <div class="drop-zone" id="zone-sueldos" style="border-color: #8b5cf6;">
+                    <h3>Cargar Reporte de Sueldos</h3>
+                    <p>Arrastrá el Excel o haz clic para buscar</p>
+                    <input type="file" id="file-sueldos" accept=".xlsx,.xls">
+                </div>
+            </div>
+
+            <div class="grid-inputs">
+                <!-- Inputs y desgloses de sueldos -->
+                <div class="card">
+                    <h3>Datos Consolidados del Reporte</h3>
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                            <span>Sueldo Bruto</span>
+                            <strong id="lbl-sueldo-bruto">$ 0,00</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                            <span>Anticipos / Adelantos</span>
+                            <strong id="lbl-anticipos">$ 0,00</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                            <span>Aportes Sindicales retenidos</span>
+                            <strong id="lbl-sindicato-aporte">$ 0,00</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                            <span>Sueldo Neto a pagar</span>
+                            <strong id="lbl-sueldo-neto">$ 0,00</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inputs manuales contables de liquidación -->
+                <div class="card">
+                    <h3>Cargas y Contribuciones Manuales</h3>
+                    <div style="display: flex; flex-direction: column; gap: 12px;">
+                        <div class="form-group">
+                            <label>Formulario 931 AFIP (Total Cargas Sociales)</label>
+                            <input type="number" id="input-f931" class="form-control" value="0" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label>Contribución Sindical Extraordinaria</label>
+                            <input type="number" id="input-sindicato-contrib" class="form-control" value="0" step="0.01">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Resultados Costo Laboral -->
+                <div class="card">
+                    <h3>Resultados y Costo Laboral</h3>
+                    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 14px; border-bottom: 1px dashed var(--border-color); padding-bottom: 8px;">
+                            <span>Total de Caja a Pagar</span>
+                            <strong id="lbl-total-a-pagar" style="color: var(--warning);">$ 0,00</strong>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; border-top: 1px solid var(--primary); padding-top: 8px;">
+                            <span>Costo Laboral Real</span>
+                            <strong id="lbl-costo-laboral" style="color: var(--success);">$ 0,00</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DETALLE DE LIQUIDACIÓN IMPORTADA -->
+                <div class="card fade-in">
+                    <div class="card-header" style="justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <h3 style="margin: 0;">Detalle de Liquidación Importada</h3>
+                            <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">Desglose de conceptos de la nómina procesada.</p>
+                        </div>
+                        <div id="salary-source-badge" style="font-size: 12px; font-weight: 600; background: rgba(139, 92, 246, 0.15); color: #7c3aed; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.3);">
+                            Fuente: PAYROLL | Período: Sin Cargar
+                        </div>
+                    </div>
+                    <div id="salary-detail-container" style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px; border: 1px dashed var(--border-color); border-radius: 6px;">
+                        Aún no se ha importado reporte de sueldos para este período.
+                    </div>
+                </div>
+                <button class="btn-primary" id="btn-save-payroll" style="width: 100%; margin-top: 16px;">✓ Confirmar y Liquidar Período</button>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 4: MOVIMIENTOS MANUALES -->
+        <section id="tab-movimientos-manuales" class="tab-content hidden">
+            <div class="grid-inputs">
+                <!-- Formulario de Compra Manual REGINFO AFIP -->
+                <div class="card" style="grid-column: span 2;">
+                    <h3>Registrar Compra Manual (Formato REGINFO)</h3>
+                    <form id="form-purchase-reginfo">
+                        <div class="grid-inputs" style="margin-bottom: 12px;">
+                            <div class="form-group">
+                                <label>Fecha Comprobante (AAAAMMDD)</label>
+                                <input type="text" name="fecha" class="form-control" placeholder="Ej: 20260704" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Tipo Comprobante (Código AFIP)</label>
+                                <select name="tipoComprobante" class="form-control" required>
+                                    <option value="001">001 - Factura A</option>
+                                    <option value="006">006 - Factura B</option>
+                                    <option value="003">003 - Nota de Crédito A</option>
+                                    <option value="011">011 - Factura C</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Punto de Venta (5 dígitos)</label>
+                                <input type="text" name="puntoVenta" class="form-control" placeholder="00001" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Número Comprobante (8 dígitos)</label>
+                                <input type="text" name="numeroComprobante" class="form-control" placeholder="00000123" required>
+                            </div>
+                            <div class="form-group">
+                                <label>CUIT Proveedor</label>
+                                <input type="text" name="cuit" class="form-control" placeholder="30123456789" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Razón Social Proveedor</label>
+                                <input type="text" name="razonSocial" class="form-control" placeholder="Proveedor S.A." required>
+                            </div>
+                            <div class="form-group">
+                                <label>Categoría Gasto</label>
+                                <select name="categoria" class="form-control">
+                                    <option value="Mercaderías / Insumos">Mercaderías / Insumos</option>
+                                    <option value="Servicios Públicos (Luz, Agua, Gas)">Servicios Públicos</option>
+                                    <option value="Telefonía e Internet">Telefonía e Internet</option>
+                                    <option value="Honorarios Profesionales">Honorarios Profesionales</option>
+                                    <option value="Alquileres Comerciales">Alquileres Comerciales</option>
+                                    <option value="Movilidad y Viáticos">Movilidad y Viáticos</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <h4 style="font-size: 13px; color: var(--accent); margin-bottom: 8px; border-bottom: 1px dashed var(--border-color); padding-bottom: 4px;">Desglose de Montos</h4>
+                        <div class="grid-inputs">
+                            <div class="form-group">
+                                <label>Importe Total</label>
+                                <input type="number" name="importeTotal" class="form-control" placeholder="0.00" step="0.01" required>
+                            </div>
+                            <div class="form-group">
+                                <label>No Gravado / Conceptos no Integrantes</label>
+                                <input type="number" name="importeNoGravado" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Importe Operaciones Exentas</label>
+                                <input type="number" name="importeExento" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Percepción IVA (Nacional)</label>
+                                <input type="number" name="importePercepIva" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Percepción IIBB (Provincial)</label>
+                                <input type="number" name="importePercepIibb" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Percepción Tasas Municipales</label>
+                                <input type="number" name="importePercepMun" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Impuestos Internos</label>
+                                <input type="number" name="importeInternos" class="form-control" placeholder="0.00" step="0.01" value="0">
+                            </div>
+                        </div>
+
+                        <div class="grid-inputs" style="margin-top: 12px;">
+                            <div class="form-group">
+                                <label>Moneda / Tipo de Cambio</label>
+                                <div style="display: flex; gap: 8px;">
+                                    <input type="text" name="moneda" class="form-control" value="PES" style="width: 80px;" readonly>
+                                    <input type="number" name="tipoCambio" class="form-control" value="1.000000" step="0.000001">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Cantidad de Alícuotas de IVA</label>
+                                <input type="number" name="cantidadAlicuotas" class="form-control" value="1" min="1">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn-primary" style="margin-top: 16px;">✓ Registrar Compra REGINFO</button>
+                    </form>
+                </div>
+
+                <!-- Formulario de Movimiento Interno (Caja Chica) -->
+                <div class="card">
+                    <h3>Registrar Movimiento Interno</h3>
+                    <form id="form-internal-movement">
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div class="form-group">
+                                <label>Tipo de Movimiento</label>
+                                <div style="display: flex; gap: 16px; margin: 4px 0;">
+                                    <label style="font-weight: 500; font-size: 13px;"><input type="radio" name="tipo" value="Ingreso" checked> Ingreso (+)</label>
+                                    <label style="font-weight: 500; font-size: 13px;"><input type="radio" name="tipo" value="Gasto"> Gasto (-)</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Fecha Calendario</label>
+                                <input type="date" name="fecha" id="internal-date" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Mes de Imputación Contable</label>
+                                <input type="month" name="imputacion" id="internal-imputacion" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Importe</label>
+                                <input type="number" name="importe" class="form-control" placeholder="0.00" step="0.01" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Descripción / Motivo</label>
+                                <textarea name="descripcion" class="form-control" placeholder="Concepto del movimiento..." rows="3"></textarea>
+                            </div>
+                            <button type="submit" class="btn-primary" style="margin-top: 8px;">✓ Guardar Movimiento</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 5: CATEGORIZACIÓN -->
+        <section id="tab-categorizacion" class="tab-content hidden">
+            <!-- A. Categorías Tributarias -->
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3>Categorías Tributarias</h3>
+                    <button class="btn-secondary" onclick="appStore.loadTaxCategories()">🔄 Actualizar</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Asignación de categorías globales a la organización.</p>
+                <div class="data-table-container">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Descripción</th>
+                                <th>Estado en Org.</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-tax-categories-body">
+                            <tr><td colspan="4" style="text-align: center;">Cargando categorías...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- B. Actividades Económicas -->
+            <div class="card" style="margin-top: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3>Actividades Económicas (ARCA)</h3>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-secondary" onclick="appStore.loadEconomicActivities()">🔄 Actualizar</button>
+                        <button class="btn-primary" onclick="appStore.promptUpsertArcaCatalog()">📥 Importar Catálogo ARCA</button>
+                    </div>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Catálogo oficial ARCA y asignación a la organización.</p>
+                <div class="data-table-container" style="max-height: 400px; overflow-y: auto;">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Código ARCA</th>
+                                <th>Actividad</th>
+                                <th>Estado en Org.</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-economic-activities-body">
+                            <tr><td colspan="4" style="text-align: center;">Cargando actividades...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- C. Tasas IIBB por Actividad/Jurisdicción -->
+            <div class="card" style="margin-top: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3>Tasas IIBB por Actividad y Jurisdicción</h3>
+                    <button class="btn-primary" onclick="appStore.promptCreateIibbRate()">+ Nueva Tasa IIBB</button>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Gestión de alícuotas vigentes para la organización.</p>
+                <div class="data-table-container">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Actividad</th>
+                                <th>Jurisdicción</th>
+                                <th>Tasa (%)</th>
+                                <th>Vigencia Desde</th>
+                                <th>Vigencia Hasta</th>
+                                <th>Estado</th>
+                                <th>Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-iibb-rates-body">
+                            <tr><td colspan="7" style="text-align: center;">Cargando tasas IIBB...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 6: CONFIGURACIÓN GENERAL (ADMIN) -->
         <section id="tab-configuracion" class="tab-content hidden">
             <div class="card">
                 <h3>Administración de Clientes / Empresas Representadas</h3>
@@ -688,7 +737,7 @@
             </div>
         </section>
 
-        <!-- SECCIÓN 4: HUB DE USUARIO - PANEL GERENCIAL (MÉTRICAS BASADAS EN CSV) -->
+        <!-- SECCIÓN 7: HUB DE USUARIO - PANEL GERENCIAL (TABLERO UNIFICADO) -->
         <section id="tab-client-dashboard" class="tab-content hidden">
             <div class="metrics-grid">
                 <div class="metric-card">
@@ -696,25 +745,30 @@
                     <div class="value" id="client-sales-val">$ 0,00</div>
                 </div>
                 <div class="metric-card" style="border-left: 4px solid var(--warning);">
-                    <h4>Egresos / Gastos</h4>
+                    <h4>Egresos / Gastos Totales</h4>
                     <div class="value" id="client-purchases-val">$ 0,00</div>
                 </div>
                 <div class="metric-card" style="border-left: 4px solid var(--success);">
-                    <h4>Resultado Operativo</h4>
+                    <h4>Resultado Operativo Neto</h4>
                     <div class="value" id="client-net-val">$ 0,00</div>
                 </div>
             </div>
 
             <div class="metrics-grid">
                 <div class="metric-card">
-                    <h4>IVA Estimado Próximo Vencimiento</h4>
+                    <h4>IVA Estimado Proximo Vencimiento</h4>
                     <div class="value" id="client-iva-val" style="color: var(--warning);">$ 0,00</div>
                     <span style="font-size: 11px; color: var(--text-muted);">Saldo estimado (Débito menos Crédito)</span>
                 </div>
                 <div class="metric-card">
-                    <h4>IIBB Estimado AGIP/ARBA</h4>
+                    <h4>IIBB Estimado (ARBA/AGIP)</h4>
                     <div class="value" id="client-iibb-val" style="color: var(--warning);">$ 0,00</div>
                     <span style="font-size: 11px; color: var(--text-muted);">Calculado sobre Ventas brutas gravadas</span>
+                </div>
+                <div class="metric-card" style="border-left: 4px solid var(--danger);">
+                    <h4>Costo Laboral del Mes</h4>
+                    <div class="value" id="client-labor-val" style="color: var(--danger);">$ 0,00</div>
+                    <span style="font-size: 11px; color: var(--text-muted);">Sueldos + F931 + Sindicato</span>
                 </div>
             </div>
 
@@ -730,8 +784,8 @@
                 <div class="card">
                     <h3>Alertas Contables Recientes</h3>
                     <ul style="font-size: 13px; list-style: none; display: flex; flex-direction: column; gap: 10px;">
-                        <li style="padding: 10px; background-color: var(--warning-light); border-radius: 6px; color: var(--warning);">
-                            ⚠️ <strong>Atención:</strong> Tenés 3 comprobantes de compras sin conciliar en la base de datos de AFIP.
+                        <li style="padding: 10px; background-color: var(--warning-light); border-radius: 6px; color: var(--warning);" id="alert-unresolved-taxes">
+                            ⚠️ <strong>Atención:</strong> Tienes comprobantes de compra con "Otros Tributos" sin conciliar.
                         </li>
                         <li style="padding: 10px; background-color: var(--success-light); border-radius: 6px; color: var(--success);">
                             ✓ <strong>Información:</strong> La última presentación de IVA cerró correctamente.
@@ -741,7 +795,7 @@
             </div>
         </section>
 
-        <!-- SECCIÓN 5: HUB DE USUARIO - CARGA OCR (TICKETS Y GASTOS FÍSICOS) -->
+        <!-- SECCIÓN 8: HUB DE USUARIO - CARGA OCR (TICKETS Y GASTOS FÍSICOS) -->
         <section id="tab-client-ocr" class="tab-content hidden">
             <div class="card">
                 <h3>Cargar Comprobantes Físicos (Lector Inteligente OCR)</h3>
@@ -785,455 +839,230 @@
         </section>
     </div>
 
-    <!-- CÓDIGO OPERATIVO (PRESERVANDO AL 100% EL MOTOR CONTABLE ANTERIOR) -->
-    <script>
-        // Listas de categorías estándar del sistema
-        const CATEGORIES_RECIBIDOS = [
-            "Mercaderías / Insumos",
-            "Servicios Públicos (Luz, Agua, Gas)",
-            "Telefonía e Internet",
-            "Honorarios Profesionales",
-            "Alquileres Comerciales",
-            "Seguros",
-            "Movilidad y Viáticos",
-            "Gastos de Oficina y Limpieza",
-            "Medicina Prepaga",
-            "Impuestos y Tasas",
-            "Sueldos y Cargas Sociales",
-            "Otros Gastos No Deducibles"
-        ];
+    <!-- MODAL POP-UP: ASIGNACIÓN Y DIVISION MULTI-ACTIVIDAD (VENTAS) -->
+    <div id="modal-multi-actividad" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 style="font-size: 16px; font-weight: bold; color: var(--primary);">Asignación Obligatoria Multi-Actividad</h3>
+                <button onclick="document.getElementById('modal-multi-actividad').classList.add('hidden')" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Esta venta pertenece a un cliente con múltiples actividades económicas registradas. Selecciona cómo imputar los montos de la factura.</p>
+                <div style="background-color: var(--bg-primary); padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span>Comprobante:</span> <strong id="modal-act-comprobante">Factura A 00001</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span>Proveedor/Receptor:</span> <strong id="modal-act-cliente">Cliente Final</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span>Neto Gravado:</span> <strong id="modal-act-neto">$ 0,00</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>Exento:</span> <strong id="modal-act-exento">$ 0,00</strong>
+                    </div>
+                </div>
 
-        const CATEGORIES_EMITIDOS = [
-            "Venta de Servicios locales",
-            "Venta de Bienes",
-            "Exportación de Servicios",
-            "Honorarios de Asesoría",
-            "Otros Ingresos Financieros"
-        ];
-
-        // 1. MOTOR DE CATEGORIZACIÓN INTELIGENTE (SIN MODIFICACIONES)
-        class CategorizationEngine {
-            constructor() {
-                this.storageKey = 'mica_historical_categories';
-                this.history = JSON.parse(localStorage.getItem(this.storageKey)) || {};
-            }
-
-            getSuggestion(cuit) {
-                if (this.history[cuit]) {
-                    return { category: this.history[cuit], exists: true };
-                }
-                return { category: "", exists: false };
-            }
-
-            saveMapping(cuit, category) {
-                if (!cuit || cuit === "S/D") return;
-                this.history[cuit] = category;
-                localStorage.setItem(this.storageKey, JSON.stringify(this.history));
-            }
-        }
-
-        const categorizer = new CategorizationEngine();
-
-        // 2. PARSER Y NORMALIZADOR DE CSV (SIN MODIFICACIONES)
-        class CSVParser {
-            static parse(content, type) {
-                const lines = content.split(/\r?\n/);
-                if (lines.length < 2) return [];
-
-                const headers = lines[0].split(';').map(h => h.replace(/"/g, '').trim());
-                const list = [];
-
-                for (let i = 1; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line) continue;
-
-                    const values = line.split(';').map(v => v.replace(/"/g, '').trim());
-                    if (values.length < headers.length) continue;
-
-                    const rawData = {};
-                    headers.forEach((header, idx) => {
-                        rawData[header] = values[idx];
-                    });
-
-                    list.push(this.normalize(rawData, type));
-                }
-                return list;
-            }
-
-            static normalize(raw, type) {
-                let name = "S/D";
-                let cuit = "S/D";
-                let date = raw['Fecha de Emisión'] || 'S/D';
-                let docType = raw['Tipo de Comprobante'] || 'S/D';
-
-                if (type === 'recibido') {
-                    name = raw['Denominación Emisor'] || 'Consumidor Final';
-                    cuit = raw['Nro. Doc. Emisor'] || 'S/D';
-                } else {
-                    name = raw['Denominación Receptor'] || 'Consumidor Final';
-                    cuit = raw['Nro. Doc. Receptor'] || 'S/D';
-                }
-
-                let rawTotal = raw['Imp. Total'] || '0';
-                rawTotal = rawTotal.replace(/\./g, '').replace(',', '.');
-                const parsedTotal = parseFloat(rawTotal) || 0;
-
-                const suggestion = categorizer.getSuggestion(cuit);
-
-                return {
-                    id: `${type}-${cuit}-${date}-${parsedTotal}`,
-                    tipo: type,
-                    fecha: date,
-                    comprobante: docType,
-                    cuit: cuit,
-                    razonSocial: name,
-                    total: parsedTotal,
-                    categoria: suggestion.category,
-                    sugerida: suggestion.exists,
-                    confirmada: false
-                };
-            }
-        }
-
-        // 3. STORE GLOBAL DE LA APP (EXTENDIDA CON NUEVOS MODELOS)
-        class AppStore {
-            constructor() {
-                this.items = [];
-                this.currentFilter = 'all';
-                this.searchQuery = '';
-                this.ocrHistory = [];
-            }
-
-            addItems(newItems) {
-                newItems.forEach(item => {
-                    if (!this.items.some(i => i.id === item.id)) {
-                        this.items.push(item);
-                    }
-                });
-                UIManager.render();
-            }
-
-            setFilter(filter) {
-                this.currentFilter = filter;
-                document.querySelectorAll('.btn-filter').forEach(btn => {
-                    btn.classList.toggle('active', btn.innerText.toLowerCase().includes(filter === 'recibidos' ? 'compras' : filter === 'emitidos' ? 'ventas' : filter === 'pending' ? 'sin' : 'todos'));
-                });
-                UIManager.render();
-            }
-
-            setSearch(query) {
-                this.searchQuery = query.toLowerCase();
-                UIManager.render();
-            }
-
-            updateCategory(id, categoryVal) {
-                const item = this.items.find(i => i.id === id);
-                if (item) {
-                    item.categoria = categoryVal;
-                    item.sugerida = false;
-                    UIManager.render();
-                }
-            }
-
-            confirmItem(id) {
-                const item = this.items.find(i => i.id === id);
-                if (item && item.categoria) {
-                    item.confirmada = true;
-                    categorizer.saveMapping(item.cuit, item.categoria);
-                    
-                    this.items.forEach(other => {
-                        if (other.cuit === item.cuit && !other.confirmada) {
-                            other.categoria = item.categoria;
-                            other.sugerida = true;
-                        }
-                    });
-
-                    UIManager.render();
-                }
-            }
-
-            getFilteredItems() {
-                return this.items.filter(item => {
-                    const matchesSearch = item.razonSocial.toLowerCase().includes(this.searchQuery) || 
-                                          item.cuit.includes(this.searchQuery) ||
-                                          item.comprobante.toLowerCase().includes(this.searchQuery);
-                    if (!matchesSearch) return false;
-
-                    if (this.currentFilter === 'recibidos') return item.tipo === 'recibido';
-                    if (this.currentFilter === 'emitidos') return item.tipo === 'emitido';
-                    if (this.currentFilter === 'pending') return !item.confirmada;
-
-                    return true;
-                });
-            }
-        }
-
-        const appStore = new AppStore();
-
-        // 4. CONTROLADOR NAVEGACIÓN SPA E INTERFAZ (EXTENDIDO)
-        function switchTab(tabId) {
-            // Oculta todas las secciones
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            
-            // Muestra la sección seleccionada
-            document.getElementById(tabId).classList.remove('hidden');
-
-            // Actualiza estilos de navegación del sidebar
-            document.querySelectorAll('.sidebar-nav a').forEach(el => el.classList.remove('active-nav'));
-            const activeLink = document.querySelector(`[onclick="switchTab('${tabId}')"]`);
-            if (activeLink) activeLink.classList.add('active-nav');
-
-            // Actualiza el título dinámicamente según la sección
-            const titleElement = document.getElementById('page-title');
-            if (tabId === 'tab-conciliador') titleElement.innerText = "Conciliador CSV (Operaciones)";
-            else if (tabId === 'tab-ajustes-contadora') titleElement.innerText = "Ajustes Tributarios (Contadora)";
-            else if (tabId === 'tab-configuracion') titleElement.innerText = "Configuración del Sistema";
-            else if (tabId === 'tab-client-dashboard') {
-                titleElement.innerText = "Panel Gerencial (Dashboard)";
-                renderClientDashboard();
-            }
-            else if (tabId === 'tab-client-ocr') titleElement.innerText = "Lector de Documentos (OCR)";
-        }
-
-        // CONTROLADOR DE MÉTRICAS OPERATIVAS PARA EL GERENTE (DASHBOARD)
-        function renderClientDashboard() {
-            const items = appStore.items;
-
-            // Ventas Brutas (Emitidos) y Compras (Recibidos)
-            const sales = items.filter(i => i.tipo === 'emitido').reduce((sum, i) => sum + i.total, 0);
-            const purchases = items.filter(i => i.tipo === 'recibido').reduce((sum, i) => sum + i.total, 0);
-            const netBalance = sales - purchases;
-
-            // Actualización de valores principales
-            document.getElementById('client-sales-val').innerText = `$ ${sales.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-            document.getElementById('client-purchases-val').innerText = `$ ${purchases.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-            
-            const netEl = document.getElementById('client-net-val');
-            netEl.innerText = `$ ${netBalance.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-            netEl.style.color = netBalance >= 0 ? 'var(--success)' : 'var(--warning)';
-
-            // Cálculo estimativo de Impuestos locales
-            const ivaEstimado = (sales * 0.21) - (purchases * 0.21);
-            const iibbEstimado = sales * 0.03; // Estimación basada en AGIP (3%)
-
-            document.getElementById('client-iva-val').innerText = `$ ${Math.max(0, ivaEstimado).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-            document.getElementById('client-iibb-val').innerText = `$ ${iibbEstimado.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-
-            // Cálculo de porcentaje por categorías de gastos
-            const categoryChartContainer = document.getElementById('client-category-chart');
-            const purchaseItems = items.filter(i => i.tipo === 'recibido');
-
-            if (purchaseItems.length === 0) {
-                categoryChartContainer.innerHTML = `
-                    <li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">
-                        No hay datos de compras disponibles. Cargá los CSV de recibidos para ver el gráfico.
-                    </li>`;
-                return;
-            }
-
-            const catTotals = {};
-            purchaseItems.forEach(i => {
-                const cat = i.categoria || "Sin Categorizar";
-                catTotals[cat] = (catTotals[cat] || 0) + i.total;
-            });
-
-            // Generar barras porcentuales
-            const sortedCategories = Object.entries(catTotals).sort((a,b) => b[1] - a[1]);
-            categoryChartContainer.innerHTML = sortedCategories.map(([category, amount]) => {
-                const pct = Math.round((amount / purchases) * 100);
-                return `
-                    <li class="progress-item">
-                        <div class="progress-item-labels">
-                            <span>${category}</span>
-                            <span>$ ${amount.toLocaleString('es-AR', {maximumFractionDigits: 0})} (${pct}%)</span>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <!-- Opción 1: Toda la factura a una actividad -->
+                    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">
+                        <input type="radio" name="modal-act-opt" id="opt-all-to-one" value="all" checked style="margin-top: 4px;">
+                        <div>
+                            <span>Asignar el 100% a una sola actividad</span>
+                            <div style="margin-top: 6px;" onclick="event.stopPropagation()">
+                                <select id="select-modal-act-single" class="form-control">
+                                    <!-- Inyectado dinámicamente -->
+                                </select>
+                            </div>
                         </div>
-                        <div class="progress-track">
-                            <div class="progress-bar" style="width: ${pct}%;"></div>
+                    </label>
+
+                    <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 8px 0;">
+
+                    <!-- Opción 2: Dividir montos entre actividades -->
+                    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">
+                        <input type="radio" name="modal-act-opt" id="opt-split-act" value="split" style="margin-top: 4px;">
+                        <div style="width: 100%;">
+                            <span>Dividir base (Itemizar) entre múltiples actividades</span>
+                            <div style="margin-top: 8px; font-weight: normal; font-size: 12px; display: flex; flex-direction: column; gap: 8px;" id="container-modal-split-fields" onclick="event.stopPropagation()">
+                                <!-- Inyectado dinámicamente en ui.js -->
+                            </div>
                         </div>
-                    </li>
-                `;
-            }).join('');
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="document.getElementById('modal-multi-actividad').classList.add('hidden')">Cancelar</button>
+                <button class="btn-primary" id="btn-modal-act-submit">Confirmar Imputación</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL POP-UP: MAPEO DE COLUMNAS FALLBACK (SALARIOS / BANCOS) -->
+    <div id="modal-column-mapper" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modal-mapper-title" style="font-size: 16px; font-weight: bold; color: var(--primary);">Mapeo Manual de Columnas</h3>
+                <button onclick="document.getElementById('modal-column-mapper').classList.add('hidden')" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-mapper-body">
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">No pudimos identificar automáticamente las columnas del archivo subido. Por favor, asocia qué columna de tu planilla corresponde a cada campo.</p>
+                <div style="display: flex; flex-direction: column; gap: 12px;" id="container-mapper-selects">
+                    <!-- Inyectado dinámicamente -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="document.getElementById('modal-column-mapper').classList.add('hidden')">Cancelar</button>
+                <button class="btn-primary" id="btn-modal-mapper-submit">Aplicar y Guardar Plantilla</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- BOTTOM NAVIGATION BAR (Solo Mobile <= 768px) -->
+    <nav id="mobile-bottom-bar" class="mobile-bottom-bar">
+        <button class="mobile-nav-item active-mobile-nav" data-tab="tab-conciliador" onclick="switchTab('tab-conciliador')">
+            <span class="mobile-nav-icon">📊</span>
+            <span class="mobile-nav-label">Inicio</span>
+        </button>
+        <button class="mobile-nav-item" data-tab="tab-bancos" onclick="switchTab('tab-bancos')">
+            <span class="mobile-nav-icon">🏦</span>
+            <span class="mobile-nav-label">Bancos</span>
+        </button>
+        <button class="mobile-nav-item" data-tab="tab-sueldos" onclick="switchTab('tab-sueldos')">
+            <span class="mobile-nav-icon">👥</span>
+            <span class="mobile-nav-label">Sueldos</span>
+        </button>
+        <button class="mobile-nav-item" data-tab="tab-client-dashboard" onclick="switchTab('tab-client-dashboard')">
+            <span class="mobile-nav-icon">📈</span>
+            <span class="mobile-nav-label">Panel</span>
+        </button>
+        <button class="mobile-nav-item" id="btn-mobile-more-toggle" onclick="toggleMobileMoreSheet(true)">
+            <span class="mobile-nav-icon">📑</span>
+            <span class="mobile-nav-label">Más</span>
+        </button>
+    </nav>
+
+    <!-- BOTTOM SHEET MENÚ "MÁS" (Mobile) -->
+    <div id="mobile-more-sheet" class="mobile-more-sheet hidden" onclick="if(event.target === this) toggleMobileMoreSheet(false)">
+        <div class="mobile-more-content">
+            <div class="mobile-more-header">
+                <h3>Navegación y Más Opciones</h3>
+                <button class="btn-close-sheet" onclick="toggleMobileMoreSheet(false)">✕</button>
+            </div>
+            <ul class="mobile-more-list">
+                <li>
+                    <a onclick="switchTab('tab-movimientos-manuales'); toggleMobileMoreSheet(false);">
+                        <span class="sheet-icon">📝</span>
+                        <div class="sheet-text">
+                            <strong>Movimientos Manuales</strong>
+                            <p>Operaciones internas y compras REGINFO</p>
+                        </div>
+                    </a>
+                </li>
+                <li>
+                    <a onclick="switchTab('tab-ajustes-contadora'); toggleMobileMoreSheet(false);">
+                        <span class="sheet-icon">⚙️</span>
+                        <div class="sheet-text">
+                            <strong>Ajustes Tributarios</strong>
+                            <p>Parámetros impositivos y alícuotas</p>
+                        </div>
+                    </a>
+                </li>
+                <li>
+                    <a onclick="switchTab('tab-configuracion'); toggleMobileMoreSheet(false);">
+                        <span class="sheet-icon">👤</span>
+                        <div class="sheet-text">
+                            <strong>Configuración</strong>
+                            <p>Perfil de cliente y preferencias contables</p>
+                        </div>
+                    </a>
+                </li>
+                <li>
+                    <a onclick="switchTab('tab-client-ocr'); toggleMobileMoreSheet(false);">
+                        <span class="sheet-icon">📷</span>
+                        <div class="sheet-text">
+                            <strong>Cargar Documentos (OCR)</strong>
+                            <p>Digitalización de comprobantes físicos</p>
+                        </div>
+                    </a>
+                </li>
+            </ul>
+            <div class="mobile-more-footer">
+                <button id="mobile-logout-btn" class="btn-danger-outline" onclick="logout(); toggleMobileMoreSheet(false);">
+                    🚪 Cerrar Sesión
+                </button>
+            </div>
+        </div>
+    </div>
+
+    </div>
+
+    <!-- MODALES DE CATEGORIZACIÓN -->
+    <div id="modal-iibb-rate" class="modal hidden">
+        <div class="modal-content card" style="max-width: 400px; margin: 50px auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3>Nueva Tasa IIBB</h3>
+                <button class="btn-close" onclick="UIManager.closeModal('modal-iibb-rate')" style="background: none; border: none; font-size: 16px; cursor: pointer;">✕</button>
+            </div>
+            <form id="form-iibb-rate" onsubmit="event.preventDefault(); window.submitIibbRateForm();">
+                <div class="form-group">
+                    <label>Actividad Económica (Dejar vacío para General)</label>
+                    <select id="iibb-rate-activity" class="form-control">
+                        <option value="">-- General --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Jurisdicción</label>
+                    <input type="text" id="iibb-rate-jurisdiction" class="form-control" placeholder="Ej: CABA (AGIP)" required>
+                </div>
+                <div class="form-group">
+                    <label>Tasa (%)</label>
+                    <input type="number" id="iibb-rate-percent" class="form-control" placeholder="Ej: 3.5" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label>Vigente Desde</label>
+                    <input type="date" id="iibb-rate-from" class="form-control" required>
+                </div>
+                <button type="submit" class="btn-primary" style="width: 100%; margin-top: 16px;">Guardar Tasa</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-arca-catalog" class="modal hidden">
+        <div class="modal-content card" style="max-width: 500px; margin: 50px auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3>Importar Catálogo ARCA</h3>
+                <button class="btn-close" onclick="UIManager.closeModal('modal-arca-catalog')" style="background: none; border: none; font-size: 16px; cursor: pointer;">✕</button>
+            </div>
+            <form id="form-arca-catalog" onsubmit="event.preventDefault(); window.submitArcaCatalogForm();">
+                <div class="form-group">
+                    <label>JSON del Catálogo (Array de Actividades)</label>
+                    <textarea id="arca-catalog-json" class="form-control" rows="8" placeholder='[{"arca_activity_code": "620100", "name": "Servicios de programación", "description": "..."}]' required></textarea>
+                </div>
+                <button type="submit" class="btn-primary" style="width: 100%; margin-top: 16px;">Importar Actividades</button>
+            </form>
+        </div>
+    </div>
+
+    <style>
+        .modal {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 9999;
+            display: flex; align-items: center; justify-content: center;
         }
-
-        // SIMULADOR DE ESCANER OCR
-        document.getElementById('ocr-input').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const progressContainer = document.getElementById('ocr-progress-container');
-            const progressBar = document.getElementById('ocr-progressbar');
-            const statusText = document.getElementById('ocr-status-text');
-
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
-            
-            // Secuencias del simulador en tiempo real
-            const steps = [
-                { pct: 20, txt: "Leendo archivo digital..." },
-                { pct: 50, txt: "Aplicando OCR / Identificando patrones fiscales..." },
-                { pct: 80, txt: "Verificando CUITs de proveedor en ARCA/AFIP..." },
-                { pct: 100, txt: "Extracción completa exitosa." }
-            ];
-
-            let stepIdx = 0;
-            const interval = setInterval(() => {
-                if (stepIdx < steps.length) {
-                    progressBar.style.width = `${steps[stepIdx].pct}%`;
-                    statusText.innerText = steps[stepIdx].txt;
-                    stepIdx++;
-                } else {
-                    clearInterval(interval);
-                    
-                    // Incorporación del ticket detectado al flujo general del sistema
-                    const randomAmount = Math.floor(Math.random() * (15000 - 3000 + 1)) + 3000;
-                    const mockInvoice = {
-                        id: `ocr-${Date.now()}`,
-                        tipo: "recibido",
-                        fecha: new Date().toISOString().split('T')[0],
-                        comprobante: "C - Factura",
-                        cuit: "30506733524",
-                        razonSocial: "ESTACION DE SERVICIO YPF SA",
-                        total: randomAmount,
-                        categoria: "Movilidad y Viáticos",
-                        sugerida: true,
-                        confirmada: false
-                    };
-
-                    // Agrega la carga al listado del cliente e historial del sistema
-                    appStore.items.push(mockInvoice);
-                    appStore.ocrHistory.unshift({
-                        fecha: mockInvoice.fecha,
-                        proveedor: mockInvoice.razonSocial,
-                        cuit: mockInvoice.cuit,
-                        total: mockInvoice.total,
-                        estado: "✓ Procesado"
-                    });
-
-                    renderOcrHistory();
-                    UIManager.render();
-                    alert(`OCR procesado: Se detectó un ticket de ${mockInvoice.razonSocial} por $ ${mockInvoice.total}. Se sumó como gasto pendiente en tu bandeja.`);
-                    
-                    progressContainer.style.display = 'none';
-                    statusText.innerText = "";
-                }
-            }, 800);
-        });
-
-        function renderOcrHistory() {
-            const tableBody = document.getElementById('ocr-history-table');
-            if (appStore.ocrHistory.length === 0) {
-                tableBody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 20px;">No hay documentos escaneados recientemente.</td></tr>`;
-                return;
-            }
-
-            tableBody.innerHTML = appStore.ocrHistory.map(doc => `
-                <tr>
-                    <td>${doc.fecha}</td>
-                    <td><strong>${doc.proveedor}</strong></td>
-                    <td>${doc.cuit}</td>
-                    <td>$ ${doc.total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
-                    <td style="color: var(--success); font-weight: 600;">${doc.estado}</td>
-                </tr>
-            `).join('');
+        .modal.hidden { display: none !important; }
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 20px;
+            width: 100%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
         }
+    </style>
 
-        // 5. RENDERIZADO DEL CONCILIADOR (NÚCLEO EXISTENTE ADAPTADO)
-        class UIManager {
-            static init() {
-                this.setupDragAndDrop('zone-recibidos', 'file-recibidos', 'recibido');
-                this.setupDragAndDrop('zone-emitidos', 'file-emitidos', 'emitido');
-            }
-
-            static setupDragAndDrop(zoneId, inputId, type) {
-                const zone = document.getElementById(zoneId);
-                const input = document.getElementById(inputId);
-
-                input.addEventListener('change', (e) => {
-                    const file = e.target.files[0];
-                    if (file) this.processFile(file, type);
-                });
-
-                zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.style.borderColor = 'var(--accent)'; });
-                zone.addEventListener('dragleave', () => { zone.style.borderColor = 'var(--border-color)'; });
-                zone.addEventListener('drop', (e) => {
-                    e.preventDefault();
-                    zone.style.borderColor = 'var(--border-color)';
-                    const file = e.dataTransfer.files[0];
-                    if (file) this.processFile(file, type);
-                });
-            }
-
-            static processFile(file, type) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const parsed = CSVParser.parse(e.target.result, type);
-                    appStore.addItems(parsed);
-                };
-                reader.readAsText(file, 'UTF-8');
-            }
-
-            static render() {
-                const tbody = document.getElementById('table-body');
-                const items = appStore.getFilteredItems();
-
-                if (items.length === 0) {
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
-                                Ningún comprobante coincide con los filtros aplicados.
-                            </td>
-                        </tr>`;
-                    return;
-                }
-
-                tbody.innerHTML = items.map(item => {
-                    const isRecibido = item.tipo === 'recibido';
-                    const badgeClass = isRecibido ? 'badge-recibido' : 'badge-emitido';
-                    const badgeText = isRecibido ? 'Compra' : 'Venta';
-                    const categoriesList = isRecibido ? CATEGORIES_RECIBIDOS : CATEGORIES_EMITIDOS;
-
-                    const optionsHTML = `
-                        <option value="">-- Seleccionar Categoría --</option>
-                        ${categoriesList.map(cat => `
-                            <option value="${cat}" ${item.categoria === cat ? 'selected' : ''}>${cat}</option>
-                        `).join('')}
-                    `;
-
-                    const isSuggestedClass = (item.sugerida && !item.confirmada) ? 'suggested' : '';
-                    const suggestionIndicator = (item.sugerida && !item.confirmada) 
-                        ? `<span class="badge-suggested">Sugerido</span>` 
-                        : '';
-
-                    const confirmButtonHTML = item.confirmada
-                        ? `<button class="btn-confirm confirmed" disabled>✓ Confirmado</button>`
-                        : `<button class="btn-confirm" onclick="appStore.confirmItem('${item.id}')" ${!item.categoria ? 'disabled' : ''}>✓ Confirmar</button>`;
-
-                    return `
-                        <tr>
-                            <td><span class="badge ${badgeClass}">${badgeText}</span></td>
-                            <td>${item.fecha}</td>
-                            <td>${item.comprobante}</td>
-                            <td>${item.cuit}</td>
-                            <td><strong>${item.razonSocial}</strong></td>
-                            <td>$ ${item.total.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
-                            <td>
-                                <div class="category-cell">
-                                    <select class="select-category ${isSuggestedClass}" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
-                                        ${optionsHTML}
-                                    </select>
-                                    ${suggestionIndicator}
-                                </div>
-                            </td>
-                            <td>${confirmButtonHTML}</td>
-                        </tr>
-                    `;
-                }).join('');
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            UIManager.init();
-        });
-    </script>
+    <!-- Script inicializador cargado como módulo ES -->
+    <script type="module" src="src/js/ui.js"></script>
+    </div> <!-- FIN APP CONTAINER -->
 </body>
 </html>
