@@ -340,7 +340,11 @@ export class PersistenceService {
         if (!Array.isArray(data)) return [];
 
         return data
-            .filter(r => r.record_type === 'PERCEPCIONES_ARBA' || r.record_type === 'PERCEPCIONES_IVA')
+            .filter(r => {
+                const rt = String(r.record_type || '').toUpperCase();
+                const op = String(r.tipo_operacion || '').toUpperCase();
+                return rt.includes('PERCEPCION') || rt === 'ARBA' || rt === 'IVA' || op === 'PERCEPCION';
+            })
             .map(r => {
                 const d = r.normalized_payload || {};
                 return {
@@ -348,14 +352,15 @@ export class PersistenceService {
                     cuit: r.cuit || d.cuit || '',
                     razonSocial: r.razon_social || d.razonSocial || 'AGENTE PERCEPCION',
                     fecha: d.fecha || r.fecha,
-                    period: d.period || d.periodo,
+                    period: d.period || d.periodo || r.periodo,
+                    periodo: d.period || d.periodo || r.periodo,
                     regimen: d.regimen,
                     sucursal: d.sucursal,
                     comprobante: r.comprobante || d.comprobante,
                     monto: typeof r.total === 'number' ? r.total : (d.monto || d.amount || 0),
                     amount: typeof r.total === 'number' ? r.total : (d.amount || d.monto || 0),
-                    jurisdiction: d.jurisdiction || (r.record_type === 'PERCEPCIONES_ARBA' ? 'ARBA' : 'NACIONAL (IVA)'),
-                    fuente: d.fuente || (r.record_type === 'PERCEPCIONES_ARBA' ? 'ARBA' : 'IVA'),
+                    jurisdiction: d.jurisdiction || (String(r.record_type).includes('ARBA') || r.record_type === 'ARBA' ? 'ARBA' : 'NACIONAL (IVA)'),
+                    fuente: d.fuente || (String(r.record_type).includes('ARBA') || r.record_type === 'ARBA' ? 'ARBA' : 'IVA'),
                     tipo: 'percepcion',
                     rawRecord: d
                 };
@@ -417,7 +422,7 @@ export class PersistenceService {
     }
 
     /**
-     * Cargar categorías tributarias activas
+     * Cargar categorías tributarias activas asignadas a la org
      */
     async loadActiveTaxCategories() {
         const { data, error } = await supabase.rpc('get_active_tax_categories');
@@ -426,7 +431,7 @@ export class PersistenceService {
     }
 
     /**
-     * Cargar actividades económicas activas
+     * Cargar actividades económicas activas asignadas a la org
      */
     async loadActiveEconomicActivities() {
         const { data, error } = await supabase.rpc('get_active_economic_activities');
@@ -435,11 +440,43 @@ export class PersistenceService {
     }
 
     /**
-     * Cargar tasas IIBB activas
+     * Cargar catálogo global de actividades ARCA
+     */
+    async loadGlobalEconomicActivities() {
+        const { data, error } = await supabase
+            .from('eco_economic_activities')
+            .select('*')
+            .order('arca_code', { ascending: true });
+        if (error) throw new Error(`Error loadGlobalEconomicActivities: ${error.message}`);
+        return data || [];
+    }
+
+    /**
+     * Asignar actividad económica a la organización
+     */
+    async assignEconomicActivityToOrg(activityId) {
+        const { error } = await supabase.rpc('assign_economic_activity_to_org', {
+            p_activity_id: activityId
+        });
+        if (error) throw new Error(`Error assignEconomicActivityToOrg: ${error.message}`);
+    }
+
+    /**
+     * Desasignar actividad económica de la organización
+     */
+    async unassignEconomicActivityFromOrg(activityId) {
+        const { error } = await supabase.rpc('unassign_economic_activity_from_org', {
+            p_activity_id: activityId
+        });
+        if (error) throw new Error(`Error unassignEconomicActivityFromOrg: ${error.message}`);
+    }
+
+    /**
+     * Cargar tasas IIBB activas de la organización
      */
     async loadActiveIibbRates() {
-        const { data, error } = await supabase.rpc('get_active_iibb_rates');
-        if (error) throw new Error(`Error get_active_iibb_rates: ${error.message}`);
+        const { data, error } = await supabase.rpc('get_active_org_iibb_rates');
+        if (error) throw new Error(`Error get_active_org_iibb_rates: ${error.message}`);
         return data || [];
     }
 
@@ -468,6 +505,29 @@ export class PersistenceService {
     }
 
     /**
+     * Modificar categoría tributaria global (Semántica ADMIN)
+     */
+    async updateTaxCategory(categoryId, { name, description, is_active = true }) {
+        const { error } = await supabase.rpc('update_global_tax_category', {
+            p_category_id: categoryId,
+            p_name: name,
+            p_description: description,
+            p_is_active: is_active
+        });
+        if (error) throw new Error(`Error updateTaxCategory: ${error.message}`);
+    }
+
+    /**
+     * Desactivar/Desasignar categoría tributaria para la organización actual
+     */
+    async unassignTaxCategoryFromOrg(categoryId) {
+        const { error } = await supabase.rpc('unassign_tax_category_from_org', {
+            p_category_id: categoryId
+        });
+        if (error) throw new Error(`Error unassignTaxCategoryFromOrg: ${error.message}`);
+    }
+
+    /**
      * Importar catálogo ARCA por lotes seguros
      */
     async upsertArcaCatalog(activitiesJson) {
@@ -485,7 +545,7 @@ export class PersistenceService {
     }
 
     /**
-     * CRUD IIBB Rates (Creation handled via generic insert to eco_org_activity_iibb_rates or via RPC if created, we'll assume direct Supabase table insert/update since RLS handles it, but let's provide wrappers)
+     * CRUD IIBB Rates via M014 RPCs
      */
     async createIibbRate(payload) {
         const { data, error } = await supabase.rpc('create_org_activity_iibb_rate', {
@@ -493,18 +553,20 @@ export class PersistenceService {
             p_jurisdiction: payload.jurisdiction,
             p_rate: payload.rate_percent,
             p_valid_from: payload.valid_from,
-            p_valid_to: payload.valid_to
+            p_valid_to: payload.valid_to || null
         });
         if (error) throw new Error(`Error createIibbRate: ${error.message}`);
         return data;
     }
 
-    async updateIibbRate(id, payload) {
-        const { data, error } = await supabase
-            .from('eco_org_activity_iibb_rates')
-            .update(payload)
-            .eq('id', id)
-            .select();
+    async updateIibbRate(rateId, payload) {
+        const { data, error } = await supabase.rpc('update_org_activity_iibb_rate', {
+            p_rate_id: rateId,
+            p_rate: payload.rate_percent,
+            p_valid_from: payload.valid_from,
+            p_valid_to: payload.valid_to || null,
+            p_is_active: payload.is_active !== undefined ? payload.is_active : true
+        });
         if (error) throw new Error(`Error updateIibbRate: ${error.message}`);
         return data;
     }

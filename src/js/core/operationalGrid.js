@@ -11,7 +11,10 @@ export class OperationalGrid {
         this.amountField = amountField;
 
         this.searchQuery = '';
+        this.dateMode = 'month'; // 'month' o 'custom'
         this.periodFilter = ''; // 'YYYY-MM'
+        this.startDate = ''; // 'YYYY-MM-DD'
+        this.endDate = ''; // 'YYYY-MM-DD'
         this.primaryFilter = 'all'; // 'all', 'emitidos', 'recibidos', 'pending', 'debitos', 'creditos', or jurisdiction name
         
         this.sortColumn = null;
@@ -80,13 +83,26 @@ export class OperationalGrid {
         this.searchQuery = '';
     }
 
-    // --- Período ---
+    // --- Período y Rango de Fechas ---
+    setDateMode(mode) {
+        this.dateMode = mode === 'custom' ? 'custom' : 'month';
+    }
+
     setPeriod(periodStr) {
+        this.dateMode = 'month';
         this.periodFilter = periodStr || ''; // 'YYYY-MM'
+    }
+
+    setCustomRange(startStr, endStr) {
+        this.dateMode = 'custom';
+        this.startDate = startStr || '';
+        this.endDate = endStr || '';
     }
 
     clearPeriod() {
         this.periodFilter = '';
+        this.startDate = '';
+        this.endDate = '';
     }
 
     // --- Filtro Principal ---
@@ -150,23 +166,28 @@ export class OperationalGrid {
                 if (!matches) return false;
             }
 
-            // 2. Filtro por Período (YYYY-MM)
-            if (this.periodFilter) {
-                const dateVal = customFieldExtractor[this.dateField] ? customFieldExtractor[this.dateField](item) : item[this.dateField];
-                if (!dateVal) return false;
-                // Soporta ISO "YYYY-MM-DD" o formato "YYYY-MM" o "DD/MM/YYYY"
-                let normalizedYearMonth = '';
-                if (dateVal.includes('-')) {
-                    normalizedYearMonth = dateVal.substring(0, 7);
-                } else if (dateVal.includes('/')) {
-                    const parts = dateVal.split('/');
+            // 2. Filtro por Fecha (Modo Mes YYYY-MM o Rango Personalizado YYYY-MM-DD)
+            const rawDate = customFieldExtractor[this.dateField] ? customFieldExtractor[this.dateField](item) : item[this.dateField];
+            if (rawDate) {
+                let isoDate = '';
+                if (rawDate.includes('-')) {
+                    isoDate = rawDate.substring(0, 10);
+                } else if (rawDate.includes('/')) {
+                    const parts = rawDate.split('/');
                     if (parts.length === 3) {
-                        normalizedYearMonth = `${parts[2]}-${parts[1].padStart(2, '0')}`;
+                        isoDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
                     }
                 }
-                if (normalizedYearMonth && normalizedYearMonth !== this.periodFilter) {
-                    return false;
+
+                if (this.dateMode === 'custom') {
+                    if (this.startDate && isoDate < this.startDate) return false;
+                    if (this.endDate && isoDate > this.endDate) return false;
+                } else if (this.periodFilter) {
+                    const ym = isoDate ? isoDate.substring(0, 7) : '';
+                    if (ym && ym !== this.periodFilter) return false;
                 }
+            } else if (this.periodFilter || (this.dateMode === 'custom' && (this.startDate || this.endDate))) {
+                return false;
             }
 
             // 3. Filtro Principal

@@ -1725,8 +1725,21 @@ export class UIManager {
         sel.innerHTML = html;
     }
 
+    static syncHeaderVisibility(grid, tableId) {
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        const ths = table.querySelectorAll('thead th[data-col-key]');
+        ths.forEach(th => {
+            const key = th.getAttribute('data-col-key');
+            if (key) {
+                th.classList.toggle('hidden', !grid.isColumnVisible(key));
+            }
+        });
+    }
+
     static renderPerceptionsTable() {
         UIManager.updateJurisdictionFilterSelects();
+        UIManager.syncHeaderVisibility(percepcionesGrid, 'table-percepciones');
 
         const tbody = document.getElementById('table-percepciones-body');
         const summaryBar = document.getElementById('percepciones-summary-bar');
@@ -1774,6 +1787,8 @@ export class UIManager {
     }
 
     static renderBankTable() {
+        UIManager.syncHeaderVisibility(bancosGrid, 'table-bancos');
+
         const tbody = document.getElementById('table-bancos-body');
         const summaryBar = document.getElementById('bancos-summary-bar');
         if (!tbody) return;
@@ -1832,6 +1847,8 @@ export class UIManager {
     }
 
     static renderMainTable() {
+        UIManager.syncHeaderVisibility(comprobantesGrid, 'table-comprobantes');
+
         const tbody = document.getElementById('table-body');
         if (!tbody) return;
 
@@ -1913,38 +1930,46 @@ export class UIManager {
         }).join('');
     }
 
+    static renderCategorization() {
+        this.renderSettings();
+    }
+
     static renderSettings() {
-        // Tax Categories
+        // Categorías Tributarias
         const tcTbody = document.getElementById('table-tax-categories-body');
         if (tcTbody) {
             const taxCats = appStore.taxCategories || [];
             if (taxCats.length === 0) {
-                tcTbody.innerHTML = `<tr><td colspan="4" style="text-align: center;">No hay categorías tributarias configuradas.</td></tr>`;
+                tcTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No hay categorías tributarias asignadas a esta organización.</td></tr>`;
             } else {
                 tcTbody.innerHTML = taxCats.map(c => `
                     <tr>
                         <td><strong>${c.name}</strong></td>
                         <td>${c.description || '-'}</td>
-                        <td><span style="color:var(--success);">Activo</span></td>
-                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Editar</button></td>
+                        <td><span style="color:var(--success); font-weight: 600;">Asignada en Org.</span></td>
+                        <td>
+                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="promptUnassignTaxCategory('${c.id}')">Desactivar para Org</button>
+                        </td>
                     </tr>
                 `).join('');
             }
         }
 
-        // Economic Activities
+        // Actividades Económicas Asignadas a Org
         const eaTbody = document.getElementById('table-economic-activities-body');
         if (eaTbody) {
             const activities = appStore.economicActivities || [];
             if (activities.length === 0) {
-                eaTbody.innerHTML = `<tr><td colspan="4" style="text-align: center;">No hay actividades económicas configuradas.</td></tr>`;
+                eaTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No hay actividades económicas asignadas a la organización.</td></tr>`;
             } else {
                 eaTbody.innerHTML = activities.map(a => `
                     <tr>
-                        <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">${a.arca_code || a.arca_activity_code || a.code || ''}</span></td>
+                        <td><span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">${a.arca_code || a.arca_activity_code || a.code || ''}</span></td>
                         <td><strong>${a.name}</strong></td>
-                        <td><span style="color:var(--success);">Activo</span></td>
-                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Editar</button></td>
+                        <td><span style="color:var(--success); font-weight: 600;">Activa en Org</span></td>
+                        <td>
+                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="unassignArcaActivityFromOrg('${a.id}')">Remover Asignación</button>
+                        </td>
                     </tr>
                 `).join('');
             }
@@ -1955,17 +1980,17 @@ export class UIManager {
         if (irTbody) {
             const rates = appStore.iibbRates || [];
             if (rates.length === 0) {
-                irTbody.innerHTML = `<tr><td colspan="7" style="text-align: center;">No hay tasas IIBB configuradas.</td></tr>`;
+                irTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No hay tasas IIBB configuradas para esta organización.</td></tr>`;
             } else {
                 irTbody.innerHTML = rates.map(r => `
                     <tr>
-                        <td>${r.activity_id ? r.activity_id.substring(0,8) : 'General'}</td>
-                        <td>${r.jurisdiction}</td>
-                        <td style="font-weight: 600;">${r.rate_percent}%</td>
+                        <td>${r.activity_name || r.activity_id ? String(r.activity_id).substring(0,8) : 'General'}</td>
+                        <td><strong>${r.jurisdiction}</strong></td>
+                        <td style="font-weight: 700; color: var(--primary);">${r.rate_percent}%</td>
                         <td>${r.valid_from ? new Date(r.valid_from).toLocaleDateString() : '-'}</td>
                         <td>${r.valid_to ? new Date(r.valid_to).toLocaleDateString() : 'Indefinido'}</td>
-                        <td>${r.is_active ? '<span style="color:var(--success);">Vigente</span>' : '<span style="color:var(--text-muted);">Inactivo</span>'}</td>
-                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Modificar</button></td>
+                        <td>${r.is_active ? '<span style="color:var(--success); font-weight:600;">Vigente</span>' : '<span style="color:var(--text-muted);">Inactivo</span>'}</td>
+                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="appStore.promptEditIibbRate('${r.id}')">Editar</button></td>
                     </tr>
                 `).join('');
             }
@@ -2010,6 +2035,95 @@ window.appStore = appStore;
 window.toggleMobileMoreSheet = toggleMobileMoreSheet;
 window.logout = logout;
 window.UIManager = UIManager;
+
+window.handleComprobantesDateModeChange = function(e) {
+    const mode = e.target.value;
+    comprobantesGrid.setDateMode(mode);
+    const mContainer = document.getElementById('comprobantes-month-container');
+    const cContainer = document.getElementById('comprobantes-custom-container');
+    if (mContainer) mContainer.style.display = mode === 'custom' ? 'none' : 'flex';
+    if (cContainer) cContainer.style.display = mode === 'custom' ? 'flex' : 'none';
+    UIManager.renderMainTable();
+};
+
+window.handleComprobantesCustomDateChange = function() {
+    const from = document.getElementById('comprobantes-date-from')?.value;
+    const to = document.getElementById('comprobantes-date-to')?.value;
+    comprobantesGrid.setCustomRange(from, to);
+    UIManager.renderMainTable();
+};
+
+window.handlePercepcionesDateModeChange = function(e) {
+    const mode = e.target.value;
+    percepcionesGrid.setDateMode(mode);
+    const mContainer = document.getElementById('percepciones-month-container');
+    const cContainer = document.getElementById('percepciones-custom-container');
+    if (mContainer) mContainer.style.display = mode === 'custom' ? 'none' : 'flex';
+    if (cContainer) cContainer.style.display = mode === 'custom' ? 'flex' : 'none';
+    UIManager.renderPerceptionsTable();
+};
+
+window.handlePercepcionesCustomDateChange = function() {
+    const from = document.getElementById('percepciones-date-from')?.value;
+    const to = document.getElementById('percepciones-date-to')?.value;
+    percepcionesGrid.setCustomRange(from, to);
+    UIManager.renderPerceptionsTable();
+};
+
+window.handleBancosDateModeChange = function(e) {
+    const mode = e.target.value;
+    bancosGrid.setDateMode(mode);
+    const mContainer = document.getElementById('bancos-month-container');
+    const cContainer = document.getElementById('bancos-custom-container');
+    if (mContainer) mContainer.style.display = mode === 'custom' ? 'none' : 'flex';
+    if (cContainer) cContainer.style.display = mode === 'custom' ? 'flex' : 'none';
+    UIManager.renderBankTable();
+};
+
+window.handleBancosCustomDateChange = function() {
+    const from = document.getElementById('bancos-date-from')?.value;
+    const to = document.getElementById('bancos-date-to')?.value;
+    bancosGrid.setCustomRange(from, to);
+    UIManager.renderBankTable();
+};
+
+window.promptUnassignTaxCategory = async function(categoryId) {
+    if (!confirm("¿Deseas desactivar esta categoría tributaria para la organización actual?")) return;
+    try {
+        await persistenceService.unassignTaxCategoryFromOrg(categoryId);
+        await appStore.loadTaxCategories();
+        alert("Categoría desactivada para la organización.");
+    } catch (err) {
+        alert("Error al desactivar categoría: " + err.message);
+    }
+};
+
+window.assignArcaActivityToOrg = async function(activityId) {
+    try {
+        await persistenceService.assignEconomicActivityToOrg(activityId);
+        await Promise.all([
+            appStore.loadEconomicActivities(),
+            appStore.loadGlobalEconomicActivities()
+        ]);
+        alert("Actividad económica asignada a la organización.");
+    } catch (err) {
+        alert("Error al asignar actividad económica: " + err.message);
+    }
+};
+
+window.unassignArcaActivityFromOrg = async function(activityId) {
+    if (!confirm("¿Deseas remover la asignación de esta actividad económica para la organización actual?")) return;
+    try {
+        await persistenceService.unassignEconomicActivityFromOrg(activityId);
+        await Promise.all([
+            appStore.loadEconomicActivities(),
+            appStore.loadGlobalEconomicActivities()
+        ]);
+        alert("Actividad desasignada.");
+    } catch (err) {
+        alert("Error al desasignar actividad: " + err.message);
+    }
+};
 
 window.submitIibbRateForm = async () => {
     const activityId = document.getElementById('iibb-rate-activity').value || null;

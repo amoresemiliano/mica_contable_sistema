@@ -8,10 +8,12 @@ export class AppStore {
         this.perceptions = []; // Tabla_Percepciones_Provinciales (CUIT, Fecha/Periodo, Monto, Jurisdiccion)
         this.bankTransactions = []; // Extracto bancario normalizado (Fecha, Descripcion, Monto, CuentaSugerida, Estado)
         this.salaries = null; // Sueldos Acompy (SueldoBruto, Anticipos, SindicatoAporte, SueldoNeto, f931Total, sindicatoContribucion)
+        this.salariesList = []; // Vector de sueldos por período
         this.manualMovements = []; // Movimientos REGINFO e internos
         this.ocrHistory = [];
         this.taxCategories = [];
-        this.economicActivities = [];
+        this.economicActivities = []; // Actividades asignadas a la organización
+        this.globalEconomicActivities = []; // Catálogo global ARCA (F883)
         this.iibbRates = [];
         this.importIssues = [];
         
@@ -162,20 +164,34 @@ export class AppStore {
     // Cargar Sueldos consolidados de Acompy
     addSalary(salaryData) {
         if (!salaryData) return;
-        const norm = salaryData.normalizedData || salaryData;
-        this.salaries = {
-            ...norm,
-            sueldoBruto: norm.sueldoBruto || norm.sueldoBrutoCalculado || norm.remunerativo || 0,
-            sueldoBrutoCalculado: norm.sueldoBrutoCalculado || norm.remunerativo || 0,
-            anticipos: norm.anticipos || norm.anticipoSueldo || 0,
-            anticipoSueldo: norm.anticipoSueldo || norm.anticipos || 0,
-            sindicatoAporte: norm.sindicatoAporte || norm.aporteSindicalCalculado || norm.aporteSindicalObligatorio || 0,
-            aporteSindicalCalculado: norm.aporteSindicalCalculado || norm.aporteSindicalObligatorio || 0,
-            sueldoNeto: norm.sueldoNeto || 0,
-            remunerativo: norm.remunerativo || 0,
-            noRemunerativo: norm.noRemunerativo || 0,
-            periodo: norm.periodo || ''
-        };
+        const list = Array.isArray(salaryData) ? salaryData : [salaryData];
+        list.forEach(item => {
+            const norm = item.normalizedData || item;
+            if (!norm) return;
+            const entry = {
+                ...norm,
+                id: item.id || norm.id || `sal-${Date.now()}-${Math.random()}`,
+                sueldoBruto: norm.sueldoBruto || norm.sueldoBrutoCalculado || norm.remunerativo || 0,
+                sueldoBrutoCalculado: norm.sueldoBrutoCalculado || norm.remunerativo || 0,
+                anticipos: norm.anticipos || norm.anticipoSueldo || 0,
+                anticipoSueldo: norm.anticipoSueldo || norm.anticipos || 0,
+                sindicatoAporte: norm.sindicatoAporte || norm.aporteSindicalCalculado || norm.aporteSindicalObligatorio || 0,
+                aporteSindicalCalculado: norm.aporteSindicalCalculado || norm.aporteSindicalObligatorio || 0,
+                sueldoNeto: norm.sueldoNeto || 0,
+                remunerativo: norm.remunerativo || 0,
+                noRemunerativo: norm.noRemunerativo || 0,
+                periodo: norm.periodo || ''
+            };
+            const existingIdx = this.salariesList.findIndex(s => (entry.periodo && s.periodo === entry.periodo) || s.id === entry.id);
+            if (existingIdx !== -1) {
+                this.salariesList[existingIdx] = entry;
+            } else {
+                this.salariesList.push(entry);
+            }
+        });
+        if (this.salariesList.length > 0) {
+            this.salaries = this.salariesList[this.salariesList.length - 1];
+        }
         this.notify();
     }
 
@@ -196,7 +212,17 @@ export class AppStore {
             this.economicActivities = acts || [];
             this.notify();
         } catch (e) {
-            console.warn("Error cargando actividades económicas:", e.message);
+            console.warn("Error cargando actividades económicas de la organización:", e.message);
+        }
+    }
+
+    async loadGlobalEconomicActivities() {
+        try {
+            const globalActs = await persistenceService.loadGlobalEconomicActivities();
+            this.globalEconomicActivities = globalActs || [];
+            this.notify();
+        } catch (e) {
+            console.warn("Error cargando catálogo global ARCA F883:", e.message);
         }
     }
 
@@ -208,13 +234,6 @@ export class AppStore {
         } catch (e) {
             console.warn("Error cargando tasas IIBB:", e.message);
         }
-    }
-
-    // Registrar Movimiento Manual o Interno
-    addManualMovement(movement) {
-        movement.id = `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        this.manualMovements.push(movement);
-        this.notify();
     }
 
     setFilter(filter) {
@@ -232,35 +251,26 @@ export class AppStore {
     }
 
     setSearch(query) {
-        this.searchQuery = query.toLowerCase();
+        this.searchQuery = (query || '').toLowerCase();
         this.notify();
     }
 
-    async loadTaxCategories() {
-        try {
-            this.taxCategories = await persistenceService.loadActiveTaxCategories();
-            this.notify();
-        } catch (e) {
-            console.error("Failed to load tax categories", e);
-        }
-    }
-
-    async loadEconomicActivities() {
-        try {
-            this.economicActivities = await persistenceService.loadActiveEconomicActivities();
-            this.notify();
-        } catch (e) {
-            console.error("Failed to load economic activities", e);
-        }
-    }
-
-    async loadIibbRates() {
-        try {
-            this.iibbRates = await persistenceService.loadActiveIibbRates();
-            this.notify();
-        } catch (e) {
-            console.error("Failed to load IIBB rates", e);
-        }
+    getFilteredItems() {
+        return (this.items || []).filter(item => {
+            if (this.currentFilter !== 'all') {
+                if (this.currentFilter === 'recibidos' && item.tipo !== 'recibido') return false;
+                if (this.currentFilter === 'emitidos' && item.tipo !== 'emitido') return false;
+                if (this.currentFilter === 'pending' && (item.confirmada || item.category_id)) return false;
+            }
+            if (this.searchQuery) {
+                const q = this.searchQuery;
+                const matches = (item.razonSocial || '').toLowerCase().includes(q) ||
+                                (item.cuit || '').includes(q) ||
+                                (item.comprobante || '').toLowerCase().includes(q);
+                if (!matches) return false;
+            }
+            return true;
+        });
     }
 
     async promptUpsertArcaCatalog() {
