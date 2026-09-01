@@ -18,20 +18,30 @@ This model is highly extensible. New taxes or union rules can be added to the gl
 Multitenancy is strictly enforced. All transactional tables (`eco_org_obligations`, `eco_obligation_instances`, `eco_obligation_payments`) have an `organization_id` column.
 Following the MICA standard, `organization_id` should **never** be trusted from the frontend. Security Definer RPCs will enforce constraints, and RLS will use `private.org_id()` to ensure tenants only access their data.
 
+**History Protection**: All foreign keys to critical organizational entities and parents use `ON DELETE RESTRICT` (instead of `CASCADE`) to prevent accidental destruction of audit history and instances.
+
 *See `sql/design/015_agenda_obligaciones_draft.sql` for the full schema proposal.*
 
 ## 4. Lifecycle / State Model
-An `eco_obligation_instances` record can have the following statuses:
-*   `PENDING`: Generated or manually created, but not yet paid.
+An `eco_obligation_instances` record can have the following stored statuses:
+*   `PENDING`: Generated or manually created, but not yet paid (or partially paid).
 *   `PAID`: Fully paid.
-*   `OVERDUE`: **(Computed)** We should NOT store `OVERDUE` directly as a static state, because time continuously moves. Instead, status is `PENDING` but the `due_date < CURRENT_DATE`. A database view or API logic should dynamically compute `OVERDUE`.
 *   `CANCELLED`: Invalidated or reversed (e.g., if a source record was fundamentally wrong and the obligation shouldn't exist).
+
+**Computed Overdue State**:
+*   `OVERDUE`: We do **NOT** store `OVERDUE` directly as a static state, because time continuously moves. Instead, status is `PENDING` but the `due_date < CURRENT_DATE`. A database view or API logic dynamically computes `OVERDUE`.
 
 ## 5. Idempotency & Source Integration
 Re-importing source data (like salaries) must not create duplicate instances.
 
-**Identity Rule**: Idempotency is guaranteed by a UNIQUE constraint on `(organization_id, org_obligation_id, period)`.
-*   **A. Sueldos**: When the Salary Parser processes a file, the backend will check for existing instances for that period and `org_obligation`. If the underlying raw `eco_financial_movements` changes the amount, the `eco_obligation_instances` amount should be updated, and an audit event generated. Raw source records remain immutable.
+**Extensible Identity Key**: Idempotency is guaranteed by a UNIQUE constraint on `(organization_id, identity_key)`.
+The `identity_key` is a deterministic hash of the context: e.g., `hash(org_obligation_id, period, jurisdiction/context)`. This is extensible for complex cases compared to a flat tuple.
+
+**Source Amendment Rules & No Silent Override**:
+*   **A. Sueldos**: When the Salary Parser processes a file, the backend checks for existing instances via `identity_key`. If the underlying raw `eco_financial_movements` changes the amount:
+    *   The `eco_obligation_instances` amount is updated.
+    *   An audit event is ALWAYS generated.
+    *   No silent override is permitted. Any user-made manual adjustment to an automatically sourced obligation requires an explicit audit log and cannot simply overwrite the source. If the source is wrong, the source should be fixed (immutable raw records are appended/corrected).
 *   **B. Taxes**: Future calculations will work similarly, upserting the instance based on the deterministic key.
 *   **C. Manual**: Follows the same key. Manual overrides to calculated amounts must be clearly audited.
 
@@ -49,7 +59,7 @@ Key queries:
 *   `get_paid_by_period()`: JOIN with payments to sum amounts.
 
 ## 8. Auditability
-Given MICA is accounting software, we must track changes. A new table `eco_obligation_audit` (or extending existing `eco_audit_events`) will record:
+Given MICA is accounting software, we must track changes. We reuse the existing `public.eco_audit_events` table to record:
 *   `INSTANCE_GENERATED`
 *   `AMOUNT_UPDATED` (e.g., due to source recalculation)
 *   `PAYMENT_ADDED`
