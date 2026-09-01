@@ -18,6 +18,291 @@ import { persistenceService } from './core/services/persistenceService.js';
 import { parseF883ActivitiesTxt } from './core/parsers/activitiesParser.js';
 import { OperationalGrid } from './core/operationalGrid.js';
 
+export const comprobantesGrid = new OperationalGrid({
+    moduleId: 'comprobantes',
+    defaultColumns: ['fecha', 'comprobante', 'cuit', 'razonSocial', 'iva', 'total', 'categoria', 'estado'],
+    searchFields: ['razonSocial', 'cuit', 'comprobante', 'categoria'],
+    dateField: 'fecha',
+    amountField: 'total'
+});
+
+export const percepcionesGrid = new OperationalGrid({
+    moduleId: 'percepciones',
+    defaultColumns: ['fuente', 'fecha', 'periodo', 'cuit', 'agente', 'comprobante', 'monto'],
+    searchFields: ['agente', 'cuit', 'comprobante', 'fuente', 'jurisdiction'],
+    dateField: 'fecha',
+    amountField: 'monto'
+});
+
+export const bancosGrid = new OperationalGrid({
+    moduleId: 'extractos',
+    defaultColumns: ['fecha', 'descripcion', 'monto', 'tipo', 'cuenta', 'estado'],
+    searchFields: ['descripcion', 'cuenta', 'categoria', 'tipo'],
+    dateField: 'fecha',
+    amountField: 'monto'
+});
+
+// Event handlers globales para las toolbars operacionales
+
+// --- Comprobantes ---
+window.setComprobantesFilter = function(filterVal) {
+    comprobantesGrid.setPrimaryFilter(filterVal);
+    document.querySelectorAll('#comprobantes-filter-group .btn-filter').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filterVal);
+    });
+    UIManager.renderMainTable();
+};
+
+window.handleComprobantesPeriodChange = function(e) {
+    comprobantesGrid.setPeriod(e.target.value);
+    UIManager.renderMainTable();
+};
+
+window.handleComprobantesSearchInput = function(e) {
+    const val = e.target.value;
+    comprobantesGrid.setSearch(val);
+    const clearBtn = document.getElementById('comprobantes-search-clear');
+    if (clearBtn) clearBtn.style.display = val.trim() ? 'block' : 'none';
+    UIManager.renderMainTable();
+};
+
+window.clearComprobantesSearch = function() {
+    comprobantesGrid.clearSearch();
+    const input = document.getElementById('comprobantes-search-input');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    const clearBtn = document.getElementById('comprobantes-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    UIManager.renderMainTable();
+};
+
+window.toggleComprobantesColDropdown = function(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('comprobantes-col-menu');
+    if (menu) {
+        const isHidden = menu.style.display === 'none' || !menu.style.display;
+        menu.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) renderComprobantesColumnCheckboxes();
+    }
+};
+
+function renderComprobantesColumnCheckboxes() {
+    const container = document.getElementById('comprobantes-col-checkboxes');
+    if (!container) return;
+    const allCols = [
+        { key: 'origen', label: 'Origen' },
+        { key: 'fecha', label: 'Fecha' },
+        { key: 'comprobante', label: 'Comprobante' },
+        { key: 'cuit', label: 'CUIT' },
+        { key: 'razonSocial', label: 'Razón Social' },
+        { key: 'neto', label: 'Neto Gravado' },
+        { key: 'exentas', label: 'Exentas' },
+        { key: 'otrosTributos', label: 'Otros Tributos' },
+        { key: 'iva', label: 'IVA' },
+        { key: 'percIva', label: 'Perc. IVA' },
+        { key: 'percIibb', label: 'Perc. IIBB' },
+        { key: 'total', label: 'Total' },
+        { key: 'categoria', label: 'Categoría' },
+        { key: 'actividad', label: 'Actividad' },
+        { key: 'estado', label: 'Estado' }
+    ];
+    container.innerHTML = allCols.map(col => `
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+            <input type="checkbox" ${comprobantesGrid.isColumnVisible(col.key) ? 'checked' : ''} onchange="toggleComprobantesColumn('${col.key}')">
+            ${col.label}
+        </label>
+    `).join('');
+}
+
+window.toggleComprobantesColumn = function(colKey) {
+    comprobantesGrid.toggleColumnVisibility(colKey);
+    renderComprobantesColumnCheckboxes();
+    UIManager.renderMainTable();
+};
+
+window.resetComprobantesColumns = function() {
+    comprobantesGrid.resetColumns();
+    renderComprobantesColumnCheckboxes();
+    UIManager.renderMainTable();
+};
+
+window.handleComprobantesSort = function(colKey, dataType = 'text') {
+    comprobantesGrid.toggleSort(colKey, dataType);
+    const icon = document.getElementById(`sort-icon-${colKey}`);
+    if (icon) {
+        icon.innerText = comprobantesGrid.sortDirection === 'asc' ? '▲' : (comprobantesGrid.sortDirection === 'desc' ? '▼' : '↕');
+    }
+    UIManager.renderMainTable();
+};
+
+// --- Percepciones ---
+window.handlePercepcionesJurisdictionChange = function(e) {
+    percepcionesGrid.setPrimaryFilter(e.target.value);
+    UIManager.renderPerceptionsTable();
+};
+
+window.handlePercepcionesPeriodChange = function(e) {
+    percepcionesGrid.setPeriod(e.target.value);
+    UIManager.renderPerceptionsTable();
+};
+
+window.handlePercepcionesSearchInput = function(e) {
+    const val = e.target.value;
+    percepcionesGrid.setSearch(val);
+    const clearBtn = document.getElementById('percepciones-search-clear');
+    if (clearBtn) clearBtn.style.display = val.trim() ? 'block' : 'none';
+    UIManager.renderPerceptionsTable();
+};
+
+window.clearPercepcionesSearch = function() {
+    percepcionesGrid.clearSearch();
+    const input = document.getElementById('percepciones-search-input');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    const clearBtn = document.getElementById('percepciones-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    UIManager.renderPerceptionsTable();
+};
+
+window.togglePercepcionesColDropdown = function(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('percepciones-col-menu');
+    if (menu) {
+        const isHidden = menu.style.display === 'none' || !menu.style.display;
+        menu.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) renderPercepcionesColumnCheckboxes();
+    }
+};
+
+function renderPercepcionesColumnCheckboxes() {
+    const container = document.getElementById('percepciones-col-checkboxes');
+    if (!container) return;
+    const allCols = [
+        { key: 'fuente', label: 'Fuente / Origen' },
+        { key: 'fecha', label: 'Fecha' },
+        { key: 'periodo', label: 'Período' },
+        { key: 'cuit', label: 'CUIT Agente' },
+        { key: 'agente', label: 'Agente / Razón Social' },
+        { key: 'comprobante', label: 'Comprobante' },
+        { key: 'monto', label: 'Importe' }
+    ];
+    container.innerHTML = allCols.map(col => `
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+            <input type="checkbox" ${percepcionesGrid.isColumnVisible(col.key) ? 'checked' : ''} onchange="togglePercepcionesColumn('${col.key}')">
+            ${col.label}
+        </label>
+    `).join('');
+}
+
+window.togglePercepcionesColumn = function(colKey) {
+    percepcionesGrid.toggleColumnVisibility(colKey);
+    renderPercepcionesColumnCheckboxes();
+    UIManager.renderPerceptionsTable();
+};
+
+window.resetPercepcionesColumns = function() {
+    percepcionesGrid.resetColumns();
+    renderPercepcionesColumnCheckboxes();
+    UIManager.renderPerceptionsTable();
+};
+
+window.handlePercepcionesSort = function(colKey, dataType = 'text') {
+    percepcionesGrid.toggleSort(colKey, dataType);
+    const icon = document.getElementById(`sort-icon-percep-${colKey}`);
+    if (icon) {
+        icon.innerText = percepcionesGrid.sortDirection === 'asc' ? '▲' : (percepcionesGrid.sortDirection === 'desc' ? '▼' : '↕');
+    }
+    UIManager.renderPerceptionsTable();
+};
+
+// --- Extractos (Bancos) ---
+window.setBancosFilter = function(filterVal) {
+    bancosGrid.setPrimaryFilter(filterVal);
+    document.querySelectorAll('#bancos-filter-group .btn-filter').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filterVal);
+    });
+    UIManager.renderBankTable();
+};
+
+window.handleBancosPeriodChange = function(e) {
+    bancosGrid.setPeriod(e.target.value);
+    UIManager.renderBankTable();
+};
+
+window.handleBancosSearchInput = function(e) {
+    const val = e.target.value;
+    bancosGrid.setSearch(val);
+    const clearBtn = document.getElementById('bancos-search-clear');
+    if (clearBtn) clearBtn.style.display = val.trim() ? 'block' : 'none';
+    UIManager.renderBankTable();
+};
+
+window.clearBancosSearch = function() {
+    bancosGrid.clearSearch();
+    const input = document.getElementById('bancos-search-input');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    const clearBtn = document.getElementById('bancos-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    UIManager.renderBankTable();
+};
+
+window.toggleBancosColDropdown = function(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('bancos-col-menu');
+    if (menu) {
+        const isHidden = menu.style.display === 'none' || !menu.style.display;
+        menu.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) renderBancosColumnCheckboxes();
+    }
+};
+
+function renderBancosColumnCheckboxes() {
+    const container = document.getElementById('bancos-col-checkboxes');
+    if (!container) return;
+    const allCols = [
+        { key: 'fecha', label: 'Fecha' },
+        { key: 'descripcion', label: 'Descripción' },
+        { key: 'monto', label: 'Importe' },
+        { key: 'tipo', label: 'Tipo' },
+        { key: 'cuenta', label: 'Cuenta / Categoría' },
+        { key: 'estado', label: 'Estado' }
+    ];
+    container.innerHTML = allCols.map(col => `
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+            <input type="checkbox" ${bancosGrid.isColumnVisible(col.key) ? 'checked' : ''} onchange="toggleBancosColumn('${col.key}')">
+            ${col.label}
+        </label>
+    `).join('');
+}
+
+window.toggleBancosColumn = function(colKey) {
+    bancosGrid.toggleColumnVisibility(colKey);
+    renderBancosColumnCheckboxes();
+    UIManager.renderBankTable();
+};
+
+window.resetBancosColumns = function() {
+    bancosGrid.resetColumns();
+    renderBancosColumnCheckboxes();
+    UIManager.renderBankTable();
+};
+
+window.handleBancosSort = function(colKey, dataType = 'text') {
+    bancosGrid.toggleSort(colKey, dataType);
+    const icon = document.getElementById(`sort-icon-bank-${colKey}`);
+    if (icon) {
+        icon.innerText = bancosGrid.sortDirection === 'asc' ? '▲' : (bancosGrid.sortDirection === 'desc' ? '▼' : '↕');
+    }
+    UIManager.renderBankTable();
+};
+
 async function loginWithGoogle() {
   const redirectUrl = window.location.origin + window.location.pathname;
   const { error } = await supabase.auth.signInWithOAuth({
@@ -1427,11 +1712,11 @@ export class UIManager {
     }
 
     static updateJurisdictionFilterSelects() {
-        const sel = document.getElementById('filter-jurisdiccion');
+        const sel = document.getElementById('percepciones-jurisdiction-select');
         if (!sel) return;
 
         const available = appStore.getAvailableJurisdictions();
-        const currentSelected = appStore.currentJurisdiction || 'all';
+        const currentSelected = percepcionesGrid.primaryFilter || 'all';
 
         let html = `<option value="all" ${currentSelected === 'all' ? 'selected' : ''}>Todas las Percepciones</option>`;
         available.forEach(j => {
@@ -1444,15 +1729,19 @@ export class UIManager {
         UIManager.updateJurisdictionFilterSelects();
 
         const tbody = document.getElementById('table-percepciones-body');
-        const badge = document.getElementById('percepciones-summary-badge');
-        const list = appStore.getFilteredPerceptions();
-        const totalList = appStore.perceptions || [];
+        const summaryBar = document.getElementById('percepciones-summary-bar');
+        
+        const rawList = appStore.perceptions || [];
+        const list = percepcionesGrid.filterAndSort(rawList, {
+            fuente: p => p.fuente || p.jurisdiction || p.jurisdiccion || '',
+            agente: p => p.agente || p.razonSocial || '',
+            monto: p => typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)
+        });
 
-        if (badge) {
-            const total = list.reduce((sum, p) => sum + (p.amount || p.monto || 0), 0);
+        if (summaryBar) {
+            const total = list.reduce((sum, p) => sum + (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)), 0);
             const totalFormatted = total.toLocaleString('es-AR', {minimumFractionDigits: 2});
-            const filterLabel = appStore.currentJurisdiction !== 'all' ? ` (${appStore.currentJurisdiction})` : '';
-            badge.innerText = `${list.length} Percepciones${filterLabel} | Total $ ${totalFormatted}`;
+            summaryBar.innerText = `${list.length} percepciones · Total $ ${totalFormatted}`;
         }
 
         if (!tbody) return;
@@ -1461,7 +1750,7 @@ export class UIManager {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
-                        ${totalList.length > 0 ? 'No hay percepciones para la jurisdicción seleccionada.' : 'No se han cargado percepciones para este período.'}
+                        ${rawList.length > 0 ? 'No hay percepciones para los filtros seleccionados.' : 'No se han cargado percepciones para este período.'}
                     </td>
                 </tr>`;
             return;
@@ -1469,16 +1758,16 @@ export class UIManager {
 
         tbody.innerHTML = list.map(p => {
             const fuenteText = p.fuente || p.jurisdiction || 'ARBA';
-            const montoVal = (p.amount || p.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+            const montoVal = (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)).toLocaleString('es-AR', {minimumFractionDigits: 2});
             return `
                 <tr>
-                    <td data-label="Fuente"><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; font-weight: 700;">${fuenteText}</span></td>
-                    <td data-label="Fecha">${p.fecha}</td>
-                    <td data-label="Período">${p.period || p.periodo || 'N/D'}</td>
-                    <td data-label="CUIT">${p.cuit}</td>
-                    <td data-label="Agente / Razón Social"><strong>${p.razonSocial || 'AGENTE PERCEPCION'}</strong></td>
-                    <td data-label="Comprobante">${p.comprobante || 'N/D'}</td>
-                    <td data-label="Importe" style="font-weight: 600;">$ ${montoVal}</td>
+                    <td data-label="Fuente" class="${percepcionesGrid.isColumnVisible('fuente') ? '' : 'hidden'}"><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; font-weight: 700;">${fuenteText}</span></td>
+                    <td data-label="Fecha" class="${percepcionesGrid.isColumnVisible('fecha') ? '' : 'hidden'}">${p.fecha}</td>
+                    <td data-label="Período" class="${percepcionesGrid.isColumnVisible('periodo') ? '' : 'hidden'}">${p.period || p.periodo || 'N/D'}</td>
+                    <td data-label="CUIT" class="${percepcionesGrid.isColumnVisible('cuit') ? '' : 'hidden'}">${p.cuit}</td>
+                    <td data-label="Agente / Razón Social" class="${percepcionesGrid.isColumnVisible('agente') ? '' : 'hidden'}" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;" title="${p.razonSocial || p.agente || ''}"><strong>${p.razonSocial || p.agente || 'AGENTE PERCEPCION'}</strong></td>
+                    <td data-label="Comprobante" class="${percepcionesGrid.isColumnVisible('comprobante') ? '' : 'hidden'}">${p.comprobante || 'N/D'}</td>
+                    <td data-label="Importe" class="${percepcionesGrid.isColumnVisible('monto') ? '' : 'hidden'}" style="font-weight: 600;">$ ${montoVal}</td>
                 </tr>
             `;
         }).join('');
@@ -1486,18 +1775,25 @@ export class UIManager {
 
     static renderBankTable() {
         const tbody = document.getElementById('table-bancos-body');
+        const summaryBar = document.getElementById('bancos-summary-bar');
         if (!tbody) return;
 
-        let transactions = appStore.bankTransactions || [];
-        
-        if (appStore.currentBankFilter !== 'all') {
-            transactions = transactions.filter(t => t.tipo === appStore.currentBankFilter);
+        const rawTxs = appStore.bankTransactions || [];
+        const transactions = bancosGrid.filterAndSort(rawTxs, {
+            descripcion: t => t.descripcion || t.concepto || '',
+            monto: t => t.monto || t.amount || 0
+        });
+
+        if (summaryBar) {
+            const debits = transactions.filter(t => (t.monto || 0) < 0 || t.tipo === 'debit' || t.tipo === 'DEBITO').reduce((sum, t) => sum + Math.abs(t.monto || 0), 0);
+            const credits = transactions.filter(t => (t.monto || 0) >= 0 || t.tipo === 'credit' || t.tipo === 'CREDITO').reduce((sum, t) => sum + Math.abs(t.monto || 0), 0);
+            summaryBar.innerText = `${transactions.length} movimientos · Débitos: $ ${debits.toLocaleString('es-AR', {minimumFractionDigits: 2})} · Créditos: $ ${credits.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
         }
 
         if (transactions.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
                         No hay extractos bancarios procesados para este período.
                     </td>
                 </tr>`;
@@ -1511,37 +1807,25 @@ export class UIManager {
             `).join('')}
         `;
 
-        const activitiesHTML = `
-            <option value="">-- Seleccionar Actividad --</option>
-            ${(appStore.economicActivities || []).map(act => `
-                <option value="${act.id}">${act.arca_activity_code} - ${act.name}</option>
-            `).join('')}
-        `;
-
         tbody.innerHTML = transactions.map(t => {
-            const isDebit = t.tipo === 'debit';
-            const badgeClass = isDebit ? 'badge-emitido' : 'badge-recibido'; // Debit is usually red, credit is green
+            const isDebit = (t.monto || 0) < 0 || t.tipo === 'debit' || t.tipo === 'DEBITO';
+            const badgeClass = isDebit ? 'badge-emitido' : 'badge-recibido';
             const badgeText = isDebit ? 'DÉBITO' : 'CRÉDITO';
-            const montoVal = (t.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+            const montoVal = Math.abs(t.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
 
             return `
                 <tr data-item-id="${t.id}">
                     <td><input type="checkbox" class="banco-checkbox" value="${t.id}" onchange="appStore.updateBankBulkSelectionBar()"></td>
-                    <td data-label="Fecha">${t.fecha}</td>
-                    <td data-label="Descripción"><strong>${t.descripcion}</strong></td>
-                    <td data-label="Importe" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
-                    <td data-label="Tipo"><span class="badge ${badgeClass}">${badgeText}</span></td>
-                    <td data-label="Categoría Tributaria">
+                    <td data-label="Fecha" class="${bancosGrid.isColumnVisible('fecha') ? '' : 'hidden'}">${t.fecha}</td>
+                    <td data-label="Descripción" class="${bancosGrid.isColumnVisible('descripcion') ? '' : 'hidden'}" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;" title="${t.descripcion}"><strong>${t.descripcion}</strong></td>
+                    <td data-label="Importe" class="${bancosGrid.isColumnVisible('monto') ? '' : 'hidden'}" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
+                    <td data-label="Tipo" class="${bancosGrid.isColumnVisible('tipo') ? '' : 'hidden'}"><span class="badge ${badgeClass}">${badgeText}</span></td>
+                    <td data-label="Clasificación / Categoría" class="${bancosGrid.isColumnVisible('cuenta') ? '' : 'hidden'}">
                         <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankCategory('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
                             ${taxCategoriesHTML.replace(`value="${t.category_id || ''}"`, `value="${t.category_id || ''}" selected`)}
                         </select>
                     </td>
-                    <td data-label="Actividad">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankActivity('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
-                            ${activitiesHTML.replace(`value="${t.activity_id || ''}"`, `value="${t.activity_id || ''}" selected`)}
-                        </select>
-                    </td>
-                    <td data-label="Estado">${t.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
+                    <td data-label="Estado" class="${bancosGrid.isColumnVisible('estado') ? '' : 'hidden'}">${t.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
                 </tr>
             `;
         }).join('');
@@ -1551,7 +1835,21 @@ export class UIManager {
         const tbody = document.getElementById('table-body');
         if (!tbody) return;
 
-        const items = appStore.getFilteredItems();
+        const rawItems = appStore.items || [];
+        const items = comprobantesGrid.filterAndSort(rawItems, {
+            razonSocial: i => i.razonSocial || i.agente || '',
+            cuit: i => i.cuit || '',
+            comprobante: i => i.comprobante || '',
+            total: i => i.total || 0,
+            iva: i => i.iva || i.importeIva || 0,
+            fecha: i => i.fecha || ''
+        });
+
+        const summaryBar = document.getElementById('comprobantes-summary-bar');
+        if (summaryBar) {
+            const totalMonto = items.reduce((sum, i) => sum + (i.total || 0), 0);
+            summaryBar.innerText = `${items.length} comprobantes · $ ${totalMonto.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        }
 
         if (items.length === 0) {
             tbody.innerHTML = `
@@ -1573,116 +1871,49 @@ export class UIManager {
         const activitiesHTML = `
             <option value="">-- Seleccionar Actividad --</option>
             ${(appStore.economicActivities || []).map(act => `
-                <option value="${act.id}">${act.arca_activity_code} - ${act.name}</option>
+                <option value="${act.id}">${act.arca_code || act.arca_activity_code || ''} - ${act.name}</option>
             `).join('')}
         `;
+
+        const formatMoney = (val) => `$ ${(val || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
 
         tbody.innerHTML = items.map(item => {
             const isRecibido = item.tipo === 'recibido';
             const badgeClass = isRecibido ? 'badge-recibido' : 'badge-emitido';
             const badgeText = isRecibido ? 'Compra' : 'Venta';
 
-            const confirmButtonHTML = item.confirmada
-                ? `<button class="btn-confirm confirmed" disabled>✓ Confirmado</button>`
-                : `<button class="btn-confirm" onclick="appStore.confirmItem('${item.id}')" ${!item.category_id ? 'disabled' : ''}>✓ Confirmar</button>`;
-
-            const formatMoney = (val) => `$ ${(val || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-
             return `
                 <tr data-item-id="${item.id}">
                     <td><input type="checkbox" class="comprobante-checkbox" value="${item.id}" onchange="appStore.updateBulkSelectionBar()"></td>
-                    <td data-label="Origen"><span class="badge ${badgeClass}">${badgeText}</span></td>
-                    <td data-label="Fecha">${item.fecha}</td>
-                    <td data-label="Comprobante">${item.comprobante}</td>
-                    <td data-label="CUIT">${item.cuit}</td>
-                    <td data-label="Razón Social"><strong>${item.razonSocial}</strong></td>
-                    <td data-label="Neto Gravado">${formatMoney(item.netoGravado)}</td>
-                    <td data-label="Exentas">${formatMoney(item.exento)}</td>
-                    <td data-label="Otros Tributos">${formatMoney(item.otrosTributos)}</td>
-                    <td data-label="IVA">${formatMoney(item.iva)}</td>
-                    <td data-label="Perc. IVA">${formatMoney(item.percepcionIva || 0)}</td>
-                    <td data-label="Perc. IIBB">${formatMoney(item.percepcionIibb || 0)}</td>
-                    <td data-label="Total" style="font-weight: 700;">${formatMoney(item.total)}</td>
-                    <td data-label="Categoría Tributaria">
+                    <td data-label="Origen" class="${comprobantesGrid.isColumnVisible('origen') ? '' : 'hidden'}"><span class="badge ${badgeClass}">${badgeText}</span></td>
+                    <td data-label="Fecha" class="${comprobantesGrid.isColumnVisible('fecha') ? '' : 'hidden'}">${item.fecha}</td>
+                    <td data-label="Comprobante" class="${comprobantesGrid.isColumnVisible('comprobante') ? '' : 'hidden'}">${item.comprobante}</td>
+                    <td data-label="CUIT" class="${comprobantesGrid.isColumnVisible('cuit') ? '' : 'hidden'}">${item.cuit}</td>
+                    <td data-label="Razón Social" class="${comprobantesGrid.isColumnVisible('razonSocial') ? '' : 'hidden'}" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;" title="${item.razonSocial || ''}"><strong>${item.razonSocial || ''}</strong></td>
+                    <td data-label="Neto Gravado" class="${comprobantesGrid.isColumnVisible('neto') ? '' : 'hidden'}">${formatMoney(item.netoGravado)}</td>
+                    <td data-label="Exentas" class="${comprobantesGrid.isColumnVisible('exentas') ? '' : 'hidden'}">${formatMoney(item.exento)}</td>
+                    <td data-label="Otros Tributos" class="${comprobantesGrid.isColumnVisible('otrosTributos') ? '' : 'hidden'}">${formatMoney(item.otrosTributos)}</td>
+                    <td data-label="IVA" class="${comprobantesGrid.isColumnVisible('iva') ? '' : 'hidden'}">${formatMoney(item.iva)}</td>
+                    <td data-label="Perc. IVA" class="${comprobantesGrid.isColumnVisible('percIva') ? '' : 'hidden'}">${formatMoney(item.percepcionIva || 0)}</td>
+                    <td data-label="Perc. IIBB" class="${comprobantesGrid.isColumnVisible('percIibb') ? '' : 'hidden'}">${formatMoney(item.percepcionIibb || 0)}</td>
+                    <td data-label="Total" class="${comprobantesGrid.isColumnVisible('total') ? '' : 'hidden'}" style="font-weight: 700;">${formatMoney(item.total)}</td>
+                    <td data-label="Categoría Tributaria" class="${comprobantesGrid.isColumnVisible('categoria') ? '' : 'hidden'}">
                         <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
                             ${taxCategoriesHTML.replace(`value="${item.category_id || ''}"`, `value="${item.category_id || ''}" selected`)}
                         </select>
                     </td>
-                    <td data-label="Actividad">
+                    <td data-label="Actividad" class="${comprobantesGrid.isColumnVisible('actividad') ? '' : 'hidden'}">
                         <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateActivity('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
                             ${activitiesHTML.replace(`value="${item.activity_id || ''}"`, `value="${item.activity_id || ''}" selected`)}
                         </select>
                     </td>
-                    <td data-label="Estado">${item.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
+                    <td data-label="Estado" class="${comprobantesGrid.isColumnVisible('estado') ? '' : 'hidden'}">${item.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
                 </tr>
             `;
         }).join('');
     }
 
-    static renderBancosGrid() {
-        const tbody = document.getElementById('table-bancos-body');
-        if (!tbody) return;
-
-        let transactions = appStore.bankTransactions || [];
-        
-        if (appStore.currentBankFilter !== 'all') {
-            transactions = transactions.filter(t => t.tipo === appStore.currentBankFilter);
-        }
-
-        if (transactions.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
-                        No hay extractos bancarios procesados para este período.
-                    </td>
-                </tr>`;
-            return;
-        }
-
-        const taxCategoriesHTML = `
-            <option value="">-- Seleccionar Categoría --</option>
-            ${(appStore.taxCategories || []).map(cat => `
-                <option value="${cat.id}">${cat.name}</option>
-            `).join('')}
-        `;
-
-        const activitiesHTML = `
-            <option value="">-- Seleccionar Actividad --</option>
-            ${(appStore.economicActivities || []).map(act => `
-                <option value="${act.id}">${act.arca_activity_code} - ${act.name}</option>
-            `).join('')}
-        `;
-
-        tbody.innerHTML = transactions.map(t => {
-            const isDebit = t.tipo === 'debit';
-            const badgeClass = isDebit ? 'badge-emitido' : 'badge-recibido'; // Debit is usually red, credit is green
-            const badgeText = isDebit ? 'DÉBITO' : 'CRÉDITO';
-            const montoVal = (t.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
-
-            return `
-                <tr data-item-id="${t.id}">
-                    <td><input type="checkbox" class="banco-checkbox" value="${t.id}" onchange="appStore.updateBankBulkSelectionBar()"></td>
-                    <td data-label="Fecha">${t.fecha}</td>
-                    <td data-label="Descripción"><strong>${t.descripcion}</strong></td>
-                    <td data-label="Importe" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
-                    <td data-label="Tipo"><span class="badge ${badgeClass}">${badgeText}</span></td>
-                    <td data-label="Categoría Tributaria">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankCategory('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
-                            ${taxCategoriesHTML.replace(`value="${t.category_id || ''}"`, `value="${t.category_id || ''}" selected`)}
-                        </select>
-                    </td>
-                    <td data-label="Actividad">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankActivity('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
-                            ${activitiesHTML.replace(`value="${t.activity_id || ''}"`, `value="${t.activity_id || ''}" selected`)}
-                        </select>
-                    </td>
-                    <td data-label="Estado">${t.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    static renderCategorization() {
+    static renderSettings() {
         // Tax Categories
         const tcTbody = document.getElementById('table-tax-categories-body');
         if (tcTbody) {
@@ -1710,7 +1941,7 @@ export class UIManager {
             } else {
                 eaTbody.innerHTML = activities.map(a => `
                     <tr>
-                        <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">${a.arca_activity_code}</span></td>
+                        <td><span class="badge" style="background:#e0f2fe; color:#0369a1;">${a.arca_code || a.arca_activity_code || a.code || ''}</span></td>
                         <td><strong>${a.name}</strong></td>
                         <td><span style="color:var(--success);">Activo</span></td>
                         <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Editar</button></td>

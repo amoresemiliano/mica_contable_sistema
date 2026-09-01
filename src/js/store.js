@@ -179,6 +179,37 @@ export class AppStore {
         this.notify();
     }
 
+    // Cargar Catálogos Impositivos y Tributarios
+    async loadTaxCategories() {
+        try {
+            const cats = await persistenceService.loadActiveTaxCategories();
+            this.taxCategories = cats || [];
+            this.notify();
+        } catch (e) {
+            console.warn("Error cargando categorías tributarias:", e.message);
+        }
+    }
+
+    async loadEconomicActivities() {
+        try {
+            const acts = await persistenceService.loadActiveEconomicActivities();
+            this.economicActivities = acts || [];
+            this.notify();
+        } catch (e) {
+            console.warn("Error cargando actividades económicas:", e.message);
+        }
+    }
+
+    async loadIibbRates() {
+        try {
+            const rates = await persistenceService.loadActiveIibbRates();
+            this.iibbRates = rates || [];
+            this.notify();
+        } catch (e) {
+            console.warn("Error cargando tasas IIBB:", e.message);
+        }
+    }
+
     // Registrar Movimiento Manual o Interno
     addManualMovement(movement) {
         movement.id = `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;

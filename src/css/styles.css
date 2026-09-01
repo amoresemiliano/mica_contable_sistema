@@ -101,12 +101,20 @@ aside {
     border-left: 4px solid var(--accent);
 }
 
-/* ÁREA DE CONTENIDO PRINCIPAL */
+#app-container {
+    width: 100vw;
+    display: flex;
+    min-height: 100vh;
+}
+
+/* ÁREA DE CONTENIDO PRINCIPAL - ANCHO COMPLETO */
 .wrapper {
     margin-left: var(--sidebar-width);
-    flex-grow: 1;
+    flex: 1;
+    min-width: 0;
+    width: calc(100vw - var(--sidebar-width));
+    max-width: none;
     padding: 24px;
-    max-width: calc(100vw - var(--sidebar-width));
 }
 
 header {
@@ -126,6 +134,8 @@ header h1 {
 /* CONTENEDORES DE SECCIÓN (SPA) */
 .tab-content {
     display: block;
+    width: 100%;
+    max-width: none;
 }
 
 .hidden {

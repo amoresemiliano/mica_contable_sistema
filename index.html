@@ -92,12 +92,11 @@
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 12px;">
-                <div id="user-header-info" style="font-size: 13px; font-weight: 600; color: var(--primary); background: var(--bg-card); padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border-color);"></div>
-                <button id="logout-btn" class="btn-secondary" style="padding: 6px 12px; font-size: 12px;">🚪 Cerrar Sesión</button>
+                <div id="user-header-info" style="font-size: 13px; font-weight: 600; color: var(--primary); background: var(--bg-card); padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border-color);">Vegen Digital · ADMIN · MICA</div>
             </div>
         </header>
 
-        <!-- SECCIÓN 1: CONCILIADOR CSV Y PERCEPCIONES -->
+        <!-- SECCIÓN 1: COMPROBANTES (CONCILIADOR CSV) -->
         <section id="tab-conciliador" class="tab-content">
             <div class="import-section">
                 <div class="drop-zone" id="zone-recibidos">
@@ -136,9 +135,9 @@
             </div>
 
             <!-- Panel de Import Issues -->
-            <div class="card hidden" id="card-import-issues" style="margin-bottom: 24px; border-color: var(--error);">
+            <div class="card hidden" id="card-import-issues" style="margin-bottom: 24px; border-color: var(--danger);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h3 style="color: var(--error); margin: 0;">❌ Errores de Importación (Issues)</h3>
+                    <h3 style="color: var(--danger); margin: 0;">❌ Errores de Importación (Issues)</h3>
                     <button class="btn-secondary" onclick="appStore.resolveAllImportIssues()">Marcar todos como resueltos</button>
                 </div>
                 <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Los siguientes registros fallaron durante la importación y requieren atención manual.</p>
@@ -161,22 +160,38 @@
                 </div>
             </div>
 
-            <div class="controls-row">
-                <div class="filter-buttons desktop-filter-buttons">
-                    <button class="btn-filter active" onclick="appStore.setFilter('all')">Todos</button>
-                    <button class="btn-filter" onclick="appStore.setFilter('recibidos')">Solo Compras</button>
-                    <button class="btn-filter" onclick="appStore.setFilter('emitidos')">Solo Ventas</button>
-                    <button class="btn-filter" onclick="appStore.setFilter('pending')">Sin Categorizar</button>
+            <!-- NAVBAR DE FILTROS Y CONTROLES OPERACIONALES STANDARDIZADOS (COMPROBANTES) -->
+            <div class="operational-toolbar" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0;">
+                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+                    <div class="btn-group" id="comprobantes-filter-group">
+                        <button class="btn btn-filter" data-filter="emitidos" onclick="setComprobantesFilter('emitidos')">Emitidos</button>
+                        <button class="btn btn-filter" data-filter="recibidos" onclick="setComprobantesFilter('recibidos')">Recibidos</button>
+                        <button class="btn btn-filter" data-filter="pending" onclick="setComprobantesFilter('pending')">Sin Categorizar</button>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+                        <label for="comprobantes-period-filter" style="font-weight: 500; color: var(--text-muted);">Período:</label>
+                        <input type="month" id="comprobantes-period-filter" class="form-control" style="padding: 4px 8px; font-size: 12px;" onchange="handleComprobantesPeriodChange(event)">
+                    </div>
+                    <div style="position: relative; display: inline-block;">
+                        <button class="btn btn-secondary btn-sm" id="comprobantes-col-btn" onclick="toggleComprobantesColDropdown(event)" style="padding: 6px 12px; font-size: 12px;">
+                            Columnas ▾
+                        </button>
+                        <div id="comprobantes-col-menu" class="card" style="display: none; position: absolute; top: 100%; left: 0; z-index: 1000; padding: 12px; width: 220px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 4px;">
+                            <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px; color: var(--text-main);">Visibilidad de Columnas</div>
+                            <div id="comprobantes-col-checkboxes" style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;"></div>
+                            <button class="btn-secondary" style="font-size: 11px; padding: 4px; width: 100%; margin-top: 10px;" onclick="resetComprobantesColumns()">Restaurar predeterminadas</button>
+                        </div>
+                    </div>
                 </div>
-                <div class="mobile-filter-select-wrapper">
-                    <select class="mobile-filter-select" onchange="appStore.setFilter(this.value)">
-                        <option value="all">🔍 Todos los comprobantes</option>
-                        <option value="recibidos">📥 Solo Compras (Recibidos)</option>
-                        <option value="emitidos">📤 Solo Ventas (Emitidos)</option>
-                        <option value="pending">⚠️ Sin Categorizar</option>
-                    </select>
+                <div>
+                    <div style="position: relative; display: inline-block;">
+                        <input type="text" id="comprobantes-search-input" class="form-control" placeholder="Buscar por Razón Social, CUIT, Comprobante..." style="padding-right: 28px; width: 280px;" oninput="handleComprobantesSearchInput(event)">
+                        <button id="comprobantes-search-clear" style="display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px;" onclick="clearComprobantesSearch()">✕</button>
+                    </div>
                 </div>
-                <input type="text" class="search-input" id="search-box" placeholder="Buscar por CUIT, Razón Social..." oninput="appStore.setSearch(this.value)">
+            </div>
+            <div id="comprobantes-summary-bar" style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px;">
+                0 comprobantes · $ 0,00
             </div>
 
             <!-- Acciones por lote (Bulk Actions) -->
@@ -191,25 +206,25 @@
             </div>
 
             <div class="data-table-container">
-                <table>
+                <table id="table-comprobantes">
                     <thead>
-                        <tr>
+                        <tr id="comprobantes-thead-row">
                             <th><input type="checkbox" id="check-all-comprobantes" onclick="appStore.toggleSelectAllComprobantes(this)"></th>
-                            <th>Origen</th>
-                            <th>Fecha</th>
-                            <th>Comprobante</th>
-                            <th>CUIT</th>
-                            <th>Razón Social</th>
-                            <th>Neto Gravado</th>
-                            <th>Exentas</th>
-                            <th>Otros Tributos</th>
-                            <th>IVA</th>
-                            <th>Perc. IVA</th>
-                            <th>Perc. IIBB</th>
-                            <th>Total</th>
-                            <th>Categoría Tributaria</th>
-                            <th>Actividad</th>
-                            <th>Estado</th>
+                            <th onclick="handleComprobantesSort('origen', 'text')" style="cursor: pointer;">Origen <span id="sort-icon-origen">↕</span></th>
+                            <th onclick="handleComprobantesSort('fecha', 'date')" style="cursor: pointer;">Fecha <span id="sort-icon-fecha">↕</span></th>
+                            <th onclick="handleComprobantesSort('comprobante', 'text')" style="cursor: pointer;">Comprobante <span id="sort-icon-comprobante">↕</span></th>
+                            <th onclick="handleComprobantesSort('cuit', 'text')" style="cursor: pointer;">CUIT <span id="sort-icon-cuit">↕</span></th>
+                            <th onclick="handleComprobantesSort('razonSocial', 'text')" style="cursor: pointer;">Razón Social <span id="sort-icon-razonSocial">↕</span></th>
+                            <th onclick="handleComprobantesSort('neto', 'numeric')" style="cursor: pointer;">Neto Gravado <span id="sort-icon-neto">↕</span></th>
+                            <th onclick="handleComprobantesSort('exentas', 'numeric')" style="cursor: pointer;">Exentas <span id="sort-icon-exentas">↕</span></th>
+                            <th onclick="handleComprobantesSort('otrosTributos', 'numeric')" style="cursor: pointer;">Otros Tributos <span id="sort-icon-otrosTributos">↕</span></th>
+                            <th onclick="handleComprobantesSort('iva', 'numeric')" style="cursor: pointer;">IVA <span id="sort-icon-iva">↕</span></th>
+                            <th onclick="handleComprobantesSort('percIva', 'numeric')" style="cursor: pointer;">Perc. IVA <span id="sort-icon-percIva">↕</span></th>
+                            <th onclick="handleComprobantesSort('percIibb', 'numeric')" style="cursor: pointer;">Perc. IIBB <span id="sort-icon-percIibb">↕</span></th>
+                            <th onclick="handleComprobantesSort('total', 'numeric')" style="cursor: pointer;">Total <span id="sort-icon-total">↕</span></th>
+                            <th onclick="handleComprobantesSort('categoria', 'text')" style="cursor: pointer;">Categoría Tributaria <span id="sort-icon-categoria">↕</span></th>
+                            <th onclick="handleComprobantesSort('actividad', 'text')" style="cursor: pointer;">Actividad <span id="sort-icon-actividad">↕</span></th>
+                            <th onclick="handleComprobantesSort('estado', 'text')" style="cursor: pointer;">Estado <span id="sort-icon-estado">↕</span></th>
                         </tr>
                     </thead>
                     <tbody id="table-body">
@@ -221,7 +236,6 @@
                     </tbody>
                 </table>
             </div>
-
         </section>
 
         <!-- SECCIÓN 1.B: PERCEPCIONES -->
@@ -242,26 +256,54 @@
                         <h3 style="margin: 0;">Bandeja de Percepciones Incorporadas</h3>
                         <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">Percepciones provinciales (ARBA) y nacionales (IVA) procesadas.</p>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <select id="filter-jurisdiccion" class="form-control" style="width: auto; padding: 6px 10px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--primary);" onchange="appStore.setJurisdictionFilter(this.value)">
-                            <option value="all">Todas las Percepciones</option>
-                        </select>
-                        <div id="percepciones-summary-badge" style="font-size: 12px; font-weight: 600; background: rgba(56, 189, 248, 0.15); color: #0284c7; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.3);">
-                            0 Percepciones | Total $ 0,00
+                </div>
+
+                <!-- OPERATIONAL TOOLBAR (PERCEPCIONES) -->
+                <div class="operational-toolbar" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0;">
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+                        <div style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+                            <label for="percepciones-jurisdiction-select" style="font-weight: 600; color: var(--primary);">Origen / Jurisdicción:</label>
+                            <select id="percepciones-jurisdiction-select" class="form-control" style="padding: 4px 8px; font-size: 12px;" onchange="handlePercepcionesJurisdictionChange(event)">
+                                <option value="all">Todas las Percepciones</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+                            <label for="percepciones-period-filter" style="font-weight: 500; color: var(--text-muted);">Período:</label>
+                            <input type="month" id="percepciones-period-filter" class="form-control" style="padding: 4px 8px; font-size: 12px;" onchange="handlePercepcionesPeriodChange(event)">
+                        </div>
+                        <div style="position: relative; display: inline-block;">
+                            <button class="btn btn-secondary btn-sm" id="percepciones-col-btn" onclick="togglePercepcionesColDropdown(event)" style="padding: 6px 12px; font-size: 12px;">
+                                Columnas ▾
+                            </button>
+                            <div id="percepciones-col-menu" class="card" style="display: none; position: absolute; top: 100%; left: 0; z-index: 1000; padding: 12px; width: 220px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 4px;">
+                                <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px; color: var(--text-main);">Visibilidad de Columnas</div>
+                                <div id="percepciones-col-checkboxes" style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;"></div>
+                                <button class="btn-secondary" style="font-size: 11px; padding: 4px; width: 100%; margin-top: 10px;" onclick="resetPercepcionesColumns()">Restaurar predeterminadas</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="position: relative; display: inline-block;">
+                            <input type="text" id="percepciones-search-input" class="form-control" placeholder="Buscar por CUIT, Razón Social..." style="padding-right: 28px; width: 280px;" oninput="handlePercepcionesSearchInput(event)">
+                            <button id="percepciones-search-clear" style="display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px;" onclick="clearPercepcionesSearch()">✕</button>
                         </div>
                     </div>
                 </div>
+                <div id="percepciones-summary-bar" style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px;">
+                    0 percepciones · Total $ 0,00
+                </div>
+
                 <div class="data-table-container" style="max-height: 350px; overflow-y: auto;">
-                    <table class="simple-table">
+                    <table class="simple-table" id="table-percepciones">
                         <thead>
                             <tr>
-                                <th>Fuente</th>
-                                <th>Fecha</th>
-                                <th>Período</th>
-                                <th>CUIT Agente</th>
-                                <th>Agente / Razón Social</th>
-                                <th>Comprobante / Certificado</th>
-                                <th>Importe</th>
+                                <th onclick="handlePercepcionesSort('fuente', 'text')" style="cursor: pointer;">Fuente <span id="sort-icon-percep-fuente">↕</span></th>
+                                <th onclick="handlePercepcionesSort('fecha', 'date')" style="cursor: pointer;">Fecha <span id="sort-icon-percep-fecha">↕</span></th>
+                                <th onclick="handlePercepcionesSort('periodo', 'text')" style="cursor: pointer;">Período <span id="sort-icon-percep-periodo">↕</span></th>
+                                <th onclick="handlePercepcionesSort('cuit', 'text')" style="cursor: pointer;">CUIT Agente <span id="sort-icon-percep-cuit">↕</span></th>
+                                <th onclick="handlePercepcionesSort('agente', 'text')" style="cursor: pointer;">Agente / Razón Social <span id="sort-icon-percep-agente">↕</span></th>
+                                <th onclick="handlePercepcionesSort('comprobante', 'text')" style="cursor: pointer;">Comprobante / Certificado <span id="sort-icon-percep-comprobante">↕</span></th>
+                                <th onclick="handlePercepcionesSort('monto', 'numeric')" style="cursor: pointer;">Importe <span id="sort-icon-percep-monto">↕</span></th>
                             </tr>
                         </thead>
                         <tbody id="table-percepciones-body">
@@ -276,7 +318,7 @@
             </div>
         </section>
 
-        <!-- SECCIÓN 2: CONCILIADOR BANCARIO -->
+        <!-- SECCIÓN 2: EXTRACTOS BANCARIOS -->
         <section id="tab-bancos" class="tab-content hidden">
             <div class="import-section">
                 <div class="drop-zone" id="zone-bancos" style="border-color: var(--accent);">
@@ -298,17 +340,40 @@
                             <button class="btn-secondary" onclick="appStore.exportBankMovements()">📥 Exportar a Excel</button>
                         </div>
                     </div>
-                    
-                    <div class="controls-row" style="margin-bottom: 12px; display: flex; gap: 12px; flex-wrap: wrap;">
-                        <div class="filter-buttons desktop-filter-buttons">
-                            <button class="btn-filter active" onclick="appStore.setBankFilter('all')">Todos</button>
-                            <button class="btn-filter" onclick="appStore.setBankFilter('pending')">Sin Categorizar</button>
+
+                    <!-- OPERATIONAL TOOLBAR (EXTRACTOS) -->
+                    <div class="operational-toolbar" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 16px 0;">
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+                            <div class="btn-group" id="bancos-filter-group">
+                                <button class="btn btn-filter active" data-filter="all" onclick="setBancosFilter('all')">Todos</button>
+                                <button class="btn btn-filter" data-filter="debitos" onclick="setBancosFilter('debitos')">Débitos (-)</button>
+                                <button class="btn btn-filter" data-filter="creditos" onclick="setBancosFilter('creditos')">Créditos (+)</button>
+                                <button class="btn btn-filter" data-filter="pending" onclick="setBancosFilter('pending')">Sin Categorizar</button>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+                                <label for="bancos-period-filter" style="font-weight: 500; color: var(--text-muted);">Período:</label>
+                                <input type="month" id="bancos-period-filter" class="form-control" style="padding: 4px 8px; font-size: 12px;" onchange="handleBancosPeriodChange(event)">
+                            </div>
+                            <div style="position: relative; display: inline-block;">
+                                <button class="btn btn-secondary btn-sm" id="bancos-col-btn" onclick="toggleBancosColDropdown(event)" style="padding: 6px 12px; font-size: 12px;">
+                                    Columnas ▾
+                                </button>
+                                <div id="bancos-col-menu" class="card" style="display: none; position: absolute; top: 100%; left: 0; z-index: 1000; padding: 12px; width: 220px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-top: 4px;">
+                                    <div style="font-weight: 600; font-size: 12px; margin-bottom: 8px; color: var(--text-main);">Visibilidad de Columnas</div>
+                                    <div id="bancos-col-checkboxes" style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;"></div>
+                                    <button class="btn-secondary" style="font-size: 11px; padding: 4px; width: 100%; margin-top: 10px;" onclick="resetBancosColumns()">Restaurar predeterminadas</button>
+                                </div>
+                            </div>
                         </div>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <input type="date" id="bank-filter-date-from" class="form-control" onchange="appStore.applyBankDateFilters()" style="width: auto;">
-                            <span style="font-size: 13px; color: var(--text-muted);">hasta</span>
-                            <input type="date" id="bank-filter-date-to" class="form-control" onchange="appStore.applyBankDateFilters()" style="width: auto;">
+                        <div>
+                            <div style="position: relative; display: inline-block;">
+                                <input type="text" id="bancos-search-input" class="form-control" placeholder="Buscar movimientos bancarios..." style="padding-right: 28px; width: 280px;" oninput="handleBancosSearchInput(event)">
+                                <button id="bancos-search-clear" style="display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px;" onclick="clearBancosSearch()">✕</button>
+                            </div>
                         </div>
+                    </div>
+                    <div id="bancos-summary-bar" style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px;">
+                        0 movimientos · Débitos: $ 0,00 · Créditos: $ 0,00
                     </div>
 
                     <!-- Acciones por lote (Bulk Actions) -->
@@ -323,15 +388,15 @@
                     </div>
 
                     <div class="data-table-container" style="max-height: 400px; overflow-y: auto;">
-                        <table class="simple-table">
+                        <table class="simple-table" id="table-bancos">
                             <thead>
                                 <tr>
                                     <th><input type="checkbox" id="check-all-bancos" onclick="appStore.toggleSelectAllBankMovements(this)"></th>
-                                    <th>Fecha</th>
-                                    <th>Descripción / Concepto</th>
-                                    <th>Importe</th>
-                                    <th>Tipo</th>
-                                    <th>Clasificación / Categoría</th>
+                                    <th onclick="handleBancosSort('fecha', 'date')" style="cursor: pointer;">Fecha <span id="sort-icon-bank-fecha">↕</span></th>
+                                    <th onclick="handleBancosSort('descripcion', 'text')" style="cursor: pointer;">Descripción / Concepto <span id="sort-icon-bank-descripcion">↕</span></th>
+                                    <th onclick="handleBancosSort('monto', 'numeric')" style="cursor: pointer;">Importe <span id="sort-icon-bank-monto">↕</span></th>
+                                    <th onclick="handleBancosSort('tipo', 'text')" style="cursor: pointer;">Tipo <span id="sort-icon-bank-tipo">↕</span></th>
+                                    <th onclick="handleBancosSort('cuenta', 'text')" style="cursor: pointer;">Clasificación / Categoría <span id="sort-icon-bank-cuenta">↕</span></th>
                                     <th>Acción</th>
                                 </tr>
                             </thead>
@@ -650,8 +715,8 @@
             </div>
         </section>
 
-        <!-- SECCIÓN 6: CONFIGURACIÓN -->
-        <section id="tab-configuracion" class="tab-content hidden">
+        <!-- SECCIÓN: CATEGORIZACIÓN (CATÁLOGOS E IMPUESTOS) -->
+        <section id="tab-categorizacion" class="tab-content hidden">
             <!-- A. Categorías Tributarias -->
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
@@ -728,6 +793,34 @@
                         </thead>
                         <tbody id="table-iibb-rates-body">
                             <tr><td colspan="7" style="text-align: center;">Cargando tasas IIBB...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- D. Configuración de Alícuotas IVA -->
+            <div class="card" style="margin-top: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3>Alícuotas de IVA Habilitadas</h3>
+                    <span style="font-size: 12px; color: var(--text-muted);">Tabla de referencia fiscal</span>
+                </div>
+                <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Porcentajes de IVA reconocidos por el sistema para operaciones y liquidaciones.</p>
+                <div class="data-table-container">
+                    <table class="simple-table">
+                        <thead>
+                            <tr>
+                                <th>Alícuota (%)</th>
+                                <th>Denominación AFIP / ARCA</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-iva-rates-body">
+                            <tr><td>0%</td><td>Exento / No Gravado</td><td><span style="color: var(--success); font-weight: 600;">Activa</span></td></tr>
+                            <tr><td>2.5%</td><td>Alícuota Reducida Especial</td><td><span style="color: var(--success); font-weight: 600;">Activa</span></td></tr>
+                            <tr><td>5%</td><td>Alícuota Reducida Bienes de Capital</td><td><span style="color: var(--success); font-weight: 600;">Activa</span></td></tr>
+                            <tr><td>10.5%</td><td>Alícuota Reducida (Bienes/Servicios)</td><td><span style="color: var(--success); font-weight: 600;">Activa</span></td></tr>
+                            <tr><td>21%</td><td>Alícuota General standard</td><td><span style="color: var(--success); font-weight: 600;">Activa</span></td></tr>
+                            <tr><td>27%</td><td>Alícuota Incrementada (Servicios Básicos/Telecom)</td><td><span style="color: var(--success); font-weight: 600;">Activa</span></td></tr>
                         </tbody>
                     </table>
                 </div>
