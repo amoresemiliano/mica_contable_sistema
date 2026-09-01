@@ -422,21 +422,41 @@ export class PersistenceService {
     }
 
     /**
-     * Cargar categorías tributarias activas asignadas a la org
+     * Cargar categorías tributarias activas asignadas a la org mediante SELECT directo con RLS
      */
     async loadActiveTaxCategories() {
-        const { data, error } = await supabase.rpc('get_active_tax_categories');
-        if (error) throw new Error(`Error get_active_tax_categories: ${error.message}`);
-        return data || [];
+        const { data, error } = await supabase
+            .from('eco_org_tax_categories')
+            .select('id, organization_id, is_active, created_at, category:eco_tax_categories(id, name, description, category_type, is_active)')
+            .eq('is_active', true);
+        if (error) throw new Error(`Error loadActiveTaxCategories: ${error.message}`);
+        return (data || []).filter(item => item.category && item.category.is_active).map(item => ({
+            id: item.category.id,
+            organization_id: item.organization_id,
+            name: item.category.name,
+            description: item.category.description,
+            category_type: item.category.category_type,
+            is_active: item.is_active
+        }));
     }
 
     /**
-     * Cargar actividades económicas activas asignadas a la org
+     * Cargar actividades económicas activas asignadas a la org mediante SELECT directo con RLS
      */
     async loadActiveEconomicActivities() {
-        const { data, error } = await supabase.rpc('get_active_economic_activities');
-        if (error) throw new Error(`Error get_active_economic_activities: ${error.message}`);
-        return data || [];
+        const { data, error } = await supabase
+            .from('eco_org_economic_activities')
+            .select('id, organization_id, is_active, created_at, activity:eco_economic_activities(id, arca_code, name, description, is_active)')
+            .eq('is_active', true);
+        if (error) throw new Error(`Error loadActiveEconomicActivities: ${error.message}`);
+        return (data || []).filter(item => item.activity && item.activity.is_active).map(item => ({
+            id: item.activity.id,
+            organization_id: item.organization_id,
+            arca_code: item.activity.arca_code,
+            name: item.activity.name,
+            description: item.activity.description,
+            is_active: item.is_active
+        }));
     }
 
     /**

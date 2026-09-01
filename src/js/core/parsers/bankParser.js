@@ -50,6 +50,11 @@ export function parseBankRows(rows, context = {}) {
         }
         else if (clean.includes('detalle')) mapping.detalle = idx;
         else if (clean === 'referencia' || clean === 'ref.' || clean.includes('referencia')) mapping.referencia = idx;
+        else if (clean === 'comprobante' || clean.includes('comprobante')) mapping.comprobante = idx;
+        else if (clean === 'cod. mov.' || clean.includes('cod. mov') || clean.includes('cod mov')) mapping.codMov = idx;
+        else if (clean.includes('leyenda')) mapping.codLeyenda = idx;
+        else if (clean.includes('suc. origen') || clean.includes('sucursal')) mapping.sucOrigen = idx;
+        else if (clean.includes('observaciones') || clean.includes('obs')) mapping.observaciones = idx;
         else if (clean.includes('importe') || clean.includes('monto')) mapping.importe = idx;
         else if (clean.includes('debito') || clean.includes('egreso') || clean.includes('salida')) mapping.debito = idx;
         else if (clean.includes('credito') || clean.includes('ingreso') || clean.includes('entrada')) mapping.credito = idx;
@@ -72,8 +77,24 @@ export function parseBankRows(rows, context = {}) {
 
         const dateVal = mapping.fecha !== undefined ? row[mapping.fecha] : null;
         const fechaValorVal = mapping.fechaValor !== undefined ? row[mapping.fechaValor] : null;
-        const referenciaVal = mapping.referencia !== undefined ? String(row[mapping.referencia] || '').trim() : '';
-        const saldoVal = mapping.saldo !== undefined ? checkStrictNumber(row[mapping.saldo]) : null;
+        
+        let referenciaVal = mapping.referencia !== undefined ? String(row[mapping.referencia] || '').trim() : '';
+        if (!referenciaVal) {
+            const compVal = mapping.comprobante !== undefined ? String(row[mapping.comprobante] || '').trim() : '';
+            const codMovVal = mapping.codMov !== undefined ? String(row[mapping.codMov] || '').trim() : '';
+            const codLeyendaVal = mapping.codLeyenda !== undefined ? String(row[mapping.codLeyenda] || '').trim() : '';
+            const sucOrigenVal = mapping.sucOrigen !== undefined ? String(row[mapping.sucOrigen] || '').trim() : '';
+            referenciaVal = [compVal, codMovVal, codLeyendaVal, sucOrigenVal].filter(Boolean).join(' ').trim();
+        }
+
+        let saldoVal = mapping.saldo !== undefined ? checkStrictNumber(row[mapping.saldo]) : null;
+        if (saldoVal === null && mapping.observaciones !== undefined) {
+            const obsStr = String(row[mapping.observaciones] || '');
+            const matchSaldo = obsStr.match(/Saldo\s*(?:Disponible)?:?\s*([-\d.,]+)/i);
+            if (matchSaldo) {
+                saldoVal = checkStrictNumber(matchSaldo[1]);
+            }
+        }
         
         const conceptoVal = mapping.concepto !== undefined ? String(row[mapping.concepto] || '').trim() : '';
         const detalleVal = mapping.detalle !== undefined ? String(row[mapping.detalle] || '').trim() : '';

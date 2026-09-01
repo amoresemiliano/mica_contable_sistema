@@ -2365,7 +2365,6 @@ appStore.subscribe(() => {
     renderClientDashboard();
     renderOcrHistory();
     renderResolucionManual();
-    UIManager.renderBancosGrid();
     UIManager.renderCategorization();
     UIManager.renderImportIssues();
 });
