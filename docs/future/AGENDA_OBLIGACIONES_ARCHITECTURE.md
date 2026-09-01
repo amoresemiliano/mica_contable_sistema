@@ -42,6 +42,7 @@ The `identity_key` is a deterministic hash of the context: e.g., `hash(org_oblig
     *   The `eco_obligation_instances` amount is updated.
     *   An audit event is ALWAYS generated.
     *   No silent override is permitted. Any user-made manual adjustment to an automatically sourced obligation requires an explicit audit log and cannot simply overwrite the source. If the source is wrong, the source should be fixed (immutable raw records are appended/corrected).
+    *   **Amount Below Paid Rule**: If the recalculated obligation amount is less than the total active payments already recorded, the system will NOT silently normalize history. It will preserve all payments and the audit trail, flag the obligation as requiring review (`requires_review = TRUE`), and will NOT auto-refund or delete payments. The UI/API will expose this state to show the inconsistency.
 *   **B. Taxes**: Future calculations will work similarly, upserting the instance based on the deterministic key.
 *   **C. Manual**: Follows the same key. Manual overrides to calculated amounts must be clearly audited.
 
@@ -70,7 +71,7 @@ Raw source data in `eco_financial_movements` remains strictly immutable.
 ## 9. User Journeys & UX
 *   **Dashboard**: Shows summary cards for "Pendientes", "Vencidas", "Próximas a vencer".
 *   **Filtros**: By Client, Period, Obligation Type.
-*   **Acciones en Lista**: "Marcar Pagado" (opens modal for date, amount, evidence), "Ver Detalle", "Añadir Manual".
+*   **Acciones en Lista**: "Marcar Pagado" (opens modal for date, amount, evidence), "Ver Detalle", "Añadir Manual". Payment evidence is stored as a stable path (`supporting_evidence_path`), not a signed URL. Signed URLs are generated at read-time only.
 *   **Sueldos UX**: The `salaryParser.js` currently extracts "sindicatoAporte". This should be mapped in the backend. Instead of hardcoding `if sindicato === X`, the parser sends the raw extracted mapping, and the backend resolves it against `eco_org_obligations` configured for `source_type = 'PAYROLL'`.
 
 ## 10. Risks & Unresolved Decisions

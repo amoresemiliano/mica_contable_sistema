@@ -44,7 +44,7 @@ The backend will expose strictly typed, `SECURITY DEFINER` RPCs to handle operat
 *   **Logic**: Validates org, ensures no duplicate `identity_key` exists.
 
 ### `mark_obligation_paid`
-*   **Input**: `p_instance_id UUID`, `p_amount NUMERIC`, `p_payment_date DATE`, `p_method TEXT`, `p_evidence_url TEXT` (optional)
+*   **Input**: `p_instance_id UUID`, `p_amount NUMERIC`, `p_payment_date DATE`, `p_method TEXT`, `p_evidence_path TEXT` (optional)
 *   **Output**: Success boolean.
 *   **Logic**: Creates a record in `eco_obligation_payments`. If total payments >= instance amount, updates instance status to `PAID`. Triggers audit. Supports partial payments (status remains `PENDING` if total paid < instance amount).
 
@@ -55,7 +55,7 @@ The backend will expose strictly typed, `SECURITY DEFINER` RPCs to handle operat
 
 ### `generate_payroll_obligations` (Internal/System RPC)
 *   **Input**: `p_financial_movement_id UUID` (the raw salary record)
-*   **Logic**: Reads the mapped `eco_org_obligations` for `PAYROLL`. Upserts instances for the specific period via deterministic `identity_key`. Logs audit event.
+*   **Logic**: Reads the mapped `eco_org_obligations` for `PAYROLL`. Upserts instances for the specific period via deterministic `identity_key`. Logs audit event. If the recalculated amount is less than the total payments already made, sets `requires_review = TRUE` and does NOT modify or refund existing payments.
 
 ---
 

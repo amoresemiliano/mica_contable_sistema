@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS public.eco_obligation_instances (
   source_record_id UUID, -- E.g., reference to eco_financial_movements for salary
   identity_key TEXT NOT NULL, -- Deterministic extensible key: hash(org_id, org_obligation_id, period, context)
 
+  requires_review BOOLEAN DEFAULT FALSE,
   notes TEXT,
   created_by UUID, -- Could be a user or a system process
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -101,7 +102,8 @@ CREATE TABLE IF NOT EXISTS public.eco_obligation_payments (
   payment_method TEXT,
   reference_number TEXT,
 
-  supporting_evidence_url TEXT, -- E.g., link to a receipt in storage (Optional)
+  supporting_evidence_path TEXT, -- E.g., link to a receipt in storage (Optional)
+  requires_review BOOLEAN DEFAULT FALSE,
   notes TEXT,
 
   created_by UUID,
