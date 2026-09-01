@@ -316,29 +316,54 @@ export function renderClientDashboard() {
         netEl.style.color = netBalance >= 0 ? 'var(--success)' : 'var(--warning)';
     }
 
-    // Cálculo de IVA (Ventas - Compras)
-    const ivaEstimado = (salesARCA * 0.21) - (purchasesARCA * 0.21);
-    // Cálculo IIBB (Ventas * alícuota)
-    const iibbEstimado = salesARCA * 0.03;
+    // IVA: Utilizar únicamente valores fiscales reales importados (Débito - Crédito)
+    const emittedItems = items.filter(i => i.tipo === 'emitido' || i.type === 'emitido');
+    const receivedItems = items.filter(i => i.tipo === 'recibido' || i.type === 'recibido');
 
-    if (ivaValEl) ivaValEl.innerText = `$ ${Math.max(0, ivaEstimado).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-    if (iibbValEl) iibbValEl.innerText = `$ ${iibbEstimado.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    const hasRealIvaEmitted = emittedItems.some(i => parseFloat(i.iva || i.importeIva || i.imp_iva) > 0);
+    const hasRealIvaReceived = receivedItems.some(i => parseFloat(i.iva || i.importeIva || i.imp_iva) > 0);
 
-    // Costo Laboral
+    if (ivaValEl) {
+        if (hasRealIvaEmitted || hasRealIvaReceived) {
+            const totalIvaDebito = emittedItems.reduce((sum, i) => sum + (parseFloat(i.iva || i.importeIva || i.imp_iva) || 0), 0);
+            const totalIvaCredito = receivedItems.reduce((sum, i) => sum + (parseFloat(i.iva || i.importeIva || i.imp_iva) || 0), 0);
+            const netIva = totalIvaDebito - totalIvaCredito;
+            ivaValEl.innerText = `$ ${Math.max(0, netIva).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        } else {
+            ivaValEl.innerText = "Pendiente de determinación";
+        }
+    }
+
+    // IIBB: Sin tasa hardcoded 3%. Estado neutro hasta motor de determinación
+    if (iibbValEl) {
+        iibbValEl.innerText = "Pendiente de determinación";
+    }
+
+    // Costo Laboral del Mes (usa modelo validado de Sueldos sin DOM form inputs ni anticipos desajustados)
     let costLabor = 0;
     if (appStore.salaries) {
         const sal = appStore.salaries;
-        const f931 = parseFloat(document.getElementById('input-f931').value) || 0;
-        const sindContrib = parseFloat(document.getElementById('input-sindicato-contrib').value) || 0;
-        costLabor = sal.sueldoNeto + f931 + sal.sindicatoAporte + sindContrib + sal.anticipos - (sal.sueldoBruto - sal.sueldoNeto);
+        costLabor = sal.costoLaboralReal !== undefined 
+            ? sal.costoLaboralReal 
+            : ((sal.sueldoBrutoCalculado || sal.sueldoBruto || sal.remunerativo || 0) + (sal.noRemunerativo || 0));
     }
     if (laborValEl) laborValEl.innerText = `$ ${costLabor.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
 
-    // Alertas de descuadres
+    // Alertas de comprobantes sin categorizar / saldo pendiente por explicar
     const alertUnresolved = document.getElementById('alert-unresolved-taxes');
+    const alertNoIssues = document.getElementById('alert-no-issues');
     if (alertUnresolved) {
-        const hasUnresolved = appStore.items.some(i => i.tipo === 'recibido' && i.saldoAExplicar > 0);
-        alertUnresolved.classList.toggle('hidden', !hasUnresolved);
+        const pendingCount = items.filter(i => (i.tipo === 'recibido' || i.type === 'recibido') && (i.saldoAExplicar > 0 || !i.confirmada)).length;
+        if (pendingCount > 0) {
+            alertUnresolved.innerHTML = `⚠️ <strong>Atención:</strong> Tenés ${pendingCount} comprobantes de compras sin categorizar o con saldo pendiente por explicar.`;
+            alertUnresolved.classList.remove('hidden');
+            alertUnresolved.style.display = 'block';
+            if (alertNoIssues) alertNoIssues.style.display = 'none';
+        } else {
+            alertUnresolved.classList.add('hidden');
+            alertUnresolved.style.display = 'none';
+            if (alertNoIssues) alertNoIssues.style.display = 'block';
+        }
     }
 
     // Desglose de Gastos

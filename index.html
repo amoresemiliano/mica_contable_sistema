@@ -600,36 +600,52 @@
                     <div class="value" id="client-sales-val">$ 0,00</div>
                 </div>
                 <div class="metric-card" style="border-left: 4px solid var(--warning);">
-                    <h4>Egresos / Gastos</h4>
+                    <h4>Egresos / Gastos Totales</h4>
                     <div class="value" id="client-purchases-val">$ 0,00</div>
                 </div>
                 <div class="metric-card" style="border-left: 4px solid var(--success);">
-                    <h4>Resultado Operativo</h4>
+                    <h4>Resultado Operativo Neto</h4>
                     <div class="value" id="client-net-val">$ 0,00</div>
+                </div>
+                <div class="metric-card" style="border-left: 4px solid var(--primary);">
+                    <h4>Costo Laboral del Mes</h4>
+                    <div class="value" id="client-labor-val">$ 0,00</div>
                 </div>
             </div>
 
             <div class="metrics-grid" style="margin-top: 16px;">
                 <div class="metric-card">
-                    <h4>IVA Estimado Próximo Vencimiento</h4>
-                    <div class="value" id="client-iva-val" style="color: var(--warning);">$ 0,00</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Saldo estimado (Débito menos Crédito)</span>
+                    <h4>IVA Determinado</h4>
+                    <div class="value" id="client-iva-val" style="color: var(--warning);">Pendiente de determinación</div>
+                    <span style="font-size: 11px; color: var(--text-muted);">Saldo basado en Débito y Crédito fiscal importado</span>
                 </div>
                 <div class="metric-card">
                     <h4>IIBB Estimado AGIP/ARBA</h4>
-                    <div class="value" id="client-iibb-val" style="color: var(--warning);">$ 0,00</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Calculado sobre Ventas brutas gravadas (3%)</span>
+                    <div class="value" id="client-iibb-val" style="color: var(--warning);">Pendiente de determinación</div>
+                    <span style="font-size: 11px; color: var(--text-muted);">Pendiente del motor de determinación impositiva</span>
                 </div>
             </div>
 
             <div class="grid-inputs" style="margin-top: 16px;">
                 <div class="card">
-                    <h3>Top Categorías de Gasto</h3>
-                    <ul id="client-category-chart" style="list-style: none; padding: 0; margin-top: 12px;">
+                    <h3>Desglose de Gastos por Categoría</h3>
+                    <ul class="progress-list" id="client-category-chart">
                         <li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">
-                            Cargando métricas de categorías...
+                            Sin datos disponibles. Cargá comprobantes recibidos para ver el desglose.
                         </li>
                     </ul>
+                </div>
+
+                <div class="card">
+                    <h3>Alertas Contables Recientes</h3>
+                    <div id="client-alerts-container" style="font-size: 13px; display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
+                        <div id="alert-unresolved-taxes" class="alert-box alert-warning hidden" style="padding: 10px; background-color: rgba(245, 158, 11, 0.15); border-radius: 6px; color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3);">
+                            ⚠️ <strong>Atención:</strong> Existen comprobantes de compras sin categorizar o con saldo pendiente por explicar.
+                        </div>
+                        <div id="alert-no-issues" style="font-size: 13px; color: var(--text-muted); padding: 8px 0;">
+                            ✓ Sin alertas críticas pendientes.
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>
