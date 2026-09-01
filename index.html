@@ -72,6 +72,7 @@
             <li><a onclick="switchTab('tab-sueldos')">👥 <span class="nav-text">Sueldos</span></a></li>
             <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Movimientos Manuales</span></a></li>
             <li><a onclick="switchTab('tab-categorizacion')">🏷️ <span class="nav-text">Categorización</span></a></li>
+            <li><a onclick="switchTab('tab-client-dashboard')">📊 <span class="nav-text">Panel Gerencial</span></a></li>
             <li><a onclick="switchTab('tab-configuracion')">⚙️ <span class="nav-text">Configuración</span></a></li>
         </ul>
 
@@ -591,13 +592,58 @@
             </div>
         </section>
 
-        <!-- SECCIÓN 5: CATEGORIZACIÓN -->
-        <section id="tab-categorizacion" class="tab-content hidden">
+        <!-- SECCIÓN: PANEL GERENCIAL -->
+        <section id="tab-client-dashboard" class="tab-content hidden">
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h4>Ventas Brutas</h4>
+                    <div class="value" id="client-sales-val">$ 0,00</div>
+                </div>
+                <div class="metric-card" style="border-left: 4px solid var(--warning);">
+                    <h4>Egresos / Gastos</h4>
+                    <div class="value" id="client-purchases-val">$ 0,00</div>
+                </div>
+                <div class="metric-card" style="border-left: 4px solid var(--success);">
+                    <h4>Resultado Operativo</h4>
+                    <div class="value" id="client-net-val">$ 0,00</div>
+                </div>
+            </div>
+
+            <div class="metrics-grid" style="margin-top: 16px;">
+                <div class="metric-card">
+                    <h4>IVA Estimado Próximo Vencimiento</h4>
+                    <div class="value" id="client-iva-val" style="color: var(--warning);">$ 0,00</div>
+                    <span style="font-size: 11px; color: var(--text-muted);">Saldo estimado (Débito menos Crédito)</span>
+                </div>
+                <div class="metric-card">
+                    <h4>IIBB Estimado AGIP/ARBA</h4>
+                    <div class="value" id="client-iibb-val" style="color: var(--warning);">$ 0,00</div>
+                    <span style="font-size: 11px; color: var(--text-muted);">Calculado sobre Ventas brutas gravadas (3%)</span>
+                </div>
+            </div>
+
+            <div class="grid-inputs" style="margin-top: 16px;">
+                <div class="card">
+                    <h3>Top Categorías de Gasto</h3>
+                    <ul id="client-category-chart" style="list-style: none; padding: 0; margin-top: 12px;">
+                        <li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">
+                            Cargando métricas de categorías...
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- SECCIÓN 6: CONFIGURACIÓN -->
+        <section id="tab-configuracion" class="tab-content hidden">
             <!-- A. Categorías Tributarias -->
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3>Categorías Tributarias</h3>
-                    <button class="btn-secondary" onclick="appStore.loadTaxCategories()">🔄 Actualizar</button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-secondary" onclick="appStore.loadTaxCategories()">🔄 Actualizar</button>
+                        <button class="btn-primary" onclick="UIManager.openModal('modal-tax-category')">+ Nueva Categoría</button>
+                    </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Asignación de categorías globales a la organización.</p>
                 <div class="data-table-container">
@@ -1028,19 +1074,87 @@
         </div>
     </div>
 
-    <div id="modal-arca-catalog" class="modal hidden">
-        <div class="modal-content card" style="max-width: 500px; margin: 50px auto;">
+    <div id="modal-tax-category" class="modal hidden">
+        <div class="modal-content card" style="max-width: 450px; margin: 50px auto;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <h3>Importar Catálogo ARCA</h3>
+                <h3>Nueva Categoría Tributaria</h3>
+                <button class="btn-close" onclick="UIManager.closeModal('modal-tax-category')" style="background: none; border: none; font-size: 16px; cursor: pointer;">✕</button>
+            </div>
+            <div id="tax-category-feedback" class="auth-status-banner" style="display: none; margin-bottom: 12px;"></div>
+            <form id="form-tax-category" onsubmit="event.preventDefault(); window.submitTaxCategoryForm();">
+                <div class="form-group">
+                    <label>Nombre de Categoría *</label>
+                    <input type="text" id="tax-category-name" class="form-control" placeholder="Ej: Honorarios Profesionales" required>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label>Tipo de Categoría *</label>
+                    <select id="tax-category-type" class="form-control" required>
+                        <option value="EXPENSE">Egreso / Gasto</option>
+                        <option value="INCOME">Ingreso / Venta</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label>Descripción / Observación</label>
+                    <textarea id="tax-category-desc" class="form-control" rows="3" placeholder="Descripción opcional..."></textarea>
+                </div>
+                <button type="submit" id="btn-save-tax-category" class="btn-primary" style="width: 100%; margin-top: 16px;">Guardar Categoría</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-arca-catalog" class="modal hidden">
+        <div class="modal-content card" style="max-width: 650px; margin: 30px auto; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3>Importar Catálogo ARCA (F883 TXT)</h3>
                 <button class="btn-close" onclick="UIManager.closeModal('modal-arca-catalog')" style="background: none; border: none; font-size: 16px; cursor: pointer;">✕</button>
             </div>
-            <form id="form-arca-catalog" onsubmit="event.preventDefault(); window.submitArcaCatalogForm();">
-                <div class="form-group">
-                    <label>JSON del Catálogo (Array de Actividades)</label>
-                    <textarea id="arca-catalog-json" class="form-control" rows="8" placeholder='[{"arca_activity_code": "620100", "name": "Servicios de programación", "description": "..."}]' required></textarea>
+            <div id="arca-catalog-feedback" class="auth-status-banner" style="display: none; margin-bottom: 12px;"></div>
+            
+            <div class="form-group" style="margin-bottom: 16px;">
+                <label>Seleccionar Archivo ACTIVIDADES_ECONOMICAS_F883.txt</label>
+                <input type="file" id="arca-catalog-file" accept=".txt,.csv" class="form-control" onchange="window.handleArcaFileSelected(event)">
+            </div>
+            
+            <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">O pegar contenido delimitado por punto y coma (;):</p>
+            <textarea id="arca-catalog-json" class="form-control" rows="4" placeholder="COD_ACTIVIDAD_F883;DESC_ACTIVIDAD_F883;DESCL_ACTIVIDA_F883;&#10;011111;Cultivo de arroz;Cultivo de arroz;&#10;000007;Jubilado;Jubilado;" oninput="window.handleArcaTextInputs()"></textarea>
+
+            <div id="arca-preview-container" style="display: none; margin-top: 16px; border-top: 1px dashed var(--border-color); padding-top: 12px;">
+                <h4 style="margin-bottom: 8px;">Resumen del Análisis</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 12px; font-size: 12px;">
+                    <div style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <span style="color: var(--text-muted); display: block;">Total Filas</span>
+                        <strong id="stat-total-rows">0</strong>
+                    </div>
+                    <div style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <span style="color: var(--text-muted); display: block;">Válidas</span>
+                        <strong id="stat-valid-rows" style="color: var(--success);">0</strong>
+                    </div>
+                    <div style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <span style="color: var(--text-muted); display: block;">Duplicados</span>
+                        <strong id="stat-duplicate-rows" style="color: var(--warning);">0</strong>
+                    </div>
+                    <div style="background: var(--bg-primary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                        <span style="color: var(--text-muted); display: block;">Inválidas</span>
+                        <strong id="stat-invalid-rows" style="color: #ef4444;">0</strong>
+                    </div>
                 </div>
-                <button type="submit" class="btn-primary" style="width: 100%; margin-top: 16px;">Importar Actividades</button>
-            </form>
+
+                <h4 style="margin-bottom: 6px; font-size: 12px;">Vista Previa (Primeras 10 filas):</h4>
+                <div class="data-table-container" style="max-height: 180px; overflow-y: auto; margin-bottom: 16px;">
+                    <table class="simple-table" style="font-size: 12px;">
+                        <thead>
+                            <tr>
+                                <th>Código</th>
+                                <th>Nombre</th>
+                                <th>Descripción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-arca-preview-body">
+                        </tbody>
+                    </table>
+                </div>
+                <button type="button" id="btn-confirm-arca-import" class="btn-primary" style="width: 100%;" onclick="window.submitArcaCatalogForm()">✓ Confirmar e Importar Catálogo</button>
+            </div>
         </div>
     </div>
     

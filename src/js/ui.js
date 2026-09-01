@@ -15,6 +15,8 @@ import { parseBankRows } from './core/parsers/bankParser.js';
 import { parseSalaryRows } from './core/parsers/salaryParser.js';
 import { stageImport } from './core/services/importService.js';
 import { persistenceService } from './core/services/persistenceService.js';
+import { parseF883ActivitiesTxt } from './core/parsers/activitiesParser.js';
+import { OperationalGrid } from './core/operationalGrid.js';
 
 async function loginWithGoogle() {
   const redirectUrl = window.location.origin + window.location.pathname;
@@ -1782,24 +1784,208 @@ window.submitIibbRateForm = async () => {
     }
 };
 
-window.submitArcaCatalogForm = async () => {
-    const jsonStr = document.getElementById('arca-catalog-json').value;
-    try {
-        const parsed = JSON.parse(jsonStr);
-        if (!Array.isArray(parsed)) {
-            throw new Error("El JSON debe ser un arreglo de actividades.");
+let parsedArcaCatalogState = null;
+
+window.handleArcaFileSelected = function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const rawText = e.target.result;
+            const parsed = parseF883ActivitiesTxt(rawText);
+            parsedArcaCatalogState = parsed;
+
+            document.getElementById('stat-total-rows').innerText = parsed.totalRows;
+            document.getElementById('stat-valid-rows').innerText = parsed.validRows;
+            document.getElementById('stat-duplicate-rows').innerText = parsed.duplicateCodes;
+            document.getElementById('stat-invalid-rows').innerText = parsed.invalidRows;
+
+            const tbody = document.getElementById('table-arca-preview-body');
+            if (tbody) {
+                tbody.innerHTML = parsed.previewRows.map(row => `
+                    <tr>
+                        <td><strong>${row.arca_code}</strong></td>
+                        <td>${row.name}</td>
+                        <td>${row.description}</td>
+                    </tr>
+                `).join('');
+            }
+
+            document.getElementById('arca-preview-container').style.display = 'block';
+            const feedback = document.getElementById('arca-catalog-feedback');
+            if (feedback) feedback.style.display = 'none';
+        } catch (err) {
+            alert("Error al leer archivo F883: " + err.message);
         }
-        if (parsed.length > 0 && (!parsed[0].arca_activity_code || !parsed[0].name)) {
-            throw new Error("Las actividades deben contener al menos 'arca_activity_code' y 'name'.");
+    };
+    reader.readAsText(file);
+};
+
+window.handleArcaTextInputs = function() {
+    const textInput = document.getElementById('arca-catalog-json');
+    const text = textInput ? textInput.value : '';
+    if (!text.trim()) {
+        const prev = document.getElementById('arca-preview-container');
+        if (prev) prev.style.display = 'none';
+        return;
+    }
+
+    try {
+        const parsed = parseF883ActivitiesTxt(text);
+        parsedArcaCatalogState = parsed;
+
+        document.getElementById('stat-total-rows').innerText = parsed.totalRows;
+        document.getElementById('stat-valid-rows').innerText = parsed.validRows;
+        document.getElementById('stat-duplicate-rows').innerText = parsed.duplicateCodes;
+        document.getElementById('stat-invalid-rows').innerText = parsed.invalidRows;
+
+        const tbody = document.getElementById('table-arca-preview-body');
+        if (tbody) {
+            tbody.innerHTML = parsed.previewRows.map(row => `
+                <tr>
+                    <td><strong>${row.arca_code}</strong></td>
+                    <td>${row.name}</td>
+                    <td>${row.description}</td>
+                </tr>
+            `).join('');
         }
 
-        await persistenceService.upsertArcaCatalog(parsed);
-        alert("Catálogo ARCA importado con éxito");
+        document.getElementById('arca-preview-container').style.display = 'block';
+        const feedback = document.getElementById('arca-catalog-feedback');
+        if (feedback) feedback.style.display = 'none';
+    } catch (err) {
+        console.warn(err);
+    }
+};
+
+window.submitArcaCatalogForm = async () => {
+    const btn = document.getElementById('btn-confirm-arca-import');
+    const feedback = document.getElementById('arca-catalog-feedback');
+
+    if (!parsedArcaCatalogState || parsedArcaCatalogState.validActivities.length === 0) {
+        // Si pegaron JSON plano fallback
+        const jsonStr = document.getElementById('arca-catalog-json').value;
+        try {
+            const parsedJson = JSON.parse(jsonStr);
+            if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+                parsedArcaCatalogState = { validActivities: parsedJson };
+            }
+        } catch (e) {
+            // No era JSON
+        }
+    }
+
+    if (!parsedArcaCatalogState || !parsedArcaCatalogState.validActivities || parsedArcaCatalogState.validActivities.length === 0) {
+        if (feedback) {
+            feedback.innerText = "No se encontraron actividades válidas para importar.";
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+        return;
+    }
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = "Importando catálogo...";
+        }
+        if (feedback) feedback.style.display = "none";
+
+        await persistenceService.upsertArcaCatalog(parsedArcaCatalogState.validActivities);
+
+        if (appStore.loadEconomicActivities) {
+            await appStore.loadEconomicActivities();
+        }
+        UIManager.render();
+
+        alert(`Se importaron ${parsedArcaCatalogState.validActivities.length} actividades económicas ARCA exitosamente.`);
         UIManager.closeModal('modal-arca-catalog');
-        document.getElementById('form-arca-catalog').reset();
-        appStore.loadEconomicActivities();
-    } catch (e) {
-        alert("Error al importar: " + e.message);
+        parsedArcaCatalogState = null;
+        const fileIn = document.getElementById('arca-catalog-file');
+        const textIn = document.getElementById('arca-catalog-json');
+        if (fileIn) fileIn.value = '';
+        if (textIn) textIn.value = '';
+        const prev = document.getElementById('arca-preview-container');
+        if (prev) prev.style.display = 'none';
+    } catch (err) {
+        console.error("Error al importar catálogo ARCA:", err);
+        if (feedback) {
+            feedback.innerText = "Error: " + (err.message || "Error al guardar en el servidor");
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "✓ Confirmar e Importar Catálogo";
+        }
+    }
+};
+
+window.submitTaxCategoryForm = async () => {
+    const nameInput = document.getElementById('tax-category-name');
+    const typeInput = document.getElementById('tax-category-type');
+    const descInput = document.getElementById('tax-category-desc');
+    const btn = document.getElementById('btn-save-tax-category');
+    const feedback = document.getElementById('tax-category-feedback');
+
+    const name = nameInput ? nameInput.value.trim() : '';
+    const category_type = typeInput ? typeInput.value : 'EXPENSE';
+    const description = descInput ? descInput.value.trim() : '';
+
+    if (!name) {
+        if (feedback) {
+            feedback.innerText = "El nombre de la categoría es obligatorio.";
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+        return;
+    }
+
+    // Validación client-side de duplicados
+    const existing = appStore.taxCategories || [];
+    if (existing.some(c => (c.name || '').toLowerCase() === name.toLowerCase())) {
+        if (feedback) {
+            feedback.innerText = "Ya existe una categoría tributaria con el mismo nombre.";
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+        return;
+    }
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = "Guardando...";
+        }
+        if (feedback) feedback.style.display = "none";
+
+        await persistenceService.createTaxCategory({ name, description, category_type });
+
+        if (appStore.loadTaxCategories) {
+            await appStore.loadTaxCategories();
+        }
+        UIManager.render();
+
+        alert(`Categoría tributaria "${name}" creada y asignada correctamente.`);
+        UIManager.closeModal('modal-tax-category');
+
+        if (nameInput) nameInput.value = '';
+        if (descInput) descInput.value = '';
+    } catch (err) {
+        console.error("Error al crear categoría tributaria:", err);
+        if (feedback) {
+            feedback.innerText = "Error: " + (err.message || "Error al guardar en servidor");
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "Guardar Categoría";
+        }
     }
 };
 

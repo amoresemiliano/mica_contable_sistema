@@ -444,13 +444,44 @@ export class PersistenceService {
     }
 
     /**
-     * Importar catálogo ARCA
+     * Crear categoría tributaria global y asignarla a la organización activa
+     */
+    async createTaxCategory({ name, description = '', category_type = 'EXPENSE' }) {
+        if (!name || !name.trim()) {
+            throw new Error('El nombre de la categoría es obligatorio.');
+        }
+
+        const { data: categoryId, error: createError } = await supabase.rpc('create_global_tax_category', {
+            p_name: name.trim(),
+            p_description: description ? description.trim() : '',
+            p_category_type: category_type || 'EXPENSE'
+        });
+        if (createError) throw new Error(`Error al crear categoría tributaria: ${createError.message}`);
+
+        const { error: assignError } = await supabase.rpc('assign_tax_category_to_org', {
+            p_category_id: categoryId,
+            p_custom_name: null
+        });
+        if (assignError) throw new Error(`Error al asignar categoría a la organización: ${assignError.message}`);
+
+        return { id: categoryId, name: name.trim(), description: description ? description.trim() : '', category_type };
+    }
+
+    /**
+     * Importar catálogo ARCA por lotes seguros
      */
     async upsertArcaCatalog(activitiesJson) {
-        const { error } = await supabase.rpc('upsert_arca_activity_catalog', {
-            p_activities: activitiesJson
-        });
-        if (error) throw new Error(`Error upsert_arca_activity_catalog: ${error.message}`);
+        if (!Array.isArray(activitiesJson) || activitiesJson.length === 0) {
+            throw new Error('No hay actividades válidas para importar.');
+        }
+        const BATCH_SIZE = 200;
+        for (let i = 0; i < activitiesJson.length; i += BATCH_SIZE) {
+            const batch = activitiesJson.slice(i, i + BATCH_SIZE);
+            const { error } = await supabase.rpc('upsert_arca_activity_catalog', {
+                p_activities: batch
+            });
+            if (error) throw new Error(`Error upsert_arca_activity_catalog: ${error.message}`);
+        }
     }
 
     /**
