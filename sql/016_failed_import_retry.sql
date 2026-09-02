@@ -165,6 +165,7 @@ AS $$
 DECLARE
     v_org_id UUID;
     v_role TEXT;
+    v_caller_id UUID;
     v_import_record RECORD;
     v_existing_successful_cnt INT := 0;
     v_file_id UUID;
@@ -196,6 +197,7 @@ DECLARE
     v_neto NUMERIC(15,2);
     v_fecha_raw TEXT;
     v_fecha_valor_raw TEXT;
+    v_row_id UUID;
 BEGIN
     v_org_id := private.org_id();
     IF v_org_id IS NULL THEN
@@ -206,6 +208,10 @@ BEGIN
     IF v_role NOT IN ('ADMIN', 'UPLOADER') THEN
         RAISE EXCEPTION 'Unauthorized: Caller role % cannot persist financial movements', COALESCE(v_role, 'NONE');
     END IF;
+
+    SELECT id INTO v_caller_id
+    FROM public.eco_user_profiles
+    WHERE auth_user_id = auth.uid() AND organization_id = v_org_id LIMIT 1;
 
     SELECT * INTO v_import_record
     FROM public.eco_source_imports
@@ -413,9 +419,16 @@ BEGIN
                 v_duplicate_cnt := v_duplicate_cnt + 1;
                 v_row_status := 'DUPLICATE';
             ELSE
+                INSERT INTO public.eco_import_rows (
+                    file_id, organization_id, source_row_number, raw_payload, parse_status
+                ) VALUES (
+                    v_file_id, v_org_id, (v_row->>'sourceRowNumber')::INT, v_row->'rawRow', v_row_status
+                ) RETURNING id INTO v_row_id;
+
                 INSERT INTO public.eco_financial_movements (
                     organization_id,
                     import_id,
+                    row_id,
                     operation_type,
                     source_type,
                     fecha,
@@ -424,14 +437,16 @@ BEGIN
                     descripcion,
                     referencia,
                     monto,
-                    tipo,
+                    movement_type,
                     saldo,
                     identity_key,
-                    fingerprint,
-                    normalized_payload
+                    financial_fingerprint,
+                    normalized_payload,
+                    created_by
                 ) VALUES (
                     v_org_id,
                     p_import_id,
+                    v_row_id,
                     v_import_record.operation_type,
                     v_import_record.source_type,
                     v_fecha,
@@ -444,26 +459,13 @@ BEGIN
                     v_saldo,
                     v_computed_identity_key,
                     v_computed_fingerprint,
-                    v_norm
+                    v_norm,
+                    v_caller_id
                 );
                 v_accepted_cnt := v_accepted_cnt + 1;
             END IF;
         END IF;
 
-        -- Record import row log
-        INSERT INTO public.eco_import_rows (
-            file_id,
-            organization_id,
-            source_row_number,
-            raw_payload,
-            parse_status
-        ) VALUES (
-            v_file_id,
-            v_org_id,
-            (v_row->>'sourceRowNumber')::INT,
-            v_row->'rawRow',
-            v_row_status
-        );
     END LOOP;
 
     -- Update final import attempt status

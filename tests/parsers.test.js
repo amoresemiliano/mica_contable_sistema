@@ -140,6 +140,37 @@ describe('BBVA Parser', () => {
         const res = parseBankRows(BBVA_COMISION);
         expect(res[0].sourceRowNumber).toBeGreaterThan(0);
     });
+
+    test('BBVA real format - Fila de débito con importe poblado es débito válido', () => {
+        const bbvaDebitRow = [
+            ['Fec.', 'Fec. Valor', 'Concepto', 'Cod. Leyenda', 'Suc. Origen', 'Desc. Sucursal', 'Cod. Mov.', 'Importe', 'Comprobante', 'Observaciones'],
+            ['29-05-2026', '29-05-2026', 'SELLADO', '030', '', '133 - PILAR', '', '-1073.43', '', 'Saldo: 1000']
+        ];
+        const res = parseBankRows(bbvaDebitRow);
+        expect(res[0].errors).toEqual([]);
+        expect(res[0].normalizedData.tipo).toBe('debit');
+        expect(res[0].normalizedData.monto).toBe(1073.43);
+    });
+
+    test('BBVA real format - Fila de crédito con importe vacío y col 6 poblada es crédito válido', () => {
+        const bbvaCreditRow = [
+            ['Fec.', 'Fec. Valor', 'Concepto', 'Cod. Leyenda', 'Suc. Origen', 'Desc. Sucursal', 'Cod. Mov.', 'Importe', 'Comprobante', 'Observaciones'],
+            ['21-05-2026', '21-05-2026', 'TRANSF.BANEL 30715507419', '136', '', '733 - N/A', '347000', '', 'CTE 30715507419', '']
+        ];
+        const res = parseBankRows(bbvaCreditRow);
+        expect(res[0].errors).toEqual([]);
+        expect(res[0].normalizedData.tipo).toBe('credit');
+        expect(res[0].normalizedData.monto).toBe(347000);
+    });
+
+    test('BBVA real format - Fila sin importe ni crédito permanece inválida', () => {
+        const bbvaInvalidRow = [
+            ['Fec.', 'Fec. Valor', 'Concepto', 'Cod. Leyenda', 'Suc. Origen', 'Desc. Sucursal', 'Cod. Mov.', 'Importe', 'Comprobante', 'Observaciones'],
+            ['21-05-2026', '21-05-2026', 'CONCEPTO SIN MONTO', '', '', '', '', '', '', '']
+        ];
+        const res = parseBankRows(bbvaInvalidRow);
+        expect(res[0].errors).toContain("Importe vacío o no numérico.");
+    });
 });
 
 describe('Salary Parser (Acompy)', () => {

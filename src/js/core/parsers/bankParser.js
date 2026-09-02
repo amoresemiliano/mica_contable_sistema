@@ -109,12 +109,22 @@ export function parseBankRows(rows, context = {}) {
 
         if (mapping.importe !== undefined) {
             let rawAmt = checkStrictNumber(row[mapping.importe]);
-            if (rawAmt === null) {
-                amountErrors.push("Importe vacío o no numérico.");
-            } else {
+            if (rawAmt !== null) {
                 amount = Math.abs(rawAmt);
                 if (rawAmt < 0) isDebit = true;
                 else if (rawAmt > 0) isCredit = true;
+            } else {
+                let credValRaw = mapping.credito !== undefined ? checkStrictNumber(row[mapping.credito]) : null;
+                if (credValRaw === null && mapping.codMov !== undefined) {
+                    let cand = checkStrictNumber(row[mapping.codMov]);
+                    if (cand !== null && cand > 0) credValRaw = cand;
+                }
+                if (credValRaw !== null && credValRaw > 0) {
+                    amount = Math.abs(credValRaw);
+                    isCredit = true;
+                } else {
+                    amountErrors.push("Importe vacío o no numérico.");
+                }
             }
         } else {
             let debValRaw = mapping.debito !== undefined ? row[mapping.debito] : null;
