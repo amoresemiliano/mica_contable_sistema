@@ -549,13 +549,72 @@ export class PersistenceService {
     }
 
     /**
-     * Desactivar/Desasignar categoría tributaria para la organización actual
+     * Cargar lista de organizaciones registradas (para SUPERADMIN)
      */
-    async unassignTaxCategoryFromOrg(categoryId) {
+    async loadOrganizations() {
+        const { data, error } = await supabase
+            .from('eco_organizations')
+            .select('id, name, created_at')
+            .order('name', { ascending: true });
+        if (error) {
+            console.warn("loadOrganizations notice:", error.message);
+            return [];
+        }
+        return data || [];
+    }
+
+    /**
+     * Cambiar contexto organizacional para SUPERADMIN via RPC 017
+     */
+    async switchSuperadminOrgContext(orgId) {
+        const { error } = await supabase.rpc('switch_superadmin_org_context', {
+            p_org_id: orgId || null
+        });
+        if (error) console.warn("switchSuperadminOrgContext notice:", error.message);
+    }
+
+    /**
+     * Asignar/Reactivar categoría tributaria para organización (propia o target)
+     */
+    async assignTaxCategoryToOrg(categoryId, targetOrgId = null) {
+        const { error } = await supabase.rpc('assign_tax_category_to_org', {
+            p_category_id: categoryId,
+            p_target_org_id: targetOrgId || null
+        });
+        if (error) throw new Error(`Error assignTaxCategoryToOrg: ${error.message}`);
+    }
+
+    /**
+     * Desactivar/Desasignar categoría tributaria para organización (propia o target)
+     */
+    async unassignTaxCategoryFromOrg(categoryId, targetOrgId = null) {
         const { error } = await supabase.rpc('unassign_tax_category_from_org', {
-            p_category_id: categoryId
+            p_category_id: categoryId,
+            p_target_org_id: targetOrgId || null
         });
         if (error) throw new Error(`Error unassignTaxCategoryFromOrg: ${error.message}`);
+    }
+
+    /**
+     * Asignar actividad económica para organización (propia o target)
+     */
+    async assignEconomicActivityToOrg(activityId, targetOrgId = null) {
+        const { error } = await supabase.rpc('assign_economic_activity_to_org', {
+            p_activity_id: activityId,
+            p_target_org_id: targetOrgId || null
+        });
+        if (error) throw new Error(`Error assignEconomicActivityToOrg: ${error.message}`);
+    }
+
+    /**
+     * Desasignar actividad económica para organización (propia o target)
+     */
+    async unassignEconomicActivityFromOrg(activityId, targetOrgId = null) {
+        const { error } = await supabase.rpc('unassign_economic_activity_from_org', {
+            p_activity_id: activityId,
+            p_target_org_id: targetOrgId || null
+        });
+        if (error) throw new Error(`Error unassignEconomicActivityFromOrg: ${error.message}`);
     }
 
     /**

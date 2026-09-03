@@ -1981,25 +1981,88 @@ export class UIManager {
 
     static renderSettings() {
         const isSuperAdmin = appStore.isSuperAdmin();
+        const isGlobalMode = appStore.isGlobalMicaMode();
 
-        // Configurar visibilidad del header de columna Estado y grupos de filtros para SUPERADMIN
+        // 0. Render Context Switcher Dropdown para SUPERADMIN
+        const switcherContainer = document.getElementById('org-context-switcher-container');
+        const selectOrgContext = document.getElementById('select-org-context');
+        if (switcherContainer && selectOrgContext) {
+            if (isSuperAdmin) {
+                switcherContainer.style.display = 'flex';
+                const orgs = appStore.organizations || [];
+                selectOrgContext.innerHTML = `
+                    <option value="" ${!appStore.activeOrganizationId ? 'selected' : ''}>[ MICA / Modo Global ]</option>
+                    ${orgs.map(o => `<option value="${o.id}" ${appStore.activeOrganizationId === o.id ? 'selected' : ''}>${o.name}</option>`).join('')}
+                `;
+            } else {
+                switcherContainer.style.display = 'none';
+            }
+        }
+
+        // Target Org Containers para Global Mode
+        const targetTaxCatContainer = document.getElementById('target-org-tax-categories-container');
+        const selectTargetTaxCat = document.getElementById('select-target-org-tax-cat');
+        if (targetTaxCatContainer && selectTargetTaxCat) {
+            targetTaxCatContainer.style.display = isGlobalMode ? 'flex' : 'none';
+            const orgs = appStore.organizations || [];
+            selectTargetTaxCat.innerHTML = orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+        }
+
+        const targetEconActContainer = document.getElementById('target-org-economic-activities-container');
+        const selectTargetEconAct = document.getElementById('select-target-org-econ-act');
+        if (targetEconActContainer && selectTargetEconAct) {
+            targetEconActContainer.style.display = isGlobalMode ? 'flex' : 'none';
+            const orgs = appStore.organizations || [];
+            selectTargetEconAct.innerHTML = orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+        }
+
+        // Header Columna Estado (Visible únicamente en Modo Global SUPERADMIN)
         const thTaxCatEstado = document.getElementById('th-tax-cat-estado');
         if (thTaxCatEstado) {
-            thTaxCatEstado.style.display = isSuperAdmin ? '' : 'none';
+            thTaxCatEstado.style.display = isGlobalMode ? '' : 'none';
             thTaxCatEstado.innerText = 'Estado';
         }
 
         const thEconomicActEstado = document.getElementById('th-economic-act-estado');
         if (thEconomicActEstado) {
-            thEconomicActEstado.style.display = isSuperAdmin ? '' : 'none';
+            thEconomicActEstado.style.display = isGlobalMode ? '' : 'none';
             thEconomicActEstado.innerText = 'Estado';
         }
 
+        // Configurar botones de filtro según Modo Global vs Modo Organización
         const fgTaxCats = document.getElementById('filter-group-tax-categories');
-        if (fgTaxCats) fgTaxCats.style.display = isSuperAdmin ? 'flex' : 'none';
+        if (fgTaxCats) {
+            if (isGlobalMode) {
+                fgTaxCats.innerHTML = `
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'all' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('all')">Todos</button>
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'assigned' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('assigned')">Asignados</button>
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'unassigned' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('unassigned')">Sin asignar</button>
+                `;
+            } else {
+                fgTaxCats.innerHTML = `
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'active' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('active')">Activas</button>
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'inactive' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('inactive')">Inactivas</button>
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'all' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('all')">Todas</button>
+                `;
+            }
+        }
 
         const fgEconActs = document.getElementById('filter-group-economic-activities');
-        if (fgEconActs) fgEconActs.style.display = isSuperAdmin ? 'flex' : 'none';
+        if (fgEconActs) {
+            if (isGlobalMode) {
+                fgEconActs.innerHTML = `
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'all' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('all')">Todos</button>
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'assigned' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('assigned')">Asignados</button>
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'unassigned' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('unassigned')">Sin asignar</button>
+                `;
+            } else {
+                fgEconActs.innerHTML = `
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'active' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('active')">Activas</button>
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'inactive' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('inactive')">Inactivas</button>
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'all' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('all')">Todas</button>
+                `;
+            }
+        }
 
         // 1. Categorías Tributarias
         const allTaxCats = appStore.taxCategories || [];
@@ -2010,13 +2073,20 @@ export class UIManager {
             const matchesSearch = !taxSearch || (c.name || '').toLowerCase().includes(taxSearch) || (c.description || '').toLowerCase().includes(taxSearch);
             if (!matchesSearch) return false;
 
-            if (isSuperAdmin) {
+            if (isGlobalMode) {
                 if (taxStatus === 'assigned') return c.isAssignedToOrg || (c.assignedState && c.assignedState.trim() !== '');
                 if (taxStatus === 'unassigned') return !c.isAssignedToOrg && (!c.assignedState || c.assignedState.trim() === '');
+            } else {
+                if (taxStatus === 'active') return c.is_active === true;
+                if (taxStatus === 'inactive') return c.is_active === false;
             }
             return true;
         });
 
+        const taxDefaultLimit = isGlobalMode ? 10 : 5;
+        if (!taxCategoriesGrid.displayLimitCustom) {
+            taxCategoriesGrid.displayLimit = taxDefaultLimit;
+        }
         const taxLimit = taxCategoriesGrid.getDisplayLimit();
         const visibleTaxCats = filteredTaxCats.slice(0, taxLimit);
         taxCategoriesGrid.reconcileSelection(visibleTaxCats);
@@ -2031,26 +2101,26 @@ export class UIManager {
             onDelete: 'window.actionDeleteTaxCategories()',
             options: {
                 masterToggleHandler: 'window.toggleMasterTaxCategories',
-                toggleLabel: 'Activar / Asignar',
-                deleteLabel: 'Desasignar de Org'
+                toggleLabel: isGlobalMode ? 'Asignar a Org Destino' : 'Activar / Reactivar',
+                deleteLabel: isGlobalMode ? 'Desasignar de Org Destino' : 'Desactivar / Desasignar'
             }
         });
 
         const tcTbody = document.getElementById('table-tax-categories-body');
         if (tcTbody) {
             if (visibleTaxCats.length === 0) {
-                const colSpan = isSuperAdmin ? 5 : 4;
-                tcTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay categorías tributarias que coincidan con el filtro.</td></tr>`;
+                const colSpan = isGlobalMode ? 5 : 4;
+                tcTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay categorías tributarias que coincidan con los filtros.</td></tr>`;
             } else {
                 tcTbody.innerHTML = visibleTaxCats.map(c => `
                     <tr>
                         <td style="text-align: center;"><input type="checkbox" class="tax-cat-checkbox" value="${c.id}" ${taxCategoriesGrid.isRowSelected(c.id) ? 'checked' : ''} onchange="window.toggleTaxCategoryRowSelection('${c.id}')"></td>
                         <td><strong>${c.name}</strong></td>
                         <td>${c.description || '-'}</td>
-                        ${isSuperAdmin ? `<td>${c.assignedState ? `<span style="color:var(--success); font-weight: 600;">${c.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
+                        ${isGlobalMode ? `<td>${c.assignedState ? `<span style="color:var(--success); font-weight: 600;">${c.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
                         <td>
                             <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.editSingleTaxCategory('${c.id}')">Editar</button>
-                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleTaxCategoryAssignment('${c.id}')">${c.isAssignedToOrg ? 'Desasignar' : 'Asignar'}</button>
+                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleTaxCategoryAssignment('${c.id}')">${c.is_active ? 'Desactivar' : 'Activar'}</button>
                         </td>
                     </tr>
                 `).join('');
@@ -2063,13 +2133,13 @@ export class UIManager {
             const totalCount = filteredTaxCats.length;
             const currentCount = visibleTaxCats.length;
             const canLoadMore = currentCount < totalCount;
-            const canLoadLess = taxLimit > 10;
+            const canLoadLess = taxLimit > taxDefaultLimit;
 
             pgTaxCatContainer.innerHTML = `
                 <span style="font-size: 12px; color: var(--text-muted);">Mostrando ${currentCount} de ${totalCount} categorías</span>
                 <div style="display: flex; gap: 8px;">
-                    ${canLoadLess ? '<button class="btn-secondary" style="font-size: 12px; padding: 3px 10px;" onclick="window.loadLessTaxCategories()">Ver menos</button>' : ''}
-                    ${canLoadMore ? '<button class="btn-primary" style="font-size: 12px; padding: 3px 12px;" onclick="window.loadMoreTaxCategories()">Ver más (+10)</button>' : ''}
+                    ${canLoadLess ? `<button class="btn-secondary" style="font-size: 12px; padding: 3px 10px;" onclick="window.loadLessTaxCategories()">Ver menos</button>` : ''}
+                    ${canLoadMore ? `<button class="btn-primary" style="font-size: 12px; padding: 3px 12px;" onclick="window.loadMoreTaxCategories()">Ver más (+${taxDefaultLimit})</button>` : ''}
                 </div>
             `;
         }
@@ -2083,13 +2153,20 @@ export class UIManager {
             const matchesSearch = !econSearch || (a.arca_code || a.afip_code || a.code || '').toLowerCase().includes(econSearch) || (a.name || '').toLowerCase().includes(econSearch);
             if (!matchesSearch) return false;
 
-            if (isSuperAdmin) {
+            if (isGlobalMode) {
                 if (econStatus === 'assigned') return a.isAssignedToOrg || (a.assignedState && a.assignedState.trim() !== '');
                 if (econStatus === 'unassigned') return !a.isAssignedToOrg && (!a.assignedState || a.assignedState.trim() === '');
+            } else {
+                if (econStatus === 'active') return a.is_active === true;
+                if (econStatus === 'inactive') return a.is_active === false;
             }
             return true;
         });
 
+        const econDefaultLimit = isGlobalMode ? 10 : 5;
+        if (!economicActivitiesGrid.displayLimitCustom) {
+            economicActivitiesGrid.displayLimit = econDefaultLimit;
+        }
         const econLimit = economicActivitiesGrid.getDisplayLimit();
         const visibleEconActs = filteredEconActs.slice(0, econLimit);
         economicActivitiesGrid.reconcileSelection(visibleEconActs);
@@ -2106,16 +2183,16 @@ export class UIManager {
                 masterToggleHandler: 'window.toggleMasterEconomicActivities',
                 allowEdit: false,
                 allowClone: true,
-                isCloneDisabled: true, // Clonar deshabilitado para catálogo oficial ARCA
-                toggleLabel: 'Asignar a Org',
-                deleteLabel: 'Remover Asignación'
+                isCloneDisabled: true,
+                toggleLabel: isGlobalMode ? 'Asignar a Org Destino' : 'Activar / Reactivar',
+                deleteLabel: isGlobalMode ? 'Desasignar de Org Destino' : 'Desactivar / Remover'
             }
         });
 
         const eaTbody = document.getElementById('table-economic-activities-body');
         if (eaTbody) {
             if (visibleEconActs.length === 0) {
-                const colSpan = isSuperAdmin ? 5 : 4;
+                const colSpan = isGlobalMode ? 5 : 4;
                 eaTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay actividades económicas que coincidan con la búsqueda.</td></tr>`;
             } else {
                 eaTbody.innerHTML = visibleEconActs.map(a => `
@@ -2123,9 +2200,9 @@ export class UIManager {
                         <td style="text-align: center;"><input type="checkbox" class="economic-act-checkbox" value="${a.id}" ${economicActivitiesGrid.isRowSelected(a.id) ? 'checked' : ''} onchange="window.toggleEconomicActivityRowSelection('${a.id}')"></td>
                         <td><span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">${a.arca_code || a.afip_code || a.code || ''}</span></td>
                         <td><strong>${a.name}</strong></td>
-                        ${isSuperAdmin ? `<td>${a.assignedState ? `<span style="color:var(--success); font-weight: 600;">${a.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
+                        ${isGlobalMode ? `<td>${a.assignedState ? `<span style="color:var(--success); font-weight: 600;">${a.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
                         <td>
-                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleEconomicActivityAssignment('${a.id}')">${a.isAssignedToOrg ? 'Remover Asignación' : 'Asignar a Org'}</button>
+                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleEconomicActivityAssignment('${a.id}')">${a.is_active ? 'Desactivar' : 'Activar'}</button>
                         </td>
                     </tr>
                 `).join('');
@@ -2138,13 +2215,13 @@ export class UIManager {
             const totalCount = filteredEconActs.length;
             const currentCount = visibleEconActs.length;
             const canLoadMore = currentCount < totalCount;
-            const canLoadLess = econLimit > 10;
+            const canLoadLess = econLimit > econDefaultLimit;
 
             pgEconActContainer.innerHTML = `
                 <span style="font-size: 12px; color: var(--text-muted);">Mostrando ${currentCount} de ${totalCount} actividades</span>
                 <div style="display: flex; gap: 8px;">
-                    ${canLoadLess ? '<button class="btn-secondary" style="font-size: 12px; padding: 3px 10px;" onclick="window.loadLessEconomicActivities()">Ver menos</button>' : ''}
-                    ${canLoadMore ? '<button class="btn-primary" style="font-size: 12px; padding: 3px 12px;" onclick="window.loadMoreEconomicActivities()">Ver más (+10)</button>' : ''}
+                    ${canLoadLess ? `<button class="btn-secondary" style="font-size: 12px; padding: 3px 10px;" onclick="window.loadLessEconomicActivities()">Ver menos</button>` : ''}
+                    ${canLoadMore ? `<button class="btn-primary" style="font-size: 12px; padding: 3px 12px;" onclick="window.loadMoreEconomicActivities()">Ver más (+${econDefaultLimit})</button>` : ''}
                 </div>
             `;
         }
@@ -2168,7 +2245,9 @@ export class UIManager {
 
         const irTbody = document.getElementById('table-iibb-rates-body');
         if (irTbody) {
-            if (rates.length === 0) {
+            if (isGlobalMode) {
+                irTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 16px;">Modo Global MICA. Selecciona una Organización de trabajo para gestionar sus Tasas IIBB.</td></tr>`;
+            } else if (rates.length === 0) {
                 irTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">No hay tasas IIBB configuradas para esta organización.</td></tr>`;
             } else {
                 irTbody.innerHTML = rates.map(r => `
@@ -2277,58 +2356,63 @@ window.handleBancosCustomDateChange = function() {
     UIManager.renderBankTable();
 };
 
-// --- HANDLERS DE SELECCIÓN, BÚSQUEDA Y ACCIONES PARA CATEGORIZACIÓN ---
+// --- CONTEXTO ORGANIZACIONAL Y CATEGORIZACIÓN ---
 
-// Búsqueda y Filtros de Estado SUPERADMIN
+window.handleOrgContextChange = async function(orgId) {
+    taxCategoriesGrid.clearSelection();
+    economicActivitiesGrid.clearSelection();
+    iibbRatesGrid.clearSelection();
+    await appStore.switchOrganizationContext(orgId);
+    UIManager.renderSettings();
+};
+
 window.handleTaxCategoriesSearch = function(query) {
     taxCategoriesGrid.searchQuery = query || '';
-    taxCategoriesGrid.resetDisplayLimit(10);
+    const limit = appStore.isGlobalMicaMode() ? 10 : 5;
+    taxCategoriesGrid.resetDisplayLimit(limit);
     UIManager.renderSettings();
 };
 
 window.setTaxCategoriesStatusFilter = function(status) {
     taxCategoriesGrid.setFilterStatus(status);
-    document.querySelectorAll('#filter-group-tax-categories .btn-filter').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    const activeBtn = document.getElementById(`filter-tax-cat-${status}`);
-    if (activeBtn) activeBtn.classList.add('active');
+    taxCategoriesGrid.clearSelection();
     UIManager.renderSettings();
 };
 
 window.loadMoreTaxCategories = function() {
-    taxCategoriesGrid.loadMoreRows(10);
+    const step = appStore.isGlobalMicaMode() ? 10 : 5;
+    taxCategoriesGrid.loadMoreRows(step);
     UIManager.renderSettings();
 };
 
 window.loadLessTaxCategories = function() {
-    taxCategoriesGrid.resetDisplayLimit(10);
+    const limit = appStore.isGlobalMicaMode() ? 10 : 5;
+    taxCategoriesGrid.resetDisplayLimit(limit);
     UIManager.renderSettings();
 };
 
 window.handleEconomicActivitiesSearch = function(query) {
     economicActivitiesGrid.searchQuery = query || '';
-    economicActivitiesGrid.resetDisplayLimit(10);
+    const limit = appStore.isGlobalMicaMode() ? 10 : 5;
+    economicActivitiesGrid.resetDisplayLimit(limit);
     UIManager.renderSettings();
 };
 
 window.setEconomicActivitiesStatusFilter = function(status) {
     economicActivitiesGrid.setFilterStatus(status);
-    document.querySelectorAll('#filter-group-economic-activities .btn-filter').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    const activeBtn = document.getElementById(`filter-econ-act-${status}`);
-    if (activeBtn) activeBtn.classList.add('active');
+    economicActivitiesGrid.clearSelection();
     UIManager.renderSettings();
 };
 
 window.loadMoreEconomicActivities = function() {
-    economicActivitiesGrid.loadMoreRows(10);
+    const step = appStore.isGlobalMicaMode() ? 10 : 5;
+    economicActivitiesGrid.loadMoreRows(step);
     UIManager.renderSettings();
 };
 
 window.loadLessEconomicActivities = function() {
-    economicActivitiesGrid.resetDisplayLimit(10);
+    const limit = appStore.isGlobalMicaMode() ? 10 : 5;
+    economicActivitiesGrid.resetDisplayLimit(limit);
     UIManager.renderSettings();
 };
 
@@ -2337,14 +2421,17 @@ window.toggleMasterTaxCategories = function(checked) {
     const allCats = appStore.taxCategories || [];
     const taxSearch = (taxCategoriesGrid.searchQuery || '').toLowerCase();
     const taxStatus = taxCategoriesGrid.getFilterStatus();
-    const isSuperAdmin = appStore.isSuperAdmin();
+    const isGlobalMode = appStore.isGlobalMicaMode();
 
     const filtered = allCats.filter(c => {
         const matchesSearch = !taxSearch || (c.name || '').toLowerCase().includes(taxSearch) || (c.description || '').toLowerCase().includes(taxSearch);
         if (!matchesSearch) return false;
-        if (isSuperAdmin) {
+        if (isGlobalMode) {
             if (taxStatus === 'assigned') return c.isAssignedToOrg || (c.assignedState && c.assignedState.trim() !== '');
             if (taxStatus === 'unassigned') return !c.isAssignedToOrg && (!c.assignedState || c.assignedState.trim() === '');
+        } else {
+            if (taxStatus === 'active') return c.is_active === true;
+            if (taxStatus === 'inactive') return c.is_active === false;
         }
         return true;
     });
@@ -2397,13 +2484,16 @@ window.toggleSingleTaxCategoryAssignment = async function(id) {
     const cat = (appStore.taxCategories || []).find(c => c.id === id);
     if (!cat) return;
     try {
-        if (cat.isAssignedToOrg) {
-            if (!confirm(`¿Deseas desasignar la categoría "${cat.name}" de la organización?`)) return;
-            await appStore.unassignTaxCategoryFromOrg(id);
-            alert(`Categoría "${cat.name}" desasignada de la organización.`);
+        const isGlobal = appStore.isGlobalMicaMode();
+        const targetOrgId = isGlobal ? document.getElementById('select-target-org-tax-cat')?.value : null;
+
+        if (cat.is_active || cat.isAssignedToOrg) {
+            if (!confirm(`¿Deseas desasignar/desactivar la categoría "${cat.name}"?`)) return;
+            await appStore.unassignTaxCategoryFromOrg(id, targetOrgId);
+            alert(`Categoría "${cat.name}" desasignada/desactivada.`);
         } else {
-            await appStore.assignTaxCategoryToOrg(id);
-            alert(`Categoría "${cat.name}" asignada a la organización.`);
+            await appStore.assignTaxCategoryToOrg(id, targetOrgId);
+            alert(`Categoría "${cat.name}" activada/asignada correctamente.`);
         }
     } catch (err) {
         alert("Error al cambiar asignación de categoría: " + err.message);
@@ -2414,24 +2504,11 @@ window.actionToggleTaxCategories = async function() {
     const ids = taxCategoriesGrid.getSelectedIds();
     if (ids.length === 0) return;
     try {
-        const cats = appStore.taxCategories || [];
-        const toAssign = ids.filter(id => {
-            const c = cats.find(item => item.id === id);
-            return c && !c.isAssignedToOrg;
-        });
-        const toUnassign = ids.filter(id => {
-            const c = cats.find(item => item.id === id);
-            return c && c.isAssignedToOrg;
-        });
-
-        if (toAssign.length > 0) {
-            await appStore.bulkAssignTaxCategories(toAssign);
-        }
-        if (toUnassign.length > 0) {
-            await appStore.bulkUnassignTaxCategories(toUnassign);
-        }
+        const isGlobal = appStore.isGlobalMicaMode();
+        const targetOrgId = isGlobal ? document.getElementById('select-target-org-tax-cat')?.value : null;
+        await appStore.bulkAssignTaxCategories(ids, targetOrgId);
         taxCategoriesGrid.clearSelection();
-        alert(`${ids.length} categoría(s) actualizadas para la organización.`);
+        alert(`${ids.length} categoría(s) asignadas/activadas correctamente.`);
     } catch (err) {
         alert("Error al actualizar categorías: " + err.message);
     }
@@ -2440,11 +2517,13 @@ window.actionToggleTaxCategories = async function() {
 window.actionDeleteTaxCategories = async function() {
     const ids = taxCategoriesGrid.getSelectedIds();
     if (ids.length === 0) return;
-    if (!confirm(`¿Deseas desasignar ${ids.length} categoría(s) de la organización actual?`)) return;
+    if (!confirm(`¿Deseas desasignar/desactivar ${ids.length} categoría(s)?`)) return;
     try {
-        await appStore.bulkUnassignTaxCategories(ids);
+        const isGlobal = appStore.isGlobalMicaMode();
+        const targetOrgId = isGlobal ? document.getElementById('select-target-org-tax-cat')?.value : null;
+        await appStore.bulkUnassignTaxCategories(ids, targetOrgId);
         taxCategoriesGrid.clearSelection();
-        alert(`${ids.length} categoría(s) desasignadas de la organización.`);
+        alert(`${ids.length} categoría(s) desasignadas/desactivadas.`);
     } catch (err) {
         alert("Error al desasignar categorías: " + err.message);
     }
@@ -2472,25 +2551,6 @@ window.toggleMasterEconomicActivities = function(checked) {
     UIManager.renderSettings();
 };
 
-window.actionDeleteTaxCategories = async function() {
-    const ids = taxCategoriesGrid.getSelectedIds();
-    if (ids.length === 0) return;
-    if (!confirm(`¿Deseas desasignar ${ids.length} categoría(s) de la organización actual?`)) return;
-    try {
-        await appStore.bulkUnassignTaxCategories(ids);
-        taxCategoriesGrid.clearSelection();
-        alert(`${ids.length} categoría(s) desasignadas de la organización.`);
-    } catch (err) {
-        alert("Error al desasignar categorías: " + err.message);
-    }
-};
-
-// B. Actividades Económicas ARCA
-window.toggleMasterEconomicActivities = function(checked) {
-    economicActivitiesGrid.toggleSelectAllVisible(appStore.displayedEconomicActivities || appStore.economicActivities || []);
-    UIManager.renderSettings();
-};
-
 window.toggleEconomicActivityRowSelection = function(id) {
     economicActivitiesGrid.toggleRowSelection(id);
     UIManager.renderSettings();
@@ -2504,13 +2564,16 @@ window.toggleSingleEconomicActivityAssignment = async function(id) {
     const act = (appStore.displayedEconomicActivities || appStore.economicActivities || []).find(a => a.id === id);
     if (!act) return;
     try {
-        if (act.isAssignedToOrg) {
-            if (!confirm(`¿Deseas remover la asignación de la actividad "${act.name}" para la organización?`)) return;
-            await appStore.unassignEconomicActivityFromOrg(id);
-            alert(`Actividad "${act.name}" desasignada.`);
+        const isGlobal = appStore.isGlobalMicaMode();
+        const targetOrgId = isGlobal ? document.getElementById('select-target-org-econ-act')?.value : null;
+
+        if (act.is_active || act.isAssignedToOrg) {
+            if (!confirm(`¿Deseas desasignar/desactivar la actividad "${act.name}"?`)) return;
+            await appStore.unassignEconomicActivityFromOrg(id, targetOrgId);
+            alert(`Actividad "${act.name}" desasignada/desactivada.`);
         } else {
-            await appStore.assignEconomicActivityToOrg(id);
-            alert(`Actividad "${act.name}" asignada a la organización.`);
+            await appStore.assignEconomicActivityToOrg(id, targetOrgId);
+            alert(`Actividad "${act.name}" asignada/activada correctamente.`);
         }
     } catch (err) {
         alert("Error al cambiar asignación de actividad: " + err.message);
@@ -2521,9 +2584,11 @@ window.actionAssignEconomicActivities = async function() {
     const ids = economicActivitiesGrid.getSelectedIds();
     if (ids.length === 0) return;
     try {
-        await appStore.bulkAssignEconomicActivitiesToOrg(ids);
+        const isGlobal = appStore.isGlobalMicaMode();
+        const targetOrgId = isGlobal ? document.getElementById('select-target-org-econ-act')?.value : null;
+        await appStore.bulkAssignEconomicActivitiesToOrg(ids, targetOrgId);
         economicActivitiesGrid.clearSelection();
-        alert(`${ids.length} actividad(es) económica(s) asignadas a la organización.`);
+        alert(`${ids.length} actividad(es) económica(s) asignadas/activadas.`);
     } catch (err) {
         alert("Error al asignar actividades: " + err.message);
     }
@@ -2532,11 +2597,13 @@ window.actionAssignEconomicActivities = async function() {
 window.actionUnassignEconomicActivities = async function() {
     const ids = economicActivitiesGrid.getSelectedIds();
     if (ids.length === 0) return;
-    if (!confirm(`¿Deseas remover la asignación de ${ids.length} actividad(es) económica(s) de la organización?`)) return;
+    if (!confirm(`¿Deseas desasignar/desactivar ${ids.length} actividad(es) económica(s)?`)) return;
     try {
-        await appStore.bulkUnassignEconomicActivitiesFromOrg(ids);
+        const isGlobal = appStore.isGlobalMicaMode();
+        const targetOrgId = isGlobal ? document.getElementById('select-target-org-econ-act')?.value : null;
+        await appStore.bulkUnassignEconomicActivitiesFromOrg(ids, targetOrgId);
         economicActivitiesGrid.clearSelection();
-        alert(`${ids.length} actividad(es) económica(s) desasignadas de la organización.`);
+        alert(`${ids.length} actividad(es) económica(s) desasignadas/desactivadas.`);
     } catch (err) {
         alert("Error al remover asignaciones de actividades: " + err.message);
     }

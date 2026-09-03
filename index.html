@@ -92,7 +92,14 @@
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 12px;">
-                <div id="user-header-info" style="font-size: 13px; font-weight: 600; color: var(--primary); background: var(--bg-card); padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border-color);">Vegen Digital · ADMIN · MICA</div>
+                <!-- Control Selector de Contexto de Organización para SUPERADMIN -->
+                <div id="org-context-switcher-container" style="display: none; align-items: center; gap: 6px; background: var(--bg-card); padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 13px;">
+                    <span style="font-weight: 600; color: var(--text-muted);">Organización de trabajo:</span>
+                    <select id="select-org-context" class="form-control" style="font-size: 12px; padding: 3px 8px; font-weight: 600;" onchange="window.handleOrgContextChange(this.value)">
+                        <option value="">[ MICA / Modo Global ]</option>
+                    </select>
+                </div>
+                <div id="user-header-info" style="font-size: 13px; font-weight: 600; color: var(--primary); background: var(--bg-card); padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border-color);">Usuario · ROLE · Org</div>
             </div>
         </header>
 
@@ -764,13 +771,20 @@
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Asignación de categorías globales a la organización.</p>
 
-                <!-- Barra de Búsqueda y Filtros de Estado SUPERADMIN -->
+                <!-- Barra de Búsqueda, Target Org (Global Mode) y Filtros de Estado -->
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
-                    <input type="text" id="search-tax-categories" placeholder="🔍 Buscar categoría..." class="form-control" style="max-width: 320px;" oninput="window.handleTaxCategoriesSearch(this.value)">
-                    <div id="filter-group-tax-categories" class="filter-group" style="display: none; gap: 6px;">
-                        <button class="btn-filter active" id="filter-tax-cat-all" onclick="window.setTaxCategoriesStatusFilter('all')">Todos</button>
-                        <button class="btn-filter" id="filter-tax-cat-assigned" onclick="window.setTaxCategoriesStatusFilter('assigned')">Asignados</button>
-                        <button class="btn-filter" id="filter-tax-cat-unassigned" onclick="window.setTaxCategoriesStatusFilter('unassigned')">Sin asignar</button>
+                    <input type="text" id="search-tax-categories" placeholder="🔍 Buscar categoría..." class="form-control" style="max-width: 300px;" oninput="window.handleTaxCategoriesSearch(this.value)">
+                    
+                    <div id="target-org-tax-categories-container" style="display: none; align-items: center; gap: 6px; font-size: 12px;">
+                        <span style="font-weight: 600; color: var(--text-muted);">Organización Destino:</span>
+                        <select id="select-target-org-tax-cat" class="form-control" style="font-size: 12px; padding: 3px 6px;">
+                        </select>
+                    </div>
+
+                    <div id="filter-group-tax-categories" class="filter-group" style="display: flex; gap: 6px;">
+                        <button class="btn-filter active" id="filter-tax-cat-all" onclick="window.setTaxCategoriesStatusFilter('active')">Activas</button>
+                        <button class="btn-filter" id="filter-tax-cat-inactive" onclick="window.setTaxCategoriesStatusFilter('inactive')">Inactivas</button>
+                        <button class="btn-filter" id="filter-tax-cat-all-mode" onclick="window.setTaxCategoriesStatusFilter('all')">Todas</button>
                     </div>
                 </div>
 
@@ -809,13 +823,20 @@
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Catálogo oficial ARCA y asignación a la organización.</p>
 
-                <!-- Barra de Búsqueda y Filtros de Estado SUPERADMIN -->
+                <!-- Barra de Búsqueda, Target Org (Global Mode) y Filtros de Estado -->
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
-                    <input type="text" id="search-economic-activities" placeholder="🔍 Buscar por código ARCA o actividad..." class="form-control" style="max-width: 360px;" oninput="window.handleEconomicActivitiesSearch(this.value)">
-                    <div id="filter-group-economic-activities" class="filter-group" style="display: none; gap: 6px;">
-                        <button class="btn-filter active" id="filter-econ-act-all" onclick="window.setEconomicActivitiesStatusFilter('all')">Todos</button>
-                        <button class="btn-filter" id="filter-econ-act-assigned" onclick="window.setEconomicActivitiesStatusFilter('assigned')">Asignados</button>
-                        <button class="btn-filter" id="filter-econ-act-unassigned" onclick="window.setEconomicActivitiesStatusFilter('unassigned')">Sin asignar</button>
+                    <input type="text" id="search-economic-activities" placeholder="🔍 Buscar por código ARCA o actividad..." class="form-control" style="max-width: 340px;" oninput="window.handleEconomicActivitiesSearch(this.value)">
+                    
+                    <div id="target-org-economic-activities-container" style="display: none; align-items: center; gap: 6px; font-size: 12px;">
+                        <span style="font-weight: 600; color: var(--text-muted);">Organización Destino:</span>
+                        <select id="select-target-org-econ-act" class="form-control" style="font-size: 12px; padding: 3px 6px;">
+                        </select>
+                    </div>
+
+                    <div id="filter-group-economic-activities" class="filter-group" style="display: flex; gap: 6px;">
+                        <button class="btn-filter active" id="filter-econ-act-all" onclick="window.setEconomicActivitiesStatusFilter('active')">Activas</button>
+                        <button class="btn-filter" id="filter-econ-act-inactive" onclick="window.setEconomicActivitiesStatusFilter('inactive')">Inactivas</button>
+                        <button class="btn-filter" id="filter-econ-act-all-mode" onclick="window.setEconomicActivitiesStatusFilter('all')">Todas</button>
                     </div>
                 </div>
 

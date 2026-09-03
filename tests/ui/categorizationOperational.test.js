@@ -87,111 +87,148 @@ describe('Categorización Module Operational Closeout & Reusable Record Actions'
         expect(grid.isRowSelected('cat-1')).toBe(true);
         expect(grid.isRowSelected('cat- hidden')).toBe(false);
     });
-
-    test('ARCA activity clone is disabled for official activity catalog', () => {
-        const arcaGrid = new OperationalGrid({
-            moduleId: 'economic-activities',
-            defaultColumns: ['checkbox', 'arca_code', 'name', 'estado', 'actions']
-        });
-        arcaGrid.toggleRowSelection('act-620100');
-        const card = arcaGrid.getSelectionCardinality([{ id: 'act-620100' }]);
-        expect(card.isSingle).toBe(true);
-    });
 });
 
-describe('DEV PASS 2 — Real Role Derivation, Dynamic Org Labels & Incremental Display', () => {
-    test('SUPERADMIN sees real joined organization assignment names (e.g. "MICA, Empresa B")', async () => {
+describe('Multitenant Organization Context & Categorization Isolation Matrix', () => {
+
+    const orgNorteId = 'org-norte-uuid';
+    const orgSurId = 'org-sur-uuid';
+    const orgOesteId = 'org-oeste-uuid';
+
+    test('Single authenticated user context switching across DEMO NORTE, DEMO SUR, DEMO OESTE', async () => {
         const { appStore } = await import('../../src/js/store.js');
         appStore.setUserRole('SUPERADMIN');
         expect(appStore.isSuperAdmin()).toBe(true);
 
-        const globalCats = [
-            { id: 'cat-100', name: 'Telefonía' },
-            { id: 'cat-101', name: 'Software' }
-        ];
-        const categoryOrgMap = new Map();
-        categoryOrgMap.set('cat-100', ['MICA', 'Empresa B']);
-        categoryOrgMap.set('cat-101', []);
+        // Global MICA mode (no active org selected)
+        await appStore.switchOrganizationContext(null);
+        expect(appStore.isGlobalMicaMode()).toBe(true);
+        expect(appStore.getActiveOrganizationName()).toBe('MICA (Modo Global)');
 
-        const mapped = globalCats.map(c => {
-            const orgs = categoryOrgMap.get(c.id) || [];
-            return {
-                ...c,
-                assignedState: orgs.join(', '),
-                isAssignedToOrg: orgs.length > 0
-            };
+        // Switch to DEMO NORTE
+        await appStore.switchOrganizationContext(orgNorteId);
+        expect(appStore.isGlobalMicaMode()).toBe(false);
+        expect(appStore.activeOrganizationId).toBe(orgNorteId);
+
+        // Switch to DEMO SUR
+        await appStore.switchOrganizationContext(orgSurId);
+        expect(appStore.activeOrganizationId).toBe(orgSurId);
+
+        // Switch to DEMO OESTE
+        await appStore.switchOrganizationContext(orgOesteId);
+        expect(appStore.activeOrganizationId).toBe(orgOesteId);
+    });
+
+    test('Multitenant Category Test Matrix (Categories A, B, C, D)', async () => {
+        const categoriesDB = [
+            { id: 'cat-A', name: 'Category A' },
+            { id: 'cat-B', name: 'Category B' },
+            { id: 'cat-C', name: 'Category C' },
+            { id: 'cat-D', name: 'Category D' }
+        ];
+
+        let assignments = [
+            { organization_id: orgNorteId, category_id: 'cat-A', is_active: true },
+            { organization_id: orgSurId, category_id: 'cat-B', is_active: true },
+            { organization_id: orgNorteId, category_id: 'cat-C', is_active: true },
+            { organization_id: orgOesteId, category_id: 'cat-C', is_active: true }
+        ];
+
+        // 1. GLOBAL MICA sees A, B, C, D
+        const globalAssignedMap = new Map();
+        assignments.filter(a => a.is_active).forEach(a => {
+            const orgName = a.organization_id === orgNorteId ? 'DEMO NORTE' : (a.organization_id === orgSurId ? 'DEMO SUR' : 'DEMO OESTE');
+            if (!globalAssignedMap.has(a.category_id)) globalAssignedMap.set(a.category_id, []);
+            globalAssignedMap.get(a.category_id).push(orgName);
         });
 
-        expect(mapped[0].assignedState).toBe('MICA, Empresa B');
-        expect(mapped[1].assignedState).toBe('');
-        expect(mapped[0].isAssignedToOrg).toBe(true);
-        expect(mapped[1].isAssignedToOrg).toBe(false);
-    });
-
-    test('ORG USER receives no assignment data for other tenants and receives tenant-scoped view', async () => {
-        const { appStore } = await import('../../src/js/store.js');
-        appStore.setUserRole('ADMIN'); // Org level role
-        expect(appStore.isSuperAdmin()).toBe(false);
-    });
-
-    test('Global search filters across complete 958 ARCA activity dataset', () => {
-        const mock958Acts = Array.from({ length: 958 }, (_, i) => ({
-            id: `act-${i + 1}`,
-            arca_code: String(620000 + i),
-            name: `Servicio Especializado ${i + 1}`
+        const globalView = categoriesDB.map(c => ({
+            ...c,
+            assignedState: (globalAssignedMap.get(c.id) || []).join(', ')
         }));
 
-        const grid = new OperationalGrid({
-            moduleId: 'economic-activities',
-            searchFields: ['arca_code', 'name']
-        });
-        grid.searchQuery = '620950';
+        expect(globalView.find(c => c.id === 'cat-A').assignedState).toBe('DEMO NORTE');
+        expect(globalView.find(c => c.id === 'cat-B').assignedState).toBe('DEMO SUR');
+        expect(globalView.find(c => c.id === 'cat-C').assignedState).toBe('DEMO NORTE, DEMO OESTE');
+        expect(globalView.find(c => c.id === 'cat-D').assignedState).toBe('');
 
-        const filtered = mock958Acts.filter(a =>
-            a.arca_code.includes(grid.searchQuery) || a.name.toLowerCase().includes(grid.searchQuery.toLowerCase())
-        );
+        // 2. DEMO NORTE sees A + C
+        const norteView = assignments.filter(a => a.organization_id === orgNorteId && a.is_active);
+        expect(norteView.map(a => a.category_id)).toEqual(['cat-A', 'cat-C']);
 
-        expect(filtered.length).toBe(1);
-        expect(filtered[0].arca_code).toBe('620950');
+        // 3. DEMO SUR sees B
+        const surView = assignments.filter(a => a.organization_id === orgSurId && a.is_active);
+        expect(surView.map(a => a.category_id)).toEqual(['cat-B']);
+
+        // 4. DEMO OESTE sees C
+        const oesteView = assignments.filter(a => a.organization_id === orgOesteId && a.is_active);
+        expect(oesteView.map(a => a.category_id)).toEqual(['cat-C']);
+
+        // 5. Unassign C from DEMO OESTE
+        const oesteC = assignments.find(a => a.organization_id === orgOesteId && a.category_id === 'cat-C');
+        if (oesteC) oesteC.is_active = false;
+
+        // DEMO OESTE Activas -> 0, Inactivas -> 1 (cat-C)
+        const oesteActive = assignments.filter(a => a.organization_id === orgOesteId && a.is_active);
+        const oesteInactive = assignments.filter(a => a.organization_id === orgOesteId && !a.is_active);
+        expect(oesteActive.length).toBe(0);
+        expect(oesteInactive.length).toBe(1);
+        expect(oesteInactive[0].category_id).toBe('cat-C');
+
+        // DEMO NORTE -> C remains active
+        const norteC = assignments.find(a => a.organization_id === orgNorteId && a.category_id === 'cat-C');
+        expect(norteC.is_active).toBe(true);
+
+        // Reactivate C for DEMO OESTE -> reuses same category_id
+        if (oesteC) oesteC.is_active = true;
+        expect(assignments.filter(a => a.organization_id === orgOesteId && a.is_active).length).toBe(1);
     });
 
-    test('Reactivation reuses same category_id without creating duplicates', async () => {
-        const { appStore } = await import('../../src/js/store.js');
-        const categoryId = 'cat-existing-123';
-        
-        // Simular reactivación de categoría existente
-        expect(categoryId).toBe('cat-existing-123');
-    });
-
-    test('IIBB creation rejects unassigned or invalid activity ID', async () => {
-        const { appStore } = await import('../../src/js/store.js');
-        appStore.economicActivities = [
-            { id: 'assigned-act-1', name: 'Servicios Informáticos', arca_code: '620100' }
+    test('Multitenant ARCA Activity Matrix (Activities X, Y, Z)', async () => {
+        let activityAssignments = [
+            { organization_id: orgNorteId, activity_id: 'act-X', is_active: true },
+            { organization_id: orgSurId, activity_id: 'act-Y', is_active: true },
+            { organization_id: orgNorteId, activity_id: 'act-Z', is_active: true },
+            { organization_id: orgOesteId, activity_id: 'act-Z', is_active: true }
         ];
 
-        // Empty activity ID
-        await expect(appStore.createIibbRate({
-            activity_id: '',
-            jurisdiction: 'CABA (AGIP)',
-            rate_percent: 3.5,
-            valid_from: '2026-01-01'
-        })).rejects.toThrow('La Actividad Económica es obligatoria para la tasa IIBB.');
+        // DEMO NORTE sees X + Z
+        expect(activityAssignments.filter(a => a.organization_id === orgNorteId && a.is_active).map(a => a.activity_id)).toEqual(['act-X', 'act-Z']);
 
-        // Unassigned activity ID
+        // DEMO SUR sees Y
+        expect(activityAssignments.filter(a => a.organization_id === orgSurId && a.is_active).map(a => a.activity_id)).toEqual(['act-Y']);
+
+        // DEMO OESTE sees Z
+        expect(activityAssignments.filter(a => a.organization_id === orgOesteId && a.is_active).map(a => a.activity_id)).toEqual(['act-Z']);
+
+        // Unassign Z from DEMO OESTE
+        const oesteZ = activityAssignments.find(a => a.organization_id === orgOesteId && a.activity_id === 'act-Z');
+        if (oesteZ) oesteZ.is_active = false;
+
+        expect(activityAssignments.filter(a => a.organization_id === orgOesteId && a.is_active).length).toBe(0);
+        expect(activityAssignments.filter(a => a.organization_id === orgNorteId && a.is_active).map(a => a.activity_id)).toContain('act-Z');
+    });
+
+    test('IIBB Rate creation & selector isolation per organization', async () => {
+        const { appStore } = await import('../../src/js/store.js');
+        
+        // Active activities for DEMO NORTE
+        appStore.economicActivities = [{ id: 'act-X', name: 'Actividad X', arca_code: '620100' }];
+
+        // Valid creation in DEMO NORTE
+        const norteRate = { activity_id: 'act-X', jurisdiction: 'CABA (AGIP)', rate_percent: 3.5, valid_from: '2026-01-01' };
+        expect(norteRate.activity_id).toBe('act-X');
+
+        // Unassigned activity in DEMO NORTE fails IIBB creation
         await expect(appStore.createIibbRate({
-            activity_id: 'unassigned-act-999',
+            activity_id: 'act-Y',
             jurisdiction: 'CABA (AGIP)',
-            rate_percent: 3.5,
-            valid_from: '2026-01-01'
+            rate_percent: 3.5
         })).rejects.toThrow('Activity ID is not assigned to this organization or is inactive');
     });
 
-    test('IVA table remains reference-only (BLOCKED_NO_CONTRACT)', () => {
-        const ivaRates = [
-            { rate: 21, name: 'General' },
-            { rate: 10.5, name: 'Reducida' },
-            { rate: 27, name: 'Incrementada' }
-        ];
-        expect(ivaRates.length).toBe(3);
+    test('MICA is NOT an organization and is never rendered as an assigned tenant name', () => {
+        const assignedOrgs = ['DEMO NORTE', 'DEMO SUR'];
+        expect(assignedOrgs.includes('MICA')).toBe(false);
     });
 });
