@@ -1,5 +1,6 @@
 -- ONE-OFF RECOVERY SCRIPT FOR HISTORICAL BBVA CREDIT MOVEMENTS
 -- Target: Recover 9 missing May 2026 credit movements and 15 missing June 2026 credit movements
+-- Strategy: Create distinct recovery import attempts linked via retry_of_import_id
 -- Invariance: Original & Retry Import records, Source Files, Issues, and existing 130 movements remain 100% IMMUTABLE.
 -- Execution Mode: One-Off application (REQUIRES MANUAL HUMAN GATE APPROVAL PRIOR TO RUNNING ON LIVE DB).
 
@@ -13,6 +14,8 @@ DECLARE
     v_cnt_total_bbva INT;
     v_may_retry_id UUID := '8a6ca4d8-a31f-4a1b-b145-85336958c843'::uuid;
     v_june_retry_id UUID := 'b6024ac0-afb9-4da1-a984-4fcbfbd7eedc'::uuid;
+    v_may_recovery_import_id UUID;
+    v_june_recovery_import_id UUID;
     v_may_file_id UUID;
     v_june_file_id UUID;
     v_inserted_may INT := 0;
@@ -28,7 +31,7 @@ DECLARE
     v_row_id UUID;
     v_existing_id UUID;
 BEGIN
-    -- 1. Organization Scope Check
+    -- 1. Resolve Organization Scope (Tenant Isolation)
     v_org_id := private.org_id();
     IF v_org_id IS NULL THEN
         SELECT organization_id INTO v_org_id 
@@ -44,34 +47,54 @@ BEGIN
     FROM public.eco_user_profiles
     WHERE organization_id = v_org_id LIMIT 1;
 
-    -- 2. Precondition Verification: Active BBVA counts prior to recovery MUST be May=71, June=59, Total=130
+    -- 2. Precondition Verification: Tenant-scoped active BBVA counts prior to recovery MUST be May=71, June=59, Total=130
     SELECT count(*) INTO v_cnt_may_debit 
     FROM public.eco_financial_movements 
-    WHERE import_id = v_may_retry_id AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id AND import_id = v_may_retry_id AND deleted_at IS NULL;
 
     SELECT count(*) INTO v_cnt_june_debit 
     FROM public.eco_financial_movements 
-    WHERE import_id = v_june_retry_id AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id AND import_id = v_june_retry_id AND deleted_at IS NULL;
 
     SELECT count(*) INTO v_cnt_total_bbva 
     FROM public.eco_financial_movements 
-    WHERE source_type = 'BANK_STATEMENT_BBVA' AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id AND source_type = 'BANK_STATEMENT_BBVA' AND deleted_at IS NULL;
 
-    RAISE NOTICE 'PRECONDITION CHECK: Active May=% (expected 71), Active June=% (expected 59), Total BBVA=% (expected 130)', 
-        v_cnt_may_debit, v_cnt_june_debit, v_cnt_total_bbva;
+    RAISE NOTICE 'PRECONDITION CHECK (Tenant-scoped %): Active May=% (expected 71), Active June=% (expected 59), Total BBVA=% (expected 130)', 
+        v_org_id, v_cnt_may_debit, v_cnt_june_debit, v_cnt_total_bbva;
 
     IF v_cnt_may_debit != 71 OR v_cnt_june_debit != 59 OR v_cnt_total_bbva != 130 THEN
         RAISE EXCEPTION 'PRECONDITION FAILED: Pre-recovery active BBVA movement counts do not match expected baseline (May=71, June=59, Total=130). Aborting.';
     END IF;
 
-    -- Fetch source file IDs
+    -- Fetch source file IDs (tenant-scoped)
     SELECT id INTO v_may_file_id 
-    FROM public.eco_source_files WHERE import_id = '881859f6-127e-4a4e-85e6-83e69a3aee00' LIMIT 1;
+    FROM public.eco_source_files WHERE organization_id = v_org_id AND import_id = '881859f6-127e-4a4e-85e6-83e69a3aee00' LIMIT 1;
 
     SELECT id INTO v_june_file_id 
-    FROM public.eco_source_files WHERE import_id = 'a1ea483b-e203-49af-9948-e124828ed3ea' LIMIT 1;
+    FROM public.eco_source_files WHERE organization_id = v_org_id AND import_id = 'a1ea483b-e203-49af-9948-e124828ed3ea' LIMIT 1;
 
-    -- 3. Recovery of the 9 May 2026 Credit Movements
+    -- 3. Create NEW Recovery Import Attempts for May and June
+    v_may_recovery_import_id := extensions.gen_random_uuid();
+    v_june_recovery_import_id := extensions.gen_random_uuid();
+
+    INSERT INTO public.eco_source_imports (
+        id, organization_id, retry_of_import_id, status, source_type, operation_type,
+        total_rows, accepted_rows, invalid_rows, duplicate_rows, created_at, created_by, completed_at
+    ) VALUES (
+        v_may_recovery_import_id, v_org_id, v_may_retry_id, 'COMPLETED', 'BANK_STATEMENT_BBVA', 'BANCO',
+        9, 9, 0, 0, NOW(), v_user_profile_id, NOW()
+    );
+
+    INSERT INTO public.eco_source_imports (
+        id, organization_id, retry_of_import_id, status, source_type, operation_type,
+        total_rows, accepted_rows, invalid_rows, duplicate_rows, created_at, created_by, completed_at
+    ) VALUES (
+        v_june_recovery_import_id, v_org_id, v_june_retry_id, 'COMPLETED', 'BANK_STATEMENT_BBVA', 'BANCO',
+        15, 15, 0, 0, NOW(), v_user_profile_id, NOW()
+    );
+
+    -- 4. Recovery of the 9 May 2026 Credit Movements
     FOR v_r IN SELECT * FROM (VALUES
         (39, '2026-05-21'::date, '2026-05-21'::date, 'TRANSF.BANEL 30715507419', 'CTE 30715507419 136 733 - N/A', 347000.00, 'credit', NULL::numeric, '["BANK_STATEMENT_BBVA", "", "2026-05-21", "CTE 30715507419 136 733 - N/A", 347000.00, "credit"]'),
         (40, '2026-05-21'::date, '2026-05-21'::date, 'DEPOS.CHQ.48 C.F.U.13340600', 'CTE 000013385554 082 133 - PARQUE INDUSTRIAL PILAR', 970000.00, 'credit', NULL::numeric, '["BANK_STATEMENT_BBVA", "", "2026-05-21", "CTE 000013385554 082 133 - PARQUE INDUSTRIAL PILAR", 970000.00, "credit"]'),
@@ -86,7 +109,7 @@ BEGIN
     LOOP
         v_identity_key := v_r.ident_key;
         
-        -- Deduplication Check
+        -- Tenant-scoped Deduplication Check
         SELECT id INTO v_existing_id 
         FROM public.eco_financial_movements 
         WHERE organization_id = v_org_id AND identity_key = v_identity_key AND deleted_at IS NULL LIMIT 1;
@@ -103,7 +126,7 @@ BEGIN
                 fecha, fecha_valor, descripcion, referencia, monto, movement_type,
                 saldo, identity_key, financial_fingerprint, normalized_payload, created_by
             ) VALUES (
-                v_org_id, v_may_retry_id, v_row_id, 'BANCO', 'BANK_STATEMENT_BBVA',
+                v_org_id, v_may_recovery_import_id, v_row_id, 'BANCO', 'BANK_STATEMENT_BBVA',
                 v_r.fecha, v_r.fecha_valor, v_r.descr, v_r.ref, v_r.monto, v_r.tipo,
                 v_r.saldo, v_identity_key, v_fingerprint,
                 jsonb_build_object('fecha', TO_CHAR(v_r.fecha, 'DD-MM-YYYY'), 'fechaValor', TO_CHAR(v_r.fecha_valor, 'DD-MM-YYYY'), 'descripcion', v_r.descr, 'referencia', v_r.ref, 'monto', v_r.monto, 'tipo', v_r.tipo),
@@ -114,7 +137,7 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- 4. Recovery of the 15 June 2026 Credit Movements
+    -- 5. Recovery of the 15 June 2026 Credit Movements
     FOR v_r IN SELECT * FROM (VALUES
         (17, '2026-06-30'::date, '2026-06-30'::date, 'DNET CREDITO NE7269730', 'CTE 269730          - 983 587 - DATANET', 2385085.50, 'credit', NULL::numeric, '["BANK_STATEMENT_BBVA", "", "2026-06-30", "CTE 269730          - 983 587 - DATANET", 2385085.50, "credit"]'),
         (20, '2026-06-29'::date, '2026-06-29'::date, 'DEPOSITO AUT BUZON/02/14:12', 'CTE 000008364002 341 357 - ALVAREZ TOMAS', 740000.00, 'credit', NULL::numeric, '["BANK_STATEMENT_BBVA", "", "2026-06-29", "CTE 000008364002 341 357 - ALVAREZ TOMAS", 740000.00, "credit"]'),
@@ -135,7 +158,7 @@ BEGIN
     LOOP
         v_identity_key := v_r.ident_key;
         
-        -- Deduplication Check
+        -- Tenant-scoped Deduplication Check
         SELECT id INTO v_existing_id 
         FROM public.eco_financial_movements 
         WHERE organization_id = v_org_id AND identity_key = v_identity_key AND deleted_at IS NULL LIMIT 1;
@@ -152,7 +175,7 @@ BEGIN
                 fecha, fecha_valor, descripcion, referencia, monto, movement_type,
                 saldo, identity_key, financial_fingerprint, normalized_payload, created_by
             ) VALUES (
-                v_org_id, v_june_retry_id, v_row_id, 'BANCO', 'BANK_STATEMENT_BBVA',
+                v_org_id, v_june_recovery_import_id, v_row_id, 'BANCO', 'BANK_STATEMENT_BBVA',
                 v_r.fecha, v_r.fecha_valor, v_r.descr, v_r.ref, v_r.monto, v_r.tipo,
                 v_r.saldo, v_identity_key, v_fingerprint,
                 jsonb_build_object('fecha', TO_CHAR(v_r.fecha, 'DD-MM-YYYY'), 'fechaValor', TO_CHAR(v_r.fecha_valor, 'DD-MM-YYYY'), 'descripcion', v_r.descr, 'referencia', v_r.ref, 'monto', v_r.monto, 'tipo', v_r.tipo),
@@ -163,18 +186,18 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- 5. Final Assertions Verification
+    -- 6. Final Assertions Verification (Tenant-Scoped)
     SELECT count(*) INTO v_final_may 
     FROM public.eco_financial_movements 
-    WHERE import_id = v_may_retry_id AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id AND fecha >= '2026-05-01' AND fecha <= '2026-05-31' AND deleted_at IS NULL;
 
     SELECT count(*) INTO v_final_june 
     FROM public.eco_financial_movements 
-    WHERE import_id = v_june_retry_id AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id AND fecha >= '2026-06-01' AND fecha <= '2026-06-30' AND deleted_at IS NULL;
 
     SELECT count(*) INTO v_final_total 
     FROM public.eco_financial_movements 
-    WHERE source_type = 'BANK_STATEMENT_BBVA' AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id AND source_type = 'BANK_STATEMENT_BBVA' AND deleted_at IS NULL;
 
     RAISE NOTICE 'POST-RECOVERY ASSERTION: Inserted May=%, Inserted June=%. Final May=% (expected 80), Final June=% (expected 74), Final Total=% (expected 154)',
         v_inserted_may, v_inserted_june, v_final_may, v_final_june, v_final_total;
@@ -184,7 +207,7 @@ BEGIN
             v_final_may, v_final_june, v_final_total;
     END IF;
 
-    -- Audit Event
+    -- Audit Event (Tenant-Scoped)
     INSERT INTO public.eco_audit_events (organization_id, event_type)
     VALUES (v_org_id, 'ONE_OFF_BBVA_CREDIT_RECOVERY_COMPLETED');
 
