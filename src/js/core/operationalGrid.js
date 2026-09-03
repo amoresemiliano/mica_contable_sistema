@@ -22,6 +22,9 @@ export class OperationalGrid {
 
         this.selectedRowIds = new Set();
 
+        this.displayLimit = 10;
+        this.filterStatus = 'all'; // 'all', 'assigned', 'unassigned'
+
         this.visibleColumns = this.loadColumnPreferences();
     }
 
@@ -173,6 +176,42 @@ export class OperationalGrid {
 
     clearSelection() {
         this.selectedRowIds.clear();
+    }
+
+    reconcileSelection(visibleItems = []) {
+        const visibleSet = new Set((visibleItems || []).map(item => item && item.id).filter(Boolean));
+        this.selectedRowIds.forEach(id => {
+            if (!visibleSet.has(id)) {
+                this.selectedRowIds.delete(id);
+            }
+        });
+    }
+
+    // --- Paginación Incremental y Filtros de Estado ---
+    getDisplayLimit() {
+        return this.displayLimit || 10;
+    }
+
+    setDisplayLimit(limit) {
+        this.displayLimit = Math.max(10, limit || 10);
+    }
+
+    loadMoreRows(step = 10) {
+        this.displayLimit = (this.displayLimit || 10) + step;
+    }
+
+    resetDisplayLimit(limit = 10) {
+        this.displayLimit = limit;
+    }
+
+    setFilterStatus(status) {
+        this.filterStatus = status || 'all';
+        this.resetDisplayLimit(10);
+        this.clearSelection();
+    }
+
+    getFilterStatus() {
+        return this.filterStatus || 'all';
     }
 
     getSelectionCardinality(visibleItems = []) {

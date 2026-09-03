@@ -538,6 +538,17 @@ export class PersistenceService {
     }
 
     /**
+     * Asignar/Reactivar categoría tributaria para la organización actual
+     */
+    async assignTaxCategoryToOrg(categoryId) {
+        const { error } = await supabase.rpc('assign_tax_category_to_org', {
+            p_category_id: categoryId,
+            p_custom_name: null
+        });
+        if (error) throw new Error(`Error assignTaxCategoryToOrg: ${error.message}`);
+    }
+
+    /**
      * Desactivar/Desasignar categoría tributaria para la organización actual
      */
     async unassignTaxCategoryFromOrg(categoryId) {

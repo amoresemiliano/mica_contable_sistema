@@ -17,7 +17,8 @@ export class AppStore {
         this.displayedEconomicActivities = []; // Lista mostrada según rol (global para SUPERADMIN, org para usuario)
         this.iibbRates = [];
         this.importIssues = [];
-        this.currentUserRole = 'ADMIN'; // 'SUPERADMIN', 'ADMIN', 'REVIEWER', 'UPLOADER', 'USER'
+        const savedRole = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('mica_user_role')) || 'USER';
+        this.currentUserRole = savedRole; // 'SUPERADMIN', 'ADMIN', 'REVIEWER', 'UPLOADER', 'USER'
         
         const getLocalJSON = (key) => {
             if (typeof localStorage !== 'undefined' && localStorage.getItem) {
@@ -632,7 +633,10 @@ export class AppStore {
 
     // --- MÓDULO CATEGORIZACIÓN & ROLES ---
     setUserRole(role) {
-        this.currentUserRole = role || 'ADMIN';
+        this.currentUserRole = role || 'USER';
+        if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem('mica_user_role', this.currentUserRole);
+        }
         this.notify();
     }
 
@@ -651,17 +655,32 @@ export class AppStore {
 
                 const { data: orgCats, error: oErr } = await persistenceService.supabase
                     .from('eco_org_tax_categories')
-                    .select('category_id, is_active, organization_id')
+                    .select('category_id, is_active, organization:eco_organizations(name)')
                     .eq('is_active', true);
                 if (oErr) throw oErr;
 
-                const activeCategoryIds = new Set((orgCats || []).map(o => o.category_id));
+                const categoryOrgMap = new Map();
+                (orgCats || []).forEach(row => {
+                    if (row && row.is_active && row.category_id) {
+                        const orgName = row.organization?.name || 'Organización';
+                        if (!categoryOrgMap.has(row.category_id)) {
+                            categoryOrgMap.set(row.category_id, []);
+                        }
+                        const list = categoryOrgMap.get(row.category_id);
+                        if (!list.includes(orgName)) {
+                            list.push(orgName);
+                        }
+                    }
+                });
 
-                this.taxCategories = (globalCats || []).map(c => ({
-                    ...c,
-                    assignedState: activeCategoryIds.has(c.id) ? 'MICA' : '',
-                    isAssignedToOrg: activeCategoryIds.has(c.id)
-                }));
+                this.taxCategories = (globalCats || []).map(c => {
+                    const orgNames = categoryOrgMap.get(c.id) || [];
+                    return {
+                        ...c,
+                        assignedState: orgNames.join(', '),
+                        isAssignedToOrg: orgNames.length > 0
+                    };
+                });
             } else {
                 const activeOrgCats = await persistenceService.loadActiveTaxCategories();
                 this.taxCategories = (activeOrgCats || []).map(c => ({
@@ -684,14 +703,35 @@ export class AppStore {
             const activeOrgActs = await persistenceService.loadActiveEconomicActivities();
             this.economicActivities = activeOrgActs || [];
 
-            const assignedActivityIds = new Set((activeOrgActs || []).map(a => a.id));
-
             if (this.isSuperAdmin()) {
-                this.displayedEconomicActivities = (globalActs || []).map(a => ({
-                    ...a,
-                    assignedState: assignedActivityIds.has(a.id) ? 'MICA' : '',
-                    isAssignedToOrg: assignedActivityIds.has(a.id)
-                }));
+                const { data: orgActs, error: oErr } = await persistenceService.supabase
+                    .from('eco_org_economic_activities')
+                    .select('activity_id, is_active, organization:eco_organizations(name)')
+                    .eq('is_active', true);
+                if (oErr) throw oErr;
+
+                const activityOrgMap = new Map();
+                (orgActs || []).forEach(row => {
+                    if (row && row.is_active && row.activity_id) {
+                        const orgName = row.organization?.name || 'Organización';
+                        if (!activityOrgMap.has(row.activity_id)) {
+                            activityOrgMap.set(row.activity_id, []);
+                        }
+                        const list = activityOrgMap.get(row.activity_id);
+                        if (!list.includes(orgName)) {
+                            list.push(orgName);
+                        }
+                    }
+                });
+
+                this.displayedEconomicActivities = (globalActs || []).map(a => {
+                    const orgNames = activityOrgMap.get(a.id) || [];
+                    return {
+                        ...a,
+                        assignedState: orgNames.join(', '),
+                        isAssignedToOrg: orgNames.length > 0
+                    };
+                });
             } else {
                 this.displayedEconomicActivities = (activeOrgActs || []).map(a => ({
                     ...a,
@@ -740,6 +780,19 @@ export class AppStore {
 
     async updateTaxCategory(categoryId, payload) {
         await persistenceService.updateTaxCategory(categoryId, payload);
+        await this.loadTaxCategories();
+    }
+
+    async assignTaxCategoryToOrg(categoryId) {
+        await persistenceService.assignTaxCategoryToOrg(categoryId);
+        await this.loadTaxCategories();
+    }
+
+    async bulkAssignTaxCategories(categoryIds) {
+        if (!Array.isArray(categoryIds) || categoryIds.length === 0) return;
+        for (const id of categoryIds) {
+            await persistenceService.assignTaxCategoryToOrg(id);
+        }
         await this.loadTaxCategories();
     }
 

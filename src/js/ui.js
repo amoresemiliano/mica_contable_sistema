@@ -437,6 +437,8 @@ async function checkUserProfile(session) {
   const userIdentity = session.user?.user_metadata?.full_name || session.user?.email || 'Usuario';
   const role = profile.role || 'USER';
 
+  appStore.setUserRole(role);
+
   if (userInfoEl) {
     userInfoEl.innerText = `${userIdentity} · ${role} · ${orgName}`;
   }
@@ -1980,7 +1982,7 @@ export class UIManager {
     static renderSettings() {
         const isSuperAdmin = appStore.isSuperAdmin();
 
-        // Configurar visibilidad del header de columna Estado para SUPERADMIN vs ORG USER
+        // Configurar visibilidad del header de columna Estado y grupos de filtros para SUPERADMIN
         const thTaxCatEstado = document.getElementById('th-tax-cat-estado');
         if (thTaxCatEstado) {
             thTaxCatEstado.style.display = isSuperAdmin ? '' : 'none';
@@ -1993,12 +1995,36 @@ export class UIManager {
             thEconomicActEstado.innerText = 'Estado';
         }
 
+        const fgTaxCats = document.getElementById('filter-group-tax-categories');
+        if (fgTaxCats) fgTaxCats.style.display = isSuperAdmin ? 'flex' : 'none';
+
+        const fgEconActs = document.getElementById('filter-group-economic-activities');
+        if (fgEconActs) fgEconActs.style.display = isSuperAdmin ? 'flex' : 'none';
+
         // 1. Categorías Tributarias
-        const taxCats = appStore.taxCategories || [];
+        const allTaxCats = appStore.taxCategories || [];
+        const taxSearch = (taxCategoriesGrid.searchQuery || '').toLowerCase();
+        const taxStatus = taxCategoriesGrid.getFilterStatus();
+
+        let filteredTaxCats = allTaxCats.filter(c => {
+            const matchesSearch = !taxSearch || (c.name || '').toLowerCase().includes(taxSearch) || (c.description || '').toLowerCase().includes(taxSearch);
+            if (!matchesSearch) return false;
+
+            if (isSuperAdmin) {
+                if (taxStatus === 'assigned') return c.isAssignedToOrg || (c.assignedState && c.assignedState.trim() !== '');
+                if (taxStatus === 'unassigned') return !c.isAssignedToOrg && (!c.assignedState || c.assignedState.trim() === '');
+            }
+            return true;
+        });
+
+        const taxLimit = taxCategoriesGrid.getDisplayLimit();
+        const visibleTaxCats = filteredTaxCats.slice(0, taxLimit);
+        taxCategoriesGrid.reconcileSelection(visibleTaxCats);
+
         this.renderRecordActionToolbar({
             containerId: 'toolbar-tax-categories',
             grid: taxCategoriesGrid,
-            visibleItems: taxCats,
+            visibleItems: visibleTaxCats,
             onEdit: 'window.actionEditTaxCategory()',
             onClone: 'window.actionCloneTaxCategory()',
             onToggleActive: 'window.actionToggleTaxCategories()',
@@ -2012,11 +2038,11 @@ export class UIManager {
 
         const tcTbody = document.getElementById('table-tax-categories-body');
         if (tcTbody) {
-            if (taxCats.length === 0) {
+            if (visibleTaxCats.length === 0) {
                 const colSpan = isSuperAdmin ? 5 : 4;
-                tcTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay categorías tributarias disponibles.</td></tr>`;
+                tcTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay categorías tributarias que coincidan con el filtro.</td></tr>`;
             } else {
-                tcTbody.innerHTML = taxCats.map(c => `
+                tcTbody.innerHTML = visibleTaxCats.map(c => `
                     <tr>
                         <td style="text-align: center;"><input type="checkbox" class="tax-cat-checkbox" value="${c.id}" ${taxCategoriesGrid.isRowSelected(c.id) ? 'checked' : ''} onchange="window.toggleTaxCategoryRowSelection('${c.id}')"></td>
                         <td><strong>${c.name}</strong></td>
@@ -2031,12 +2057,47 @@ export class UIManager {
             }
         }
 
+        // Paginación Incremental Categorías
+        const pgTaxCatContainer = document.getElementById('pagination-tax-categories');
+        if (pgTaxCatContainer) {
+            const totalCount = filteredTaxCats.length;
+            const currentCount = visibleTaxCats.length;
+            const canLoadMore = currentCount < totalCount;
+            const canLoadLess = taxLimit > 10;
+
+            pgTaxCatContainer.innerHTML = `
+                <span style="font-size: 12px; color: var(--text-muted);">Mostrando ${currentCount} de ${totalCount} categorías</span>
+                <div style="display: flex; gap: 8px;">
+                    ${canLoadLess ? '<button class="btn-secondary" style="font-size: 12px; padding: 3px 10px;" onclick="window.loadLessTaxCategories()">Ver menos</button>' : ''}
+                    ${canLoadMore ? '<button class="btn-primary" style="font-size: 12px; padding: 3px 12px;" onclick="window.loadMoreTaxCategories()">Ver más (+10)</button>' : ''}
+                </div>
+            `;
+        }
+
         // 2. Actividades Económicas ARCA
-        const activities = appStore.displayedEconomicActivities || appStore.economicActivities || [];
+        const allEconActs = appStore.displayedEconomicActivities || appStore.economicActivities || [];
+        const econSearch = (economicActivitiesGrid.searchQuery || '').toLowerCase();
+        const econStatus = economicActivitiesGrid.getFilterStatus();
+
+        let filteredEconActs = allEconActs.filter(a => {
+            const matchesSearch = !econSearch || (a.arca_code || a.afip_code || a.code || '').toLowerCase().includes(econSearch) || (a.name || '').toLowerCase().includes(econSearch);
+            if (!matchesSearch) return false;
+
+            if (isSuperAdmin) {
+                if (econStatus === 'assigned') return a.isAssignedToOrg || (a.assignedState && a.assignedState.trim() !== '');
+                if (econStatus === 'unassigned') return !a.isAssignedToOrg && (!a.assignedState || a.assignedState.trim() === '');
+            }
+            return true;
+        });
+
+        const econLimit = economicActivitiesGrid.getDisplayLimit();
+        const visibleEconActs = filteredEconActs.slice(0, econLimit);
+        economicActivitiesGrid.reconcileSelection(visibleEconActs);
+
         this.renderRecordActionToolbar({
             containerId: 'toolbar-economic-activities',
             grid: economicActivitiesGrid,
-            visibleItems: activities,
+            visibleItems: visibleEconActs,
             onEdit: 'window.actionEditEconomicActivity()',
             onClone: 'window.actionCloneEconomicActivity()',
             onToggleActive: 'window.actionAssignEconomicActivities()',
@@ -2053,11 +2114,11 @@ export class UIManager {
 
         const eaTbody = document.getElementById('table-economic-activities-body');
         if (eaTbody) {
-            if (activities.length === 0) {
+            if (visibleEconActs.length === 0) {
                 const colSpan = isSuperAdmin ? 5 : 4;
-                eaTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay actividades económicas cargadas.</td></tr>`;
+                eaTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay actividades económicas que coincidan con la búsqueda.</td></tr>`;
             } else {
-                eaTbody.innerHTML = activities.map(a => `
+                eaTbody.innerHTML = visibleEconActs.map(a => `
                     <tr>
                         <td style="text-align: center;"><input type="checkbox" class="economic-act-checkbox" value="${a.id}" ${economicActivitiesGrid.isRowSelected(a.id) ? 'checked' : ''} onchange="window.toggleEconomicActivityRowSelection('${a.id}')"></td>
                         <td><span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">${a.arca_code || a.afip_code || a.code || ''}</span></td>
@@ -2069,6 +2130,23 @@ export class UIManager {
                     </tr>
                 `).join('');
             }
+        }
+
+        // Paginación Incremental Actividades
+        const pgEconActContainer = document.getElementById('pagination-economic-activities');
+        if (pgEconActContainer) {
+            const totalCount = filteredEconActs.length;
+            const currentCount = visibleEconActs.length;
+            const canLoadMore = currentCount < totalCount;
+            const canLoadLess = econLimit > 10;
+
+            pgEconActContainer.innerHTML = `
+                <span style="font-size: 12px; color: var(--text-muted);">Mostrando ${currentCount} de ${totalCount} actividades</span>
+                <div style="display: flex; gap: 8px;">
+                    ${canLoadLess ? '<button class="btn-secondary" style="font-size: 12px; padding: 3px 10px;" onclick="window.loadLessEconomicActivities()">Ver menos</button>' : ''}
+                    ${canLoadMore ? '<button class="btn-primary" style="font-size: 12px; padding: 3px 12px;" onclick="window.loadMoreEconomicActivities()">Ver más (+10)</button>' : ''}
+                </div>
+            `;
         }
 
         // 3. IIBB Rates
@@ -2199,11 +2277,80 @@ window.handleBancosCustomDateChange = function() {
     UIManager.renderBankTable();
 };
 
-// --- HANDLERS DE SELECCIÓN Y ACCIONES REUTILIZABLES PARA CATEGORIZACIÓN ---
+// --- HANDLERS DE SELECCIÓN, BÚSQUEDA Y ACCIONES PARA CATEGORIZACIÓN ---
+
+// Búsqueda y Filtros de Estado SUPERADMIN
+window.handleTaxCategoriesSearch = function(query) {
+    taxCategoriesGrid.searchQuery = query || '';
+    taxCategoriesGrid.resetDisplayLimit(10);
+    UIManager.renderSettings();
+};
+
+window.setTaxCategoriesStatusFilter = function(status) {
+    taxCategoriesGrid.setFilterStatus(status);
+    document.querySelectorAll('#filter-group-tax-categories .btn-filter').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`filter-tax-cat-${status}`);
+    if (activeBtn) activeBtn.classList.add('active');
+    UIManager.renderSettings();
+};
+
+window.loadMoreTaxCategories = function() {
+    taxCategoriesGrid.loadMoreRows(10);
+    UIManager.renderSettings();
+};
+
+window.loadLessTaxCategories = function() {
+    taxCategoriesGrid.resetDisplayLimit(10);
+    UIManager.renderSettings();
+};
+
+window.handleEconomicActivitiesSearch = function(query) {
+    economicActivitiesGrid.searchQuery = query || '';
+    economicActivitiesGrid.resetDisplayLimit(10);
+    UIManager.renderSettings();
+};
+
+window.setEconomicActivitiesStatusFilter = function(status) {
+    economicActivitiesGrid.setFilterStatus(status);
+    document.querySelectorAll('#filter-group-economic-activities .btn-filter').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(`filter-econ-act-${status}`);
+    if (activeBtn) activeBtn.classList.add('active');
+    UIManager.renderSettings();
+};
+
+window.loadMoreEconomicActivities = function() {
+    economicActivitiesGrid.loadMoreRows(10);
+    UIManager.renderSettings();
+};
+
+window.loadLessEconomicActivities = function() {
+    economicActivitiesGrid.resetDisplayLimit(10);
+    UIManager.renderSettings();
+};
 
 // A. Categorías Tributarias
 window.toggleMasterTaxCategories = function(checked) {
-    taxCategoriesGrid.toggleSelectAllVisible(appStore.taxCategories || []);
+    const allCats = appStore.taxCategories || [];
+    const taxSearch = (taxCategoriesGrid.searchQuery || '').toLowerCase();
+    const taxStatus = taxCategoriesGrid.getFilterStatus();
+    const isSuperAdmin = appStore.isSuperAdmin();
+
+    const filtered = allCats.filter(c => {
+        const matchesSearch = !taxSearch || (c.name || '').toLowerCase().includes(taxSearch) || (c.description || '').toLowerCase().includes(taxSearch);
+        if (!matchesSearch) return false;
+        if (isSuperAdmin) {
+            if (taxStatus === 'assigned') return c.isAssignedToOrg || (c.assignedState && c.assignedState.trim() !== '');
+            if (taxStatus === 'unassigned') return !c.isAssignedToOrg && (!c.assignedState || c.assignedState.trim() === '');
+        }
+        return true;
+    });
+
+    const visible = filtered.slice(0, taxCategoriesGrid.getDisplayLimit());
+    taxCategoriesGrid.toggleSelectAllVisible(visible);
     UIManager.renderSettings();
 };
 
@@ -2255,8 +2402,7 @@ window.toggleSingleTaxCategoryAssignment = async function(id) {
             await appStore.unassignTaxCategoryFromOrg(id);
             alert(`Categoría "${cat.name}" desasignada de la organización.`);
         } else {
-            await persistenceService.assignTaxCategoryToOrg ? await persistenceService.assignTaxCategoryToOrg(id) : await appStore.createTaxCategory({ name: cat.name, description: cat.description, category_type: cat.category_type });
-            await appStore.loadTaxCategories();
+            await appStore.assignTaxCategoryToOrg(id);
             alert(`Categoría "${cat.name}" asignada a la organización.`);
         }
     } catch (err) {
@@ -2268,12 +2414,62 @@ window.actionToggleTaxCategories = async function() {
     const ids = taxCategoriesGrid.getSelectedIds();
     if (ids.length === 0) return;
     try {
-        await appStore.bulkUnassignTaxCategories(ids);
+        const cats = appStore.taxCategories || [];
+        const toAssign = ids.filter(id => {
+            const c = cats.find(item => item.id === id);
+            return c && !c.isAssignedToOrg;
+        });
+        const toUnassign = ids.filter(id => {
+            const c = cats.find(item => item.id === id);
+            return c && c.isAssignedToOrg;
+        });
+
+        if (toAssign.length > 0) {
+            await appStore.bulkAssignTaxCategories(toAssign);
+        }
+        if (toUnassign.length > 0) {
+            await appStore.bulkUnassignTaxCategories(toUnassign);
+        }
         taxCategoriesGrid.clearSelection();
         alert(`${ids.length} categoría(s) actualizadas para la organización.`);
     } catch (err) {
         alert("Error al actualizar categorías: " + err.message);
     }
+};
+
+window.actionDeleteTaxCategories = async function() {
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`¿Deseas desasignar ${ids.length} categoría(s) de la organización actual?`)) return;
+    try {
+        await appStore.bulkUnassignTaxCategories(ids);
+        taxCategoriesGrid.clearSelection();
+        alert(`${ids.length} categoría(s) desasignadas de la organización.`);
+    } catch (err) {
+        alert("Error al desasignar categorías: " + err.message);
+    }
+};
+
+// B. Actividades Económicas ARCA
+window.toggleMasterEconomicActivities = function(checked) {
+    const allActs = appStore.displayedEconomicActivities || appStore.economicActivities || [];
+    const econSearch = (economicActivitiesGrid.searchQuery || '').toLowerCase();
+    const econStatus = economicActivitiesGrid.getFilterStatus();
+    const isSuperAdmin = appStore.isSuperAdmin();
+
+    const filtered = allActs.filter(a => {
+        const matchesSearch = !econSearch || (a.arca_code || a.afip_code || a.code || '').toLowerCase().includes(econSearch) || (a.name || '').toLowerCase().includes(econSearch);
+        if (!matchesSearch) return false;
+        if (isSuperAdmin) {
+            if (econStatus === 'assigned') return a.isAssignedToOrg || (a.assignedState && a.assignedState.trim() !== '');
+            if (econStatus === 'unassigned') return !a.isAssignedToOrg && (!a.assignedState || a.assignedState.trim() === '');
+        }
+        return true;
+    });
+
+    const visible = filtered.slice(0, economicActivitiesGrid.getDisplayLimit());
+    economicActivitiesGrid.toggleSelectAllVisible(visible);
+    UIManager.renderSettings();
 };
 
 window.actionDeleteTaxCategories = async function() {

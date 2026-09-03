@@ -763,7 +763,17 @@
                     </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Asignación de categorías globales a la organización.</p>
-                
+
+                <!-- Barra de Búsqueda y Filtros de Estado SUPERADMIN -->
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+                    <input type="text" id="search-tax-categories" placeholder="🔍 Buscar categoría..." class="form-control" style="max-width: 320px;" oninput="window.handleTaxCategoriesSearch(this.value)">
+                    <div id="filter-group-tax-categories" class="filter-group" style="display: none; gap: 6px;">
+                        <button class="btn-filter active" id="filter-tax-cat-all" onclick="window.setTaxCategoriesStatusFilter('all')">Todos</button>
+                        <button class="btn-filter" id="filter-tax-cat-assigned" onclick="window.setTaxCategoriesStatusFilter('assigned')">Asignados</button>
+                        <button class="btn-filter" id="filter-tax-cat-unassigned" onclick="window.setTaxCategoriesStatusFilter('unassigned')">Sin asignar</button>
+                    </div>
+                </div>
+
                 <!-- Action Toolbar para Categorías -->
                 <div id="toolbar-tax-categories" class="record-action-toolbar" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-primary); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 12px;"></div>
 
@@ -783,6 +793,9 @@
                         </tbody>
                     </table>
                 </div>
+
+                <!-- Paginación Incremental (Ver más / Ver menos) -->
+                <div id="pagination-tax-categories" style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 4px 0;"></div>
             </div>
 
             <!-- B. Actividades Económicas -->
@@ -795,11 +808,21 @@
                     </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Catálogo oficial ARCA y asignación a la organización.</p>
-                
+
+                <!-- Barra de Búsqueda y Filtros de Estado SUPERADMIN -->
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+                    <input type="text" id="search-economic-activities" placeholder="🔍 Buscar por código ARCA o actividad..." class="form-control" style="max-width: 360px;" oninput="window.handleEconomicActivitiesSearch(this.value)">
+                    <div id="filter-group-economic-activities" class="filter-group" style="display: none; gap: 6px;">
+                        <button class="btn-filter active" id="filter-econ-act-all" onclick="window.setEconomicActivitiesStatusFilter('all')">Todos</button>
+                        <button class="btn-filter" id="filter-econ-act-assigned" onclick="window.setEconomicActivitiesStatusFilter('assigned')">Asignados</button>
+                        <button class="btn-filter" id="filter-econ-act-unassigned" onclick="window.setEconomicActivitiesStatusFilter('unassigned')">Sin asignar</button>
+                    </div>
+                </div>
+
                 <!-- Action Toolbar para Actividades Económicas -->
                 <div id="toolbar-economic-activities" class="record-action-toolbar" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-primary); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 12px;"></div>
 
-                <div class="data-table-container" style="max-height: 400px; overflow-y: auto;">
+                <div class="data-table-container" style="max-height: 440px; overflow-y: auto;">
                     <table class="simple-table">
                         <thead>
                             <tr>
@@ -815,6 +838,9 @@
                         </tbody>
                     </table>
                 </div>
+
+                <!-- Paginación Incremental (Ver más / Ver menos) -->
+                <div id="pagination-economic-activities" style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 4px 0;"></div>
             </div>
 
             <!-- C. Tasas IIBB por Actividad/Jurisdicción -->
