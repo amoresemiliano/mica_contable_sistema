@@ -177,6 +177,46 @@ export class OperationalGrid {
         return '';
     }
 
+    isItemDebit(item, customFieldExtractor = {}) {
+        const rawAmt = customFieldExtractor[this.amountField]
+            ? customFieldExtractor[this.amountField](item)
+            : (item[this.amountField] !== undefined ? item[this.amountField] : (item.monto !== undefined ? item.monto : (item.importe !== undefined ? item.importe : (item.total !== undefined ? item.total : item.amount))));
+        
+        const numAmt = typeof rawAmt === 'number' ? rawAmt : parseFloat(rawAmt);
+        if (!isNaN(numAmt) && numAmt < 0) {
+            return true;
+        }
+
+        const rawType = String(item.tipo || item.type || item.movement_type || item.movementType || '').toLowerCase().trim();
+        if (rawType === 'debit' || rawType === 'debito') {
+            return true;
+        }
+
+        return false;
+    }
+
+    isItemCredit(item, customFieldExtractor = {}) {
+        const rawAmt = customFieldExtractor[this.amountField]
+            ? customFieldExtractor[this.amountField](item)
+            : (item[this.amountField] !== undefined ? item[this.amountField] : (item.monto !== undefined ? item.monto : (item.importe !== undefined ? item.importe : (item.total !== undefined ? item.total : item.amount))));
+        
+        const numAmt = typeof rawAmt === 'number' ? rawAmt : parseFloat(rawAmt);
+        if (!isNaN(numAmt) && numAmt > 0) {
+            return true;
+        }
+
+        const rawType = String(item.tipo || item.type || item.movement_type || item.movementType || '').toLowerCase().trim();
+        if (rawType === 'credit' || rawType === 'credito') {
+            return true;
+        }
+
+        if (!isNaN(numAmt) && numAmt === 0 && !this.isItemDebit(item, customFieldExtractor)) {
+            return true;
+        }
+
+        return false;
+    }
+
     // --- Procesamiento de Colección (Filtrar + Ordenar) ---
     filterAndSort(items, customFieldExtractor = {}) {
         if (!Array.isArray(items)) return [];
@@ -220,11 +260,9 @@ export class OperationalGrid {
                         return false;
                     }
                 } else if (this.primaryFilter === 'debitos') {
-                    const amount = item.importe !== undefined ? item.importe : item.total;
-                    if (amount >= 0 && item.tipo !== 'DEBITO') return false;
+                    if (!this.isItemDebit(item, customFieldExtractor)) return false;
                 } else if (this.primaryFilter === 'creditos') {
-                    const amount = item.importe !== undefined ? item.importe : item.total;
-                    if (amount < 0 && item.tipo !== 'CREDITO') return false;
+                    if (!this.isItemCredit(item, customFieldExtractor)) return false;
                 } else {
                     // Para Percepciones, filtro por Origen/Jurisdicción
                     const origen = item.fuente || item.jurisdiction || item.origen || '';

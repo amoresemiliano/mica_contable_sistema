@@ -165,4 +165,110 @@ describe('Operational Grid System Tests', () => {
             expect(res.map(i => i.id)).toEqual(['b6']);
         });
     });
+
+    describe('Composición de filtros de Extractos Bancarios (AND Semantics)', () => {
+        const bankItems = [
+            { id: 'b1', fecha: '2026-06-01', descripcion: 'Depósito sueldo DataNet', monto: 1000, tipo: 'credit' },
+            { id: 'b2', fecha: '30-06-2026', descripcion: 'Pago servicio DataNet', monto: -500, tipo: 'debit' },
+            { id: 'b3', fecha: '15/06/2026', descripcion: 'Transferencia cliente', monto: 2000, tipo: 'credit' },
+            { id: 'b4', fecha: '2026-05-31', descripcion: 'Pago proveedor mayo', monto: -100, tipo: 'DEBITO' },
+            { id: 'b5', fecha: '15-05-2026', descripcion: 'Acreditación mayo', monto: 300, tipo: 'CREDITO' },
+            { id: 'b6', fecha: '2025-06-15', descripcion: 'Abono antiguo', monto: 400, tipo: 'credit' }
+        ];
+
+        let bankGrid;
+        const extractor = {
+            fecha: t => t.fecha,
+            descripcion: t => t.descripcion,
+            monto: t => t.monto
+        };
+
+        beforeEach(() => {
+            bankGrid = new OperationalGrid({
+                moduleId: 'extractos',
+                defaultColumns: ['fecha', 'descripcion', 'monto', 'tipo'],
+                searchFields: ['descripcion'],
+                dateField: 'fecha',
+                amountField: 'monto'
+            });
+        });
+
+        test('June 2026 + Todos -> devuelve todos los de junio 2026', () => {
+            bankGrid.setPeriod('2026-06');
+            bankGrid.setPrimaryFilter('all');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b1', 'b2', 'b3']);
+        });
+
+        test('June 2026 + Débitos -> sólo movimientos de débito de junio 2026', () => {
+            bankGrid.setPeriod('2026-06');
+            bankGrid.setPrimaryFilter('debitos');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b2']);
+        });
+
+        test('June 2026 + Créditos -> sólo movimientos de crédito de junio 2026', () => {
+            bankGrid.setPeriod('2026-06');
+            bankGrid.setPrimaryFilter('creditos');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b1', 'b3']);
+        });
+
+        test('May 2026 + Débitos -> sólo movimientos de débito de mayo 2026', () => {
+            bankGrid.setPeriod('2026-05');
+            bankGrid.setPrimaryFilter('debitos');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b4']);
+        });
+
+        test('May 2026 + Créditos -> sólo movimientos de crédito de mayo 2026', () => {
+            bankGrid.setPeriod('2026-05');
+            bankGrid.setPrimaryFilter('creditos');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b5']);
+        });
+
+        test('Custom Range + Débitos -> sólo débitos dentro del rango', () => {
+            bankGrid.setCustomRange('2026-05-01', '2026-06-15');
+            bankGrid.setPrimaryFilter('debitos');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b4']);
+        });
+
+        test('Custom Range + Créditos -> sólo créditos dentro del rango', () => {
+            bankGrid.setCustomRange('2026-06-01', '2026-06-30');
+            bankGrid.setPrimaryFilter('creditos');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b1', 'b3']);
+        });
+
+        test('Search + Period + Débitos -> intersección estricta AND', () => {
+            bankGrid.setSearch('datanet');
+            bankGrid.setPeriod('2026-06');
+            bankGrid.setPrimaryFilter('debitos');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b2']);
+        });
+
+        test('Clear All -> devuelve todos los elementos sin filtros', () => {
+            bankGrid.setSearch('datanet');
+            bankGrid.setPeriod('2026-06');
+            bankGrid.setPrimaryFilter('debitos');
+            expect(bankGrid.filterAndSort(bankItems, extractor).length).toBe(1);
+
+            bankGrid.clearSearch();
+            bankGrid.clearPeriod();
+            bankGrid.setPrimaryFilter('all');
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.length).toBe(6);
+        });
+
+        test('Ordenamiento respeta la composición de filtros previa', () => {
+            bankGrid.setPeriod('2026-06');
+            bankGrid.setPrimaryFilter('creditos');
+            bankGrid.toggleSort('monto', 'numeric'); // asc
+            const res = bankGrid.filterAndSort(bankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['b1', 'b3']);
+        });
+    });
 });
