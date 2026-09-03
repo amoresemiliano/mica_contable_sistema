@@ -125,9 +125,34 @@ export class OperationalGrid {
         }
     }
 
-    // --- Selección de Filas Visibles ---
-    toggleSelectAllVisible(visibleItems) {
-        const visibleIds = visibleItems.map(item => item.id).filter(Boolean);
+    // --- Selección de Filas Visibles y Reusable Action Pattern ---
+    getSelectedCount() {
+        return this.selectedRowIds.size;
+    }
+
+    getSelectedIds() {
+        return Array.from(this.selectedRowIds);
+    }
+
+    isRowSelected(id) {
+        return this.selectedRowIds.has(id);
+    }
+
+    selectAllVisible(visibleItems = []) {
+        (visibleItems || []).forEach(item => {
+            if (item && item.id) this.selectedRowIds.add(item.id);
+        });
+    }
+
+    deselectAllVisible(visibleItems = []) {
+        (visibleItems || []).forEach(item => {
+            if (item && item.id) this.selectedRowIds.delete(item.id);
+        });
+    }
+
+    toggleSelectAllVisible(visibleItems = []) {
+        const visibleIds = (visibleItems || []).map(item => item.id).filter(Boolean);
+        if (visibleIds.length === 0) return;
         const allSelected = visibleIds.every(id => this.selectedRowIds.has(id));
 
         if (allSelected) {
@@ -138,6 +163,7 @@ export class OperationalGrid {
     }
 
     toggleRowSelection(itemId) {
+        if (!itemId) return;
         if (this.selectedRowIds.has(itemId)) {
             this.selectedRowIds.delete(itemId);
         } else {
@@ -147,6 +173,24 @@ export class OperationalGrid {
 
     clearSelection() {
         this.selectedRowIds.clear();
+    }
+
+    getSelectionCardinality(visibleItems = []) {
+        const count = this.selectedRowIds.size;
+        const visibleIds = (visibleItems || []).map(item => item.id).filter(Boolean);
+        const isAllVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => this.selectedRowIds.has(id));
+
+        return {
+            count,
+            isZero: count === 0,
+            isSingle: count === 1,
+            isMulti: count > 1,
+            canEdit: count === 1,
+            canClone: count === 1,
+            canToggleActive: count >= 1,
+            canDelete: count >= 1,
+            isAllVisibleSelected
+        };
     }
 
     parseToIsoDate(rawDate) {

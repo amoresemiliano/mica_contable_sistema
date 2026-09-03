@@ -763,18 +763,23 @@
                     </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Asignación de categorías globales a la organización.</p>
+                
+                <!-- Action Toolbar para Categorías -->
+                <div id="toolbar-tax-categories" class="record-action-toolbar" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-primary); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 12px;"></div>
+
                 <div class="data-table-container">
                     <table class="simple-table">
                         <thead>
                             <tr>
+                                <th style="width: 36px; text-align: center;"><input type="checkbox" id="master-checkbox-tax-categories" onchange="window.toggleMasterTaxCategories(this.checked)"></th>
                                 <th>Nombre</th>
                                 <th>Descripción</th>
-                                <th>Estado en Org.</th>
+                                <th id="th-tax-cat-estado">Estado</th>
                                 <th>Acción</th>
                             </tr>
                         </thead>
                         <tbody id="table-tax-categories-body">
-                            <tr><td colspan="4" style="text-align: center;">Cargando categorías...</td></tr>
+                            <tr><td colspan="5" style="text-align: center;">Cargando categorías...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -790,18 +795,23 @@
                     </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Catálogo oficial ARCA y asignación a la organización.</p>
+                
+                <!-- Action Toolbar para Actividades Económicas -->
+                <div id="toolbar-economic-activities" class="record-action-toolbar" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-primary); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 12px;"></div>
+
                 <div class="data-table-container" style="max-height: 400px; overflow-y: auto;">
                     <table class="simple-table">
                         <thead>
                             <tr>
+                                <th style="width: 36px; text-align: center;"><input type="checkbox" id="master-checkbox-economic-activities" onchange="window.toggleMasterEconomicActivities(this.checked)"></th>
                                 <th>Código ARCA</th>
                                 <th>Actividad</th>
-                                <th>Estado en Org.</th>
+                                <th id="th-economic-act-estado">Estado</th>
                                 <th>Acción</th>
                             </tr>
                         </thead>
                         <tbody id="table-economic-activities-body">
-                            <tr><td colspan="4" style="text-align: center;">Cargando actividades...</td></tr>
+                            <tr><td colspan="5" style="text-align: center;">Cargando actividades...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -811,14 +821,19 @@
             <div class="card" style="margin-top: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3>Tasas IIBB por Actividad y Jurisdicción</h3>
-                    <button class="btn-primary" onclick="appStore.promptCreateIibbRate()">+ Nueva Tasa IIBB</button>
+                    <button class="btn-primary" onclick="window.promptCreateIibbRateModal()">+ Nueva Tasa IIBB</button>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Gestión de alícuotas vigentes para la organización.</p>
+                
+                <!-- Action Toolbar para Tasas IIBB -->
+                <div id="toolbar-iibb-rates" class="record-action-toolbar" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-primary); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); margin-bottom: 12px;"></div>
+
                 <div class="data-table-container">
                     <table class="simple-table">
                         <thead>
                             <tr>
-                                <th>Actividad</th>
+                                <th style="width: 36px; text-align: center;"><input type="checkbox" id="master-checkbox-iibb-rates" onchange="window.toggleMasterIibbRates(this.checked)"></th>
+                                <th>Actividad Económica</th>
                                 <th>Jurisdicción</th>
                                 <th>Tasa (%)</th>
                                 <th>Vigencia Desde</th>
@@ -828,7 +843,7 @@
                             </tr>
                         </thead>
                         <tbody id="table-iibb-rates-body">
-                            <tr><td colspan="7" style="text-align: center;">Cargando tasas IIBB...</td></tr>
+                            <tr><td colspan="8" style="text-align: center;">Cargando tasas IIBB...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -1197,9 +1212,9 @@
             </div>
             <form id="form-iibb-rate" onsubmit="event.preventDefault(); window.submitIibbRateForm();">
                 <div class="form-group">
-                    <label>Actividad Económica (Dejar vacío para General)</label>
-                    <select id="iibb-rate-activity" class="form-control">
-                        <option value="">-- General --</option>
+                    <label>Actividad Económica Asignada *</label>
+                    <select id="iibb-rate-activity" class="form-control" required>
+                        <option value="" disabled selected>-- Seleccionar Actividad Asignada --</option>
                     </select>
                 </div>
                 <div class="form-group">

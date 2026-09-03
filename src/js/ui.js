@@ -42,6 +42,24 @@ export const bancosGrid = new OperationalGrid({
     amountField: 'monto'
 });
 
+export const taxCategoriesGrid = new OperationalGrid({
+    moduleId: 'tax-categories',
+    defaultColumns: ['checkbox', 'name', 'description', 'estado', 'actions'],
+    searchFields: ['name', 'description']
+});
+
+export const economicActivitiesGrid = new OperationalGrid({
+    moduleId: 'economic-activities',
+    defaultColumns: ['checkbox', 'arca_code', 'name', 'estado', 'actions'],
+    searchFields: ['arca_code', 'name']
+});
+
+export const iibbRatesGrid = new OperationalGrid({
+    moduleId: 'iibb-rates',
+    defaultColumns: ['checkbox', 'activity', 'jurisdiction', 'rate', 'valid_from', 'valid_to', 'estado', 'actions'],
+    searchFields: ['jurisdiction', 'activity_name']
+});
+
 // Event handlers globales para las toolbars operacionales
 
 // --- Comprobantes ---
@@ -1935,63 +1953,156 @@ export class UIManager {
         this.renderSettings();
     }
 
+    static renderRecordActionToolbar({ containerId, grid, visibleItems, onEdit, onClone, onToggleActive, onDelete, options = {} }) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        const cardinality = grid.getSelectionCardinality(visibleItems);
+        const count = cardinality.count;
+
+        container.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 13px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                    <input type="checkbox" ${cardinality.isAllVisibleSelected ? 'checked' : ''} onchange="${options.masterToggleHandler}(this.checked)">
+                    <strong>Seleccionar todo</strong>
+                </label>
+                <span style="color: var(--text-muted); font-size: 12px;">${count} seleccionado${count !== 1 ? 's' : ''}</span>
+            </div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                ${options.allowEdit !== false ? `<button class="btn-secondary" ${!cardinality.canEdit ? 'disabled' : ''} onclick="${onEdit}">✏️ Editar</button>` : ''}
+                ${options.allowClone !== false ? `<button class="btn-secondary" ${!cardinality.canClone || options.isCloneDisabled ? 'disabled' : ''} onclick="${onClone}">📋 Clonar</button>` : ''}
+                ${options.allowToggle !== false ? `<button class="btn-secondary" ${!cardinality.canToggleActive ? 'disabled' : ''} onclick="${onToggleActive}">⚡ ${options.toggleLabel || 'Activar / Desactivar'}</button>` : ''}
+                ${options.allowDelete !== false ? `<button class="btn-danger" ${!cardinality.canDelete ? 'disabled' : ''} onclick="${onDelete}">🗑️ ${options.deleteLabel || 'Eliminar / Desasignar'}</button>` : ''}
+            </div>
+        `;
+    }
+
     static renderSettings() {
-        // Categorías Tributarias
+        const isSuperAdmin = appStore.isSuperAdmin();
+
+        // Configurar visibilidad del header de columna Estado para SUPERADMIN vs ORG USER
+        const thTaxCatEstado = document.getElementById('th-tax-cat-estado');
+        if (thTaxCatEstado) {
+            thTaxCatEstado.style.display = isSuperAdmin ? '' : 'none';
+            thTaxCatEstado.innerText = 'Estado';
+        }
+
+        const thEconomicActEstado = document.getElementById('th-economic-act-estado');
+        if (thEconomicActEstado) {
+            thEconomicActEstado.style.display = isSuperAdmin ? '' : 'none';
+            thEconomicActEstado.innerText = 'Estado';
+        }
+
+        // 1. Categorías Tributarias
+        const taxCats = appStore.taxCategories || [];
+        this.renderRecordActionToolbar({
+            containerId: 'toolbar-tax-categories',
+            grid: taxCategoriesGrid,
+            visibleItems: taxCats,
+            onEdit: 'window.actionEditTaxCategory()',
+            onClone: 'window.actionCloneTaxCategory()',
+            onToggleActive: 'window.actionToggleTaxCategories()',
+            onDelete: 'window.actionDeleteTaxCategories()',
+            options: {
+                masterToggleHandler: 'window.toggleMasterTaxCategories',
+                toggleLabel: 'Activar / Asignar',
+                deleteLabel: 'Desasignar de Org'
+            }
+        });
+
         const tcTbody = document.getElementById('table-tax-categories-body');
         if (tcTbody) {
-            const taxCats = appStore.taxCategories || [];
             if (taxCats.length === 0) {
-                tcTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No hay categorías tributarias asignadas a esta organización.</td></tr>`;
+                const colSpan = isSuperAdmin ? 5 : 4;
+                tcTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay categorías tributarias disponibles.</td></tr>`;
             } else {
                 tcTbody.innerHTML = taxCats.map(c => `
                     <tr>
+                        <td style="text-align: center;"><input type="checkbox" class="tax-cat-checkbox" value="${c.id}" ${taxCategoriesGrid.isRowSelected(c.id) ? 'checked' : ''} onchange="window.toggleTaxCategoryRowSelection('${c.id}')"></td>
                         <td><strong>${c.name}</strong></td>
                         <td>${c.description || '-'}</td>
-                        <td><span style="color:var(--success); font-weight: 600;">Asignada en Org.</span></td>
+                        ${isSuperAdmin ? `<td>${c.assignedState ? `<span style="color:var(--success); font-weight: 600;">${c.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
                         <td>
-                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="promptUnassignTaxCategory('${c.id}')">Desactivar para Org</button>
+                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.editSingleTaxCategory('${c.id}')">Editar</button>
+                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleTaxCategoryAssignment('${c.id}')">${c.isAssignedToOrg ? 'Desasignar' : 'Asignar'}</button>
                         </td>
                     </tr>
                 `).join('');
             }
         }
 
-        // Actividades Económicas Asignadas a Org
+        // 2. Actividades Económicas ARCA
+        const activities = appStore.displayedEconomicActivities || appStore.economicActivities || [];
+        this.renderRecordActionToolbar({
+            containerId: 'toolbar-economic-activities',
+            grid: economicActivitiesGrid,
+            visibleItems: activities,
+            onEdit: 'window.actionEditEconomicActivity()',
+            onClone: 'window.actionCloneEconomicActivity()',
+            onToggleActive: 'window.actionAssignEconomicActivities()',
+            onDelete: 'window.actionUnassignEconomicActivities()',
+            options: {
+                masterToggleHandler: 'window.toggleMasterEconomicActivities',
+                allowEdit: false,
+                allowClone: true,
+                isCloneDisabled: true, // Clonar deshabilitado para catálogo oficial ARCA
+                toggleLabel: 'Asignar a Org',
+                deleteLabel: 'Remover Asignación'
+            }
+        });
+
         const eaTbody = document.getElementById('table-economic-activities-body');
         if (eaTbody) {
-            const activities = appStore.economicActivities || [];
             if (activities.length === 0) {
-                eaTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No hay actividades económicas asignadas a la organización.</td></tr>`;
+                const colSpan = isSuperAdmin ? 5 : 4;
+                eaTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay actividades económicas cargadas.</td></tr>`;
             } else {
                 eaTbody.innerHTML = activities.map(a => `
                     <tr>
-                        <td><span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">${a.arca_code || a.arca_activity_code || a.code || ''}</span></td>
+                        <td style="text-align: center;"><input type="checkbox" class="economic-act-checkbox" value="${a.id}" ${economicActivitiesGrid.isRowSelected(a.id) ? 'checked' : ''} onchange="window.toggleEconomicActivityRowSelection('${a.id}')"></td>
+                        <td><span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">${a.arca_code || a.afip_code || a.code || ''}</span></td>
                         <td><strong>${a.name}</strong></td>
-                        <td><span style="color:var(--success); font-weight: 600;">Activa en Org</span></td>
+                        ${isSuperAdmin ? `<td>${a.assignedState ? `<span style="color:var(--success); font-weight: 600;">${a.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
                         <td>
-                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="unassignArcaActivityFromOrg('${a.id}')">Remover Asignación</button>
+                            <button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleEconomicActivityAssignment('${a.id}')">${a.isAssignedToOrg ? 'Remover Asignación' : 'Asignar a Org'}</button>
                         </td>
                     </tr>
                 `).join('');
             }
         }
 
-        // IIBB Rates
+        // 3. IIBB Rates
+        const rates = appStore.iibbRates || [];
+        this.renderRecordActionToolbar({
+            containerId: 'toolbar-iibb-rates',
+            grid: iibbRatesGrid,
+            visibleItems: rates,
+            onEdit: 'window.actionEditIibbRate()',
+            onClone: 'window.actionCloneIibbRate()',
+            onToggleActive: 'window.actionToggleIibbRates()',
+            onDelete: 'window.actionDeleteIibbRates()',
+            options: {
+                masterToggleHandler: 'window.toggleMasterIibbRates',
+                toggleLabel: 'Activar / Desactivar',
+                deleteLabel: 'Desactivar / Eliminar'
+            }
+        });
+
         const irTbody = document.getElementById('table-iibb-rates-body');
         if (irTbody) {
-            const rates = appStore.iibbRates || [];
             if (rates.length === 0) {
-                irTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No hay tasas IIBB configuradas para esta organización.</td></tr>`;
+                irTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">No hay tasas IIBB configuradas para esta organización.</td></tr>`;
             } else {
                 irTbody.innerHTML = rates.map(r => `
                     <tr>
-                        <td>${r.activity_name || r.activity_id ? String(r.activity_id).substring(0,8) : 'General'}</td>
+                        <td style="text-align: center;"><input type="checkbox" class="iibb-rate-checkbox" value="${r.id}" ${iibbRatesGrid.isRowSelected(r.id) ? 'checked' : ''} onchange="window.toggleIibbRateRowSelection('${r.id}')"></td>
+                        <td><strong>${r.activity_name || 'Desconocida'}</strong></td>
                         <td><strong>${r.jurisdiction}</strong></td>
                         <td style="font-weight: 700; color: var(--primary);">${r.rate_percent}%</td>
                         <td>${r.valid_from ? new Date(r.valid_from).toLocaleDateString() : '-'}</td>
                         <td>${r.valid_to ? new Date(r.valid_to).toLocaleDateString() : 'Indefinido'}</td>
                         <td>${r.is_active ? '<span style="color:var(--success); font-weight:600;">Vigente</span>' : '<span style="color:var(--text-muted);">Inactivo</span>'}</td>
-                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="appStore.promptEditIibbRate('${r.id}')">Editar</button></td>
+                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.promptEditIibbRateModal('${r.id}')">Editar</button></td>
                     </tr>
                 `).join('');
             }
@@ -2088,49 +2199,294 @@ window.handleBancosCustomDateChange = function() {
     UIManager.renderBankTable();
 };
 
-window.promptUnassignTaxCategory = async function(categoryId) {
-    if (!confirm("¿Deseas desactivar esta categoría tributaria para la organización actual?")) return;
+// --- HANDLERS DE SELECCIÓN Y ACCIONES REUTILIZABLES PARA CATEGORIZACIÓN ---
+
+// A. Categorías Tributarias
+window.toggleMasterTaxCategories = function(checked) {
+    taxCategoriesGrid.toggleSelectAllVisible(appStore.taxCategories || []);
+    UIManager.renderSettings();
+};
+
+window.toggleTaxCategoryRowSelection = function(id) {
+    taxCategoriesGrid.toggleRowSelection(id);
+    UIManager.renderSettings();
+};
+
+window.editSingleTaxCategory = function(id) {
+    const cat = (appStore.taxCategories || []).find(c => c.id === id);
+    if (!cat) return;
+    document.getElementById('tax-category-name').value = cat.name || '';
+    document.getElementById('tax-category-type').value = cat.category_type || 'EXPENSE';
+    document.getElementById('tax-category-desc').value = cat.description || '';
+    document.getElementById('form-tax-category').dataset.editingId = cat.id;
+    UIManager.openModal('modal-tax-category');
+};
+
+window.actionEditTaxCategory = function() {
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length !== 1) {
+        alert("Debes seleccionar exactamente 1 categoría para editar.");
+        return;
+    }
+    window.editSingleTaxCategory(ids[0]);
+};
+
+window.actionCloneTaxCategory = function() {
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length !== 1) {
+        alert("Debes seleccionar exactamente 1 categoría para clonar.");
+        return;
+    }
+    const cat = (appStore.taxCategories || []).find(c => c.id === ids[0]);
+    if (!cat) return;
+    document.getElementById('tax-category-name').value = `${cat.name || ''} (Copia)`;
+    document.getElementById('tax-category-type').value = cat.category_type || 'EXPENSE';
+    document.getElementById('tax-category-desc').value = cat.description || '';
+    delete document.getElementById('form-tax-category').dataset.editingId;
+    UIManager.openModal('modal-tax-category');
+};
+
+window.toggleSingleTaxCategoryAssignment = async function(id) {
+    const cat = (appStore.taxCategories || []).find(c => c.id === id);
+    if (!cat) return;
     try {
-        await persistenceService.unassignTaxCategoryFromOrg(categoryId);
-        await appStore.loadTaxCategories();
-        alert("Categoría desactivada para la organización.");
+        if (cat.isAssignedToOrg) {
+            if (!confirm(`¿Deseas desasignar la categoría "${cat.name}" de la organización?`)) return;
+            await appStore.unassignTaxCategoryFromOrg(id);
+            alert(`Categoría "${cat.name}" desasignada de la organización.`);
+        } else {
+            await persistenceService.assignTaxCategoryToOrg ? await persistenceService.assignTaxCategoryToOrg(id) : await appStore.createTaxCategory({ name: cat.name, description: cat.description, category_type: cat.category_type });
+            await appStore.loadTaxCategories();
+            alert(`Categoría "${cat.name}" asignada a la organización.`);
+        }
     } catch (err) {
-        alert("Error al desactivar categoría: " + err.message);
+        alert("Error al cambiar asignación de categoría: " + err.message);
     }
 };
 
-window.assignArcaActivityToOrg = async function(activityId) {
+window.actionToggleTaxCategories = async function() {
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length === 0) return;
     try {
-        await persistenceService.assignEconomicActivityToOrg(activityId);
-        await Promise.all([
-            appStore.loadEconomicActivities(),
-            appStore.loadGlobalEconomicActivities()
-        ]);
-        alert("Actividad económica asignada a la organización.");
+        await appStore.bulkUnassignTaxCategories(ids);
+        taxCategoriesGrid.clearSelection();
+        alert(`${ids.length} categoría(s) actualizadas para la organización.`);
     } catch (err) {
-        alert("Error al asignar actividad económica: " + err.message);
+        alert("Error al actualizar categorías: " + err.message);
     }
 };
 
-window.unassignArcaActivityFromOrg = async function(activityId) {
-    if (!confirm("¿Deseas remover la asignación de esta actividad económica para la organización actual?")) return;
+window.actionDeleteTaxCategories = async function() {
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`¿Deseas desasignar ${ids.length} categoría(s) de la organización actual?`)) return;
     try {
-        await persistenceService.unassignEconomicActivityFromOrg(activityId);
-        await Promise.all([
-            appStore.loadEconomicActivities(),
-            appStore.loadGlobalEconomicActivities()
-        ]);
-        alert("Actividad desasignada.");
+        await appStore.bulkUnassignTaxCategories(ids);
+        taxCategoriesGrid.clearSelection();
+        alert(`${ids.length} categoría(s) desasignadas de la organización.`);
     } catch (err) {
-        alert("Error al desasignar actividad: " + err.message);
+        alert("Error al desasignar categorías: " + err.message);
+    }
+};
+
+// B. Actividades Económicas ARCA
+window.toggleMasterEconomicActivities = function(checked) {
+    economicActivitiesGrid.toggleSelectAllVisible(appStore.displayedEconomicActivities || appStore.economicActivities || []);
+    UIManager.renderSettings();
+};
+
+window.toggleEconomicActivityRowSelection = function(id) {
+    economicActivitiesGrid.toggleRowSelection(id);
+    UIManager.renderSettings();
+};
+
+window.actionCloneEconomicActivity = function() {
+    alert("No está permitido clonar actividades oficiales del catálogo ARCA.");
+};
+
+window.toggleSingleEconomicActivityAssignment = async function(id) {
+    const act = (appStore.displayedEconomicActivities || appStore.economicActivities || []).find(a => a.id === id);
+    if (!act) return;
+    try {
+        if (act.isAssignedToOrg) {
+            if (!confirm(`¿Deseas remover la asignación de la actividad "${act.name}" para la organización?`)) return;
+            await appStore.unassignEconomicActivityFromOrg(id);
+            alert(`Actividad "${act.name}" desasignada.`);
+        } else {
+            await appStore.assignEconomicActivityToOrg(id);
+            alert(`Actividad "${act.name}" asignada a la organización.`);
+        }
+    } catch (err) {
+        alert("Error al cambiar asignación de actividad: " + err.message);
+    }
+};
+
+window.actionAssignEconomicActivities = async function() {
+    const ids = economicActivitiesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    try {
+        await appStore.bulkAssignEconomicActivitiesToOrg(ids);
+        economicActivitiesGrid.clearSelection();
+        alert(`${ids.length} actividad(es) económica(s) asignadas a la organización.`);
+    } catch (err) {
+        alert("Error al asignar actividades: " + err.message);
+    }
+};
+
+window.actionUnassignEconomicActivities = async function() {
+    const ids = economicActivitiesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`¿Deseas remover la asignación de ${ids.length} actividad(es) económica(s) de la organización?`)) return;
+    try {
+        await appStore.bulkUnassignEconomicActivitiesFromOrg(ids);
+        economicActivitiesGrid.clearSelection();
+        alert(`${ids.length} actividad(es) económica(s) desasignadas de la organización.`);
+    } catch (err) {
+        alert("Error al remover asignaciones de actividades: " + err.message);
+    }
+};
+
+// C. Tasas IIBB
+window.toggleMasterIibbRates = function(checked) {
+    iibbRatesGrid.toggleSelectAllVisible(appStore.iibbRates || []);
+    UIManager.renderSettings();
+};
+
+window.toggleIibbRateRowSelection = function(id) {
+    iibbRatesGrid.toggleRowSelection(id);
+    UIManager.renderSettings();
+};
+
+window.populateIibbActivitySelect = function(selectedActivityId = null) {
+    const select = document.getElementById('iibb-rate-activity');
+    if (!select) return;
+
+    const assignedActivities = appStore.economicActivities || [];
+    if (assignedActivities.length === 0) {
+        select.innerHTML = '<option value="" disabled selected>-- No hay actividades asignadas a la organización --</option>';
+        return false;
+    }
+
+    select.innerHTML = [
+        '<option value="" disabled>-- Seleccionar Actividad Asignada --</option>',
+        ...assignedActivities.map(a => `
+            <option value="${a.id}" ${selectedActivityId === a.id ? 'selected' : ''}>
+                ${a.arca_code || a.afip_code ? `[${a.arca_code || a.afip_code}] ` : ''}${a.name}
+            </option>
+        `)
+    ].join('');
+
+    if (selectedActivityId && assignedActivities.some(a => a.id === selectedActivityId)) {
+        select.value = selectedActivityId;
+    } else {
+        select.value = assignedActivities[0].id;
+    }
+    return true;
+};
+
+window.promptCreateIibbRateModal = function() {
+    const assignedActivities = appStore.economicActivities || [];
+    if (assignedActivities.length === 0) {
+        alert("No hay actividades económicas asignadas a la organización. Asigna al menos una actividad antes de crear una tasa IIBB.");
+        return;
+    }
+
+    const form = document.getElementById('form-iibb-rate');
+    if (form) {
+        form.reset();
+        delete form.dataset.editingId;
+    }
+
+    window.populateIibbActivitySelect();
+    UIManager.openModal('modal-iibb-rate');
+};
+
+window.promptEditIibbRateModal = function(id) {
+    const rate = (appStore.iibbRates || []).find(r => r.id === id);
+    if (!rate) return;
+
+    const form = document.getElementById('form-iibb-rate');
+    if (form) {
+        form.dataset.editingId = rate.id;
+    }
+
+    window.populateIibbActivitySelect(rate.activity_id);
+    document.getElementById('iibb-rate-jurisdiction').value = rate.jurisdiction || '';
+    document.getElementById('iibb-rate-percent').value = rate.rate_percent !== undefined ? rate.rate_percent : rate.rate;
+    document.getElementById('iibb-rate-from').value = rate.valid_from ? rate.valid_from.substring(0, 10) : '';
+
+    UIManager.openModal('modal-iibb-rate');
+};
+
+window.actionEditIibbRate = function() {
+    const ids = iibbRatesGrid.getSelectedIds();
+    if (ids.length !== 1) {
+        alert("Debes seleccionar exactamente 1 tasa IIBB para editar.");
+        return;
+    }
+    window.promptEditIibbRateModal(ids[0]);
+};
+
+window.actionCloneIibbRate = function() {
+    const ids = iibbRatesGrid.getSelectedIds();
+    if (ids.length !== 1) {
+        alert("Debes seleccionar exactamente 1 tasa IIBB para clonar.");
+        return;
+    }
+    const rate = (appStore.iibbRates || []).find(r => r.id === ids[0]);
+    if (!rate) return;
+
+    const form = document.getElementById('form-iibb-rate');
+    if (form) {
+        delete form.dataset.editingId; // Genera un nuevo registro sin reutilizar ID
+    }
+
+    window.populateIibbActivitySelect(rate.activity_id);
+    document.getElementById('iibb-rate-jurisdiction').value = rate.jurisdiction ? `${rate.jurisdiction} (Copia)` : '';
+    document.getElementById('iibb-rate-percent').value = rate.rate_percent !== undefined ? rate.rate_percent : rate.rate;
+    document.getElementById('iibb-rate-from').value = rate.valid_from ? rate.valid_from.substring(0, 10) : '';
+
+    UIManager.openModal('modal-iibb-rate');
+};
+
+window.actionToggleIibbRates = async function() {
+    const ids = iibbRatesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    try {
+        await appStore.bulkToggleIibbRates(ids);
+        iibbRatesGrid.clearSelection();
+        alert(`${ids.length} tasa(s) IIBB actualizadas.`);
+    } catch (err) {
+        alert("Error al actualizar tasas IIBB: " + err.message);
+    }
+};
+
+window.actionDeleteIibbRates = async function() {
+    const ids = iibbRatesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`¿Deseas desactivar ${ids.length} tasa(s) IIBB?`)) return;
+    try {
+        await appStore.bulkDeleteIibbRates(ids);
+        iibbRatesGrid.clearSelection();
+        alert(`${ids.length} tasa(s) IIBB desactivadas.`);
+    } catch (err) {
+        alert("Error al desactivar tasas IIBB: " + err.message);
     }
 };
 
 window.submitIibbRateForm = async () => {
-    const activityId = document.getElementById('iibb-rate-activity').value || null;
+    const select = document.getElementById('iibb-rate-activity');
+    const activityId = select ? select.value : null;
     const jurisdiction = document.getElementById('iibb-rate-jurisdiction').value;
     const ratePercent = parseFloat(document.getElementById('iibb-rate-percent').value);
     const validFrom = document.getElementById('iibb-rate-from').value;
+    const form = document.getElementById('form-iibb-rate');
+    const editingId = form ? form.dataset.editingId : null;
+
+    if (!activityId || String(activityId).trim() === '') {
+        alert("Debe seleccionar una Actividad Económica asignada.");
+        return;
+    }
 
     if (!jurisdiction || isNaN(ratePercent) || !validFrom) {
         alert("Completar todos los campos requeridos.");
@@ -2138,20 +2494,32 @@ window.submitIibbRateForm = async () => {
     }
 
     try {
-        await persistenceService.createIibbRate({
-            activity_id: activityId,
-            jurisdiction: jurisdiction,
-            rate_percent: ratePercent,
-            valid_from: validFrom,
-            valid_to: null,
-            is_active: true
-        });
-        alert("Tasa IIBB creada exitosamente.");
+        if (editingId) {
+            await appStore.updateIibbRate(editingId, {
+                rate_percent: ratePercent,
+                valid_from: validFrom,
+                valid_to: null,
+                is_active: true
+            });
+            alert("Tasa IIBB actualizada exitosamente.");
+        } else {
+            await appStore.createIibbRate({
+                activity_id: activityId,
+                jurisdiction: jurisdiction,
+                rate_percent: ratePercent,
+                valid_from: validFrom,
+                valid_to: null,
+                is_active: true
+            });
+            alert("Tasa IIBB creada exitosamente.");
+        }
         UIManager.closeModal('modal-iibb-rate');
-        document.getElementById('form-iibb-rate').reset();
-        appStore.loadIibbRates();
+        if (form) {
+            form.reset();
+            delete form.dataset.editingId;
+        }
     } catch (e) {
-        alert("Error al crear Tasa IIBB: " + e.message);
+        alert("Error al guardar Tasa IIBB: " + e.message);
     }
 };
 

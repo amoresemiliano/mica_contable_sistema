@@ -14,8 +14,10 @@ export class AppStore {
         this.taxCategories = [];
         this.economicActivities = []; // Actividades asignadas a la organización
         this.globalEconomicActivities = []; // Catálogo global ARCA (F883)
+        this.displayedEconomicActivities = []; // Lista mostrada según rol (global para SUPERADMIN, org para usuario)
         this.iibbRates = [];
         this.importIssues = [];
+        this.currentUserRole = 'ADMIN'; // 'SUPERADMIN', 'ADMIN', 'REVIEWER', 'UPLOADER', 'USER'
         
         const getLocalJSON = (key) => {
             if (typeof localStorage !== 'undefined' && localStorage.getItem) {
@@ -626,6 +628,213 @@ export class AppStore {
 
             return true;
         });
+    }
+
+    // --- MÓDULO CATEGORIZACIÓN & ROLES ---
+    setUserRole(role) {
+        this.currentUserRole = role || 'ADMIN';
+        this.notify();
+    }
+
+    isSuperAdmin() {
+        return this.currentUserRole === 'SUPERADMIN';
+    }
+
+    async loadTaxCategories() {
+        try {
+            if (this.isSuperAdmin()) {
+                const { data: globalCats, error: gErr } = await persistenceService.supabase
+                    .from('eco_tax_categories')
+                    .select('*')
+                    .order('name', { ascending: true });
+                if (gErr) throw gErr;
+
+                const { data: orgCats, error: oErr } = await persistenceService.supabase
+                    .from('eco_org_tax_categories')
+                    .select('category_id, is_active, organization_id')
+                    .eq('is_active', true);
+                if (oErr) throw oErr;
+
+                const activeCategoryIds = new Set((orgCats || []).map(o => o.category_id));
+
+                this.taxCategories = (globalCats || []).map(c => ({
+                    ...c,
+                    assignedState: activeCategoryIds.has(c.id) ? 'MICA' : '',
+                    isAssignedToOrg: activeCategoryIds.has(c.id)
+                }));
+            } else {
+                const activeOrgCats = await persistenceService.loadActiveTaxCategories();
+                this.taxCategories = (activeOrgCats || []).map(c => ({
+                    ...c,
+                    assignedState: '',
+                    isAssignedToOrg: true
+                }));
+            }
+            this.notify();
+        } catch (e) {
+            console.error("Failed to load tax categories:", e);
+        }
+    }
+
+    async loadEconomicActivities() {
+        try {
+            const globalActs = await persistenceService.loadGlobalEconomicActivities();
+            this.globalEconomicActivities = globalActs || [];
+
+            const activeOrgActs = await persistenceService.loadActiveEconomicActivities();
+            this.economicActivities = activeOrgActs || [];
+
+            const assignedActivityIds = new Set((activeOrgActs || []).map(a => a.id));
+
+            if (this.isSuperAdmin()) {
+                this.displayedEconomicActivities = (globalActs || []).map(a => ({
+                    ...a,
+                    assignedState: assignedActivityIds.has(a.id) ? 'MICA' : '',
+                    isAssignedToOrg: assignedActivityIds.has(a.id)
+                }));
+            } else {
+                this.displayedEconomicActivities = (activeOrgActs || []).map(a => ({
+                    ...a,
+                    assignedState: '',
+                    isAssignedToOrg: true
+                }));
+            }
+            this.notify();
+        } catch (e) {
+            console.error("Failed to load economic activities:", e);
+        }
+    }
+
+    async loadIibbRates() {
+        try {
+            const rates = await persistenceService.loadActiveIibbRates();
+            const activitiesMap = new Map();
+            (this.globalEconomicActivities || []).forEach(a => {
+                activitiesMap.set(a.id, a.name || a.arca_code || a.code);
+            });
+            (this.economicActivities || []).forEach(a => {
+                activitiesMap.set(a.id, a.name || a.arca_code);
+            });
+
+            this.iibbRates = (rates || []).map(r => ({
+                ...r,
+                rate_percent: r.rate !== undefined ? r.rate : r.rate_percent,
+                activity_name: activitiesMap.get(r.activity_id) || r.activity_name || (r.activity_id ? String(r.activity_id).substring(0, 8) : 'Desconocida')
+            }));
+            this.notify();
+        } catch (e) {
+            console.error("Failed to load IIBB rates:", e);
+        }
+    }
+
+    async loadIibbData() {
+        await this.loadEconomicActivities();
+        await this.loadIibbRates();
+    }
+
+    async createTaxCategory(payload) {
+        const res = await persistenceService.createTaxCategory(payload);
+        await this.loadTaxCategories();
+        return res;
+    }
+
+    async updateTaxCategory(categoryId, payload) {
+        await persistenceService.updateTaxCategory(categoryId, payload);
+        await this.loadTaxCategories();
+    }
+
+    async unassignTaxCategoryFromOrg(categoryId) {
+        await persistenceService.unassignTaxCategoryFromOrg(categoryId);
+        await this.loadTaxCategories();
+    }
+
+    async bulkUnassignTaxCategories(categoryIds) {
+        if (!Array.isArray(categoryIds) || categoryIds.length === 0) return;
+        for (const id of categoryIds) {
+            await persistenceService.unassignTaxCategoryFromOrg(id);
+        }
+        await this.loadTaxCategories();
+    }
+
+    async assignEconomicActivityToOrg(activityId) {
+        await persistenceService.assignEconomicActivityToOrg(activityId);
+        await this.loadEconomicActivities();
+    }
+
+    async unassignEconomicActivityFromOrg(activityId) {
+        await persistenceService.unassignEconomicActivityFromOrg(activityId);
+        await this.loadEconomicActivities();
+    }
+
+    async bulkAssignEconomicActivitiesToOrg(activityIds) {
+        if (!Array.isArray(activityIds) || activityIds.length === 0) return;
+        for (const id of activityIds) {
+            await persistenceService.assignEconomicActivityToOrg(id);
+        }
+        await this.loadEconomicActivities();
+    }
+
+    async bulkUnassignEconomicActivitiesFromOrg(activityIds) {
+        if (!Array.isArray(activityIds) || activityIds.length === 0) return;
+        for (const id of activityIds) {
+            await persistenceService.unassignEconomicActivityFromOrg(id);
+        }
+        await this.loadEconomicActivities();
+    }
+
+    async upsertArcaCatalog(activitiesJson) {
+        await persistenceService.upsertArcaCatalog(activitiesJson);
+        await this.loadEconomicActivities();
+    }
+
+    async createIibbRate(payload) {
+        if (!payload.activity_id || String(payload.activity_id).trim() === '') {
+            throw new Error('La Actividad Económica es obligatoria para la tasa IIBB.');
+        }
+
+        const validAssignedIds = new Set((this.economicActivities || []).map(a => a.id));
+        if (!validAssignedIds.has(payload.activity_id)) {
+            throw new Error('Activity ID is not assigned to this organization or is inactive');
+        }
+
+        const res = await persistenceService.createIibbRate(payload);
+        await this.loadIibbRates();
+        return res;
+    }
+
+    async updateIibbRate(rateId, payload) {
+        const res = await persistenceService.updateIibbRate(rateId, payload);
+        await this.loadIibbRates();
+        return res;
+    }
+
+    async bulkToggleIibbRates(rateIds) {
+        if (!Array.isArray(rateIds) || rateIds.length === 0) return;
+        for (const id of rateIds) {
+            const current = (this.iibbRates || []).find(r => r.id === id);
+            const nextActive = current ? !current.is_active : false;
+            await persistenceService.updateIibbRate(id, {
+                rate_percent: current ? current.rate_percent : 0,
+                valid_from: current ? current.valid_from : null,
+                valid_to: current ? current.valid_to : null,
+                is_active: nextActive
+            });
+        }
+        await this.loadIibbRates();
+    }
+
+    async bulkDeleteIibbRates(rateIds) {
+        if (!Array.isArray(rateIds) || rateIds.length === 0) return;
+        for (const id of rateIds) {
+            const current = (this.iibbRates || []).find(r => r.id === id);
+            await persistenceService.updateIibbRate(id, {
+                rate_percent: current ? current.rate_percent : 0,
+                valid_from: current ? current.valid_from : null,
+                valid_to: current ? current.valid_to : null,
+                is_active: false
+            });
+        }
+        await this.loadIibbRates();
     }
 }
 
