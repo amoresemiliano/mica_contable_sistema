@@ -271,4 +271,92 @@ describe('Operational Grid System Tests', () => {
             expect(res.map(i => i.id)).toEqual(['b1', 'b3']);
         });
     });
+
+    describe('Clasificación y Filtrado con Forma Real de Objetos DEV Supabase', () => {
+        // En DEV Supabase, tanto débitos como créditos tienen monto POSITIVO (e.g. monto: 1073.43 para débito y monto: 347000 para crédito).
+        // La dirección del movimiento se determina primordialmente por el campo `tipo` ('debit' vs 'credit').
+        const realDevBankItems = [
+            { id: 'd1', fecha: '29-05-2026', fechaValor: '29-05-2026', descripcion: 'SELLADO', referencia: '030', monto: 1073.43, saldo: -10860159.05, tipo: 'debit' },
+            { id: 'd2', fecha: '29-05-2026', fechaValor: '29-05-2026', descripcion: 'INT.COB.ACUE', referencia: '122', monto: 32285.88, saldo: null, tipo: 'debit' },
+            { id: 'c1', fecha: '21-05-2026', fechaValor: '21-05-2026', descripcion: 'TRANSF.BANEL 30715507419', referencia: 'CTE 30715507419', monto: 347000, tipo: 'credit' },
+            { id: 'c2', fecha: '20-05-2026', fechaValor: '20-05-2026', descripcion: 'DNET CREDITO NE4023944', referencia: 'CTE 023944', monto: 1300000, tipo: 'credit' },
+            { id: 'd3', fecha: '30-06-2026', fechaValor: '30-06-2026', descripcion: 'PAGO COMISION JUNIO', referencia: '999', monto: 500, tipo: 'debit' },
+            { id: 'c3', fecha: '15-06-2026', fechaValor: '15-06-2026', descripcion: 'ACREDITACION JUNIO', referencia: '888', monto: 75000, tipo: 'credit' },
+            { id: 'u1', fecha: '10-06-2026', fechaValor: '10-06-2026', descripcion: 'MOVIMIENTO MONTO CERO SIN TIPO', referencia: '000', monto: 0 } // Desconocido/Ambiguo
+        ];
+
+        let bankGrid;
+        const extractor = {
+            fecha: t => t.fecha,
+            descripcion: t => t.descripcion,
+            monto: t => t.monto
+        };
+
+        beforeEach(() => {
+            bankGrid = new OperationalGrid({
+                moduleId: 'extractos',
+                defaultColumns: ['fecha', 'descripcion', 'monto', 'tipo'],
+                searchFields: ['descripcion'],
+                dateField: 'fecha',
+                amountField: 'monto'
+            });
+        });
+
+        test('No period + Créditos -> sólo movimientos de crédito reales (monto positivo con tipo credit)', () => {
+            bankGrid.clearPeriod();
+            bankGrid.setPrimaryFilter('creditos');
+            const res = bankGrid.filterAndSort(realDevBankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['c1', 'c2', 'c3']);
+        });
+
+        test('No period + Débitos -> sólo movimientos de débito reales (monto positivo con tipo debit)', () => {
+            bankGrid.clearPeriod();
+            bankGrid.setPrimaryFilter('debitos');
+            const res = bankGrid.filterAndSort(realDevBankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['d1', 'd2', 'd3']);
+        });
+
+        test('June + Créditos -> sólo movimientos de crédito reales de Junio 2026', () => {
+            bankGrid.setPeriod('2026-06');
+            bankGrid.setPrimaryFilter('creditos');
+            const res = bankGrid.filterAndSort(realDevBankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['c3']);
+        });
+
+        test('June + Débitos -> sólo movimientos de débito reales de Junio 2026', () => {
+            bankGrid.setPeriod('2026-06');
+            bankGrid.setPrimaryFilter('debitos');
+            const res = bankGrid.filterAndSort(realDevBankItems, extractor);
+            expect(res.map(i => i.id)).toEqual(['d3']);
+        });
+
+        test('Disyunción perfecta (no overlap) y suma exactitud con Todos para items conocidos', () => {
+            bankGrid.setPeriod('2026-05');
+
+            bankGrid.setPrimaryFilter('all');
+            const allMay = bankGrid.filterAndSort(realDevBankItems, extractor);
+
+            bankGrid.setPrimaryFilter('debitos');
+            const debitsMay = bankGrid.filterAndSort(realDevBankItems, extractor);
+
+            bankGrid.setPrimaryFilter('creditos');
+            const creditsMay = bankGrid.filterAndSort(realDevBankItems, extractor);
+
+            // Intersección = 0
+            const debitIds = new Set(debitsMay.map(i => i.id));
+            const creditIds = new Set(creditsMay.map(i => i.id));
+            const intersection = [...debitIds].filter(id => creditIds.has(id));
+            expect(intersection.length).toBe(0);
+
+            // Suma de resultados = Todos (en mayo sólo hay items conocidos d1, d2, c1, c2)
+            expect(debitsMay.length + creditsMay.length).toBe(allMay.length);
+        });
+
+        test('Monto cero sin tipo no se clasifica como crédito por defecto (unknown/ambiguous)', () => {
+            const zeroItem = { monto: 0 };
+            expect(bankGrid.getItemMovementDirection(zeroItem)).toBe('unknown');
+            expect(bankGrid.isItemDebit(zeroItem)).toBe(false);
+            expect(bankGrid.isItemCredit(zeroItem)).toBe(false);
+        });
+    });
 });

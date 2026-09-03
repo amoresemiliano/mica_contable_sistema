@@ -177,44 +177,44 @@ export class OperationalGrid {
         return '';
     }
 
-    isItemDebit(item, customFieldExtractor = {}) {
-        const rawAmt = customFieldExtractor[this.amountField]
-            ? customFieldExtractor[this.amountField](item)
-            : (item[this.amountField] !== undefined ? item[this.amountField] : (item.monto !== undefined ? item.monto : (item.importe !== undefined ? item.importe : (item.total !== undefined ? item.total : item.amount))));
-        
-        const numAmt = typeof rawAmt === 'number' ? rawAmt : parseFloat(rawAmt);
-        if (!isNaN(numAmt) && numAmt < 0) {
-            return true;
-        }
+    getItemMovementDirection(item) {
+        if (!item) return 'unknown';
 
-        const rawType = String(item.tipo || item.type || item.movement_type || item.movementType || '').toLowerCase().trim();
+        // 1. Precedencia 1: Tipo explícito de movimiento si está presente
+        const rawType = String(
+            item.tipo || item.type || item.movement_type || item.movementType || ''
+        ).toLowerCase().trim();
+
         if (rawType === 'debit' || rawType === 'debito') {
-            return true;
+            return 'debit';
+        }
+        if (rawType === 'credit' || rawType === 'credito') {
+            return 'credit';
         }
 
-        return false;
+        // 2. Precedencia 2: Sólo si el tipo está ausente/desconocido, inferir del monto numérico con signo
+        const rawAmt = item[this.amountField] !== undefined
+            ? item[this.amountField]
+            : (item.monto !== undefined ? item.monto : (item.importe !== undefined ? item.importe : (item.total !== undefined ? item.total : item.amount)));
+
+        if (rawAmt !== undefined && rawAmt !== null && rawAmt !== '') {
+            const numAmt = typeof rawAmt === 'number' ? rawAmt : parseFloat(rawAmt);
+            if (!isNaN(numAmt)) {
+                if (numAmt < 0) return 'debit';
+                if (numAmt > 0) return 'credit';
+            }
+        }
+
+        // Movimiento ambiguo/desconocido (o monto === 0 sin tipo): ni débito ni crédito
+        return 'unknown';
+    }
+
+    isItemDebit(item, customFieldExtractor = {}) {
+        return this.getItemMovementDirection(item) === 'debit';
     }
 
     isItemCredit(item, customFieldExtractor = {}) {
-        const rawAmt = customFieldExtractor[this.amountField]
-            ? customFieldExtractor[this.amountField](item)
-            : (item[this.amountField] !== undefined ? item[this.amountField] : (item.monto !== undefined ? item.monto : (item.importe !== undefined ? item.importe : (item.total !== undefined ? item.total : item.amount))));
-        
-        const numAmt = typeof rawAmt === 'number' ? rawAmt : parseFloat(rawAmt);
-        if (!isNaN(numAmt) && numAmt > 0) {
-            return true;
-        }
-
-        const rawType = String(item.tipo || item.type || item.movement_type || item.movementType || '').toLowerCase().trim();
-        if (rawType === 'credit' || rawType === 'credito') {
-            return true;
-        }
-
-        if (!isNaN(numAmt) && numAmt === 0 && !this.isItemDebit(item, customFieldExtractor)) {
-            return true;
-        }
-
-        return false;
+        return this.getItemMovementDirection(item) === 'credit';
     }
 
     // --- Procesamiento de Colección (Filtrar + Ordenar) ---
