@@ -19,8 +19,8 @@ La recuperación crea registros dedicados en `eco_source_imports`:
 ## Invariantes Preservados
 1. **Inmutabilidad Histórica**: Los registros de importación inicial y reintento (`881859f6...`, `a1ea483b...`, `8a6ca4d8...`, `b6024ac0...`), contadores históricos (`71/13` y `59/19`), archivos fuente (`eco_source_files`) e incidentes (`eco_import_issues`) permanecen **100% inalterados**.
 2. **Sin Cambios de Esquema ni Migración**: No se modifica la Migración 016 ni 014, ni se crea una Migración 017.
-3. **Control Tenant-Scoped**: Precondiciones, consultas y deduplicación están estrictamente filtradas por `organization_id = v_org_id`.
-4. **Idempotencia Garantizada**: Cada fila a recuperar verifica su `identity_key` en `eco_financial_movements` para el tenant. Ejecuciones subsecuentes insertan 0 filas sin alterar los totales.
+3. **Control Tenant-Scoped y Fuente BBVA**: Precondiciones, consultas de aserción final y deduplicación están estrictamente filtradas por `organization_id = v_org_id` y `source_type = 'BANK_STATEMENT_BBVA'`.
+4. **Seguridad y Precondición Estricta (One-Off)**: Al ser un script de ejecución puntual (One-Off), la primera ejecución incrementa la base de 130 a 154 movimientos. Una eventual segunda ejecución en un entorno ya persistido **aborta de forma segura en la verificación de precondición** (`baseline expected May=71, June=59, Total=130`), evitando inserciones duplicadas (0 movimientos insertados).
 
 ## Estrategia de Recuperación
 El script `scripts/recovery/2026-09-bbva-credit-recovery.sql`:

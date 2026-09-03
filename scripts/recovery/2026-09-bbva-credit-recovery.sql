@@ -186,18 +186,26 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- 6. Final Assertions Verification (Tenant-Scoped)
+    -- 6. Final Assertions Verification (Tenant-Scoped & BBVA Source Scoped)
     SELECT count(*) INTO v_final_may 
     FROM public.eco_financial_movements 
-    WHERE organization_id = v_org_id AND fecha >= '2026-05-01' AND fecha <= '2026-05-31' AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id 
+      AND source_type = 'BANK_STATEMENT_BBVA'
+      AND fecha >= '2026-05-01' AND fecha <= '2026-05-31' 
+      AND deleted_at IS NULL;
 
     SELECT count(*) INTO v_final_june 
     FROM public.eco_financial_movements 
-    WHERE organization_id = v_org_id AND fecha >= '2026-06-01' AND fecha <= '2026-06-30' AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id 
+      AND source_type = 'BANK_STATEMENT_BBVA'
+      AND fecha >= '2026-06-01' AND fecha <= '2026-06-30' 
+      AND deleted_at IS NULL;
 
     SELECT count(*) INTO v_final_total 
     FROM public.eco_financial_movements 
-    WHERE organization_id = v_org_id AND source_type = 'BANK_STATEMENT_BBVA' AND deleted_at IS NULL;
+    WHERE organization_id = v_org_id 
+      AND source_type = 'BANK_STATEMENT_BBVA' 
+      AND deleted_at IS NULL;
 
     RAISE NOTICE 'POST-RECOVERY ASSERTION: Inserted May=%, Inserted June=%. Final May=% (expected 80), Final June=% (expected 74), Final Total=% (expected 154)',
         v_inserted_may, v_inserted_june, v_final_may, v_final_june, v_final_total;
