@@ -1795,6 +1795,7 @@ export class UIManager {
 
         const rawTxs = appStore.bankTransactions || [];
         const transactions = bancosGrid.filterAndSort(rawTxs, {
+            fecha: t => t.fecha || t.fechaValor || '',
             descripcion: t => t.descripcion || t.concepto || '',
             monto: t => t.monto || t.amount || 0
         });

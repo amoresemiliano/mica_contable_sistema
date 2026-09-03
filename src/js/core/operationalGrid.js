@@ -149,6 +149,34 @@ export class OperationalGrid {
         this.selectedRowIds.clear();
     }
 
+    parseToIsoDate(rawDate) {
+        if (!rawDate) return '';
+        if (rawDate instanceof Date) {
+            const y = rawDate.getFullYear();
+            const m = String(rawDate.getMonth() + 1).padStart(2, '0');
+            const d = String(rawDate.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+        const str = String(rawDate).trim();
+        if (!str) return '';
+
+        // Coincide con YYYY-MM-DD o YYYY/MM/DD (comienza con 4 dígitos de año)
+        const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if (ymdMatch) {
+            const [, y, m, d] = ymdMatch;
+            return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        }
+
+        // Coincide con DD-MM-YYYY o DD/MM/YYYY (comienza con 1-2 dígitos de día, año de 4 dígitos al final)
+        const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+        if (dmyMatch) {
+            const [, d, m, y] = dmyMatch;
+            return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+        }
+
+        return '';
+    }
+
     // --- Procesamiento de Colección (Filtrar + Ordenar) ---
     filterAndSort(items, customFieldExtractor = {}) {
         if (!Array.isArray(items)) return [];
@@ -168,23 +196,14 @@ export class OperationalGrid {
 
             // 2. Filtro por Fecha (Modo Mes YYYY-MM o Rango Personalizado YYYY-MM-DD)
             const rawDate = customFieldExtractor[this.dateField] ? customFieldExtractor[this.dateField](item) : item[this.dateField];
-            if (rawDate) {
-                let isoDate = '';
-                if (rawDate.includes('-')) {
-                    isoDate = rawDate.substring(0, 10);
-                } else if (rawDate.includes('/')) {
-                    const parts = rawDate.split('/');
-                    if (parts.length === 3) {
-                        isoDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-                    }
-                }
-
+            const isoDate = this.parseToIsoDate(rawDate);
+            if (isoDate) {
                 if (this.dateMode === 'custom') {
                     if (this.startDate && isoDate < this.startDate) return false;
                     if (this.endDate && isoDate > this.endDate) return false;
                 } else if (this.periodFilter) {
-                    const ym = isoDate ? isoDate.substring(0, 7) : '';
-                    if (ym && ym !== this.periodFilter) return false;
+                    const ym = isoDate.substring(0, 7);
+                    if (ym !== this.periodFilter) return false;
                 }
             } else if (this.periodFilter || (this.dateMode === 'custom' && (this.startDate || this.endDate))) {
                 return false;

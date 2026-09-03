@@ -114,4 +114,55 @@ describe('Operational Grid System Tests', () => {
         expect(grid.selectedRowIds.has('1')).toBe(false);
         expect(grid.selectedRowIds.has('3')).toBe(false);
     });
+
+    describe('Filtros de fecha robustos para Extractos Bancarios', () => {
+        const bankItems = [
+            { id: 'b1', fecha: '2026-06-01', descripcion: 'Depósito inicio junio', monto: 1000, tipo: 'credit' },
+            { id: 'b2', fecha: '30-06-2026', descripcion: 'Transf fin junio DD-MM-YYYY', monto: -500, tipo: 'debit' },
+            { id: 'b3', fecha: '15/06/2026', descripcion: 'Cobro medio junio DD/MM/YYYY', monto: 2000, tipo: 'credit' },
+            { id: 'b4', fecha: '2026-05-31', descripcion: 'Fin de mayo ISO', monto: -100, tipo: 'debit' },
+            { id: 'b5', fecha: '15-05-2026', descripcion: 'Medio de mayo DD-MM-YYYY', monto: 300, tipo: 'credit' },
+            { id: 'b6', fecha: '2025-06-15', descripcion: 'Junio del año anterior', monto: 400, tipo: 'credit' }
+        ];
+
+        let bankGrid;
+        beforeEach(() => {
+            bankGrid = new OperationalGrid({
+                moduleId: 'extractos',
+                defaultColumns: ['fecha', 'descripcion', 'monto', 'tipo'],
+                searchFields: ['descripcion']
+            });
+        });
+
+        test('filtrar por Junio 2026 incluye movimientos 2026-06-01, 30-06-2026 y 15/06/2026', () => {
+            bankGrid.setPeriod('2026-06');
+            const res = bankGrid.filterAndSort(bankItems);
+            expect(res.map(i => i.id)).toEqual(['b1', 'b2', 'b3']);
+        });
+
+        test('filtrar por Mayo 2026 incluye movimientos de mayo y excluye junio', () => {
+            bankGrid.setPeriod('2026-05');
+            const res = bankGrid.filterAndSort(bankItems);
+            expect(res.map(i => i.id)).toEqual(['b4', 'b5']);
+        });
+
+        test('filtrar por rango de fecha personalizado (límites 2026-06-01 a 2026-06-30)', () => {
+            bankGrid.setCustomRange('2026-06-01', '2026-06-30');
+            const res = bankGrid.filterAndSort(bankItems);
+            expect(res.map(i => i.id)).toEqual(['b1', 'b2', 'b3']);
+        });
+
+        test('sin período seleccionado (clearPeriod) devuelve todos los movimientos', () => {
+            bankGrid.setPeriod('2026-06');
+            expect(bankGrid.filterAndSort(bankItems).length).toBe(3);
+            bankGrid.clearPeriod();
+            expect(bankGrid.filterAndSort(bankItems).length).toBe(6);
+        });
+
+        test('diferencia correctamente años (2025-06 vs 2026-06)', () => {
+            bankGrid.setPeriod('2025-06');
+            const res = bankGrid.filterAndSort(bankItems);
+            expect(res.map(i => i.id)).toEqual(['b6']);
+        });
+    });
 });
