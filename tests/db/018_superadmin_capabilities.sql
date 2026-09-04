@@ -1,7 +1,7 @@
 -- Verification script for Migration 018 (SUPERADMIN Operational Capability Inheritance)
 BEGIN;
 
--- 1. Check all target RPC definitions for SUPERADMIN authorization
+-- 1. Check all 20 target RPC definitions for SUPERADMIN authorization
 DO $$
 DECLARE
   v_procname TEXT;
@@ -45,7 +45,25 @@ BEGIN
   END LOOP;
 END $$;
 
--- 2. Verify RLS remains enabled on all multitenant tables
+-- 2. Verify specific contract preservation rules
+DO $$
+DECLARE
+  v_def TEXT;
+BEGIN
+  -- persist_import_batch validation checks
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'persist_import_batch';
+  IF v_def NOT LIKE '%255%' OR v_def NOT LIKE '%20971520%' THEN
+    RAISE EXCEPTION 'Verification FAILED: persist_import_batch lost filename length (255) or file size (20MB) validations';
+  END IF;
+
+  -- persist_financial_movements_batch retry contract check
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'persist_financial_movements_batch';
+  IF v_def NOT LIKE '%retry_of_import_id%' THEN
+    RAISE EXCEPTION 'Verification FAILED: persist_financial_movements_batch lost M016 retry contract';
+  END IF;
+END $$;
+
+-- 3. Verify RLS remains enabled on all multitenant tables
 SELECT tablename, rowsecurity
 FROM pg_tables
 WHERE schemaname = 'public'
