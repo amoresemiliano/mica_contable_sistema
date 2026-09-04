@@ -78,7 +78,7 @@ BEGIN
 
   SELECT id INTO v_caller_id
   FROM public.eco_user_profiles
-  WHERE firebase_uid = auth.jwt()->>'sub' AND is_active = TRUE;
+  WHERE auth_user_id = auth.uid() AND is_active = TRUE;
 
   IF v_caller_id IS NULL THEN
     RAISE EXCEPTION 'User profile not found or inactive';
@@ -88,8 +88,12 @@ BEGIN
   SET organization_id = p_org_id
   WHERE id = v_caller_id;
 
-  INSERT INTO public.eco_audit_events (organization_id, event_type)
-  VALUES (COALESCE(p_org_id, (SELECT id FROM public.eco_organizations WHERE name = 'DEMO NORTE' LIMIT 1)), 'SUPERADMIN_ORG_CONTEXT_SWITCHED');
+  -- Note: eco_audit_events.organization_id is NOT NULL. When switching to global mode (p_org_id IS NULL),
+  -- no tenant-scoped audit record is written to avoid attributing global system events to a fake tenant organization.
+  IF p_org_id IS NOT NULL THEN
+    INSERT INTO public.eco_audit_events (organization_id, event_type)
+    VALUES (p_org_id, 'SUPERADMIN_ORG_CONTEXT_SWITCHED');
+  END IF;
 END;
 $$;
 
@@ -100,6 +104,11 @@ GRANT EXECUTE ON FUNCTION public.switch_superadmin_org_context(UUID) TO authenti
 -- ============================================================
 -- 4. RPCS DE ASIGNACIÓN/DESASIGNACIÓN CON CONTEXTO TARGET ORGANIZACIÓN
 -- ============================================================
+
+DROP FUNCTION IF EXISTS public.assign_tax_category_to_org(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.unassign_tax_category_from_org(UUID);
+DROP FUNCTION IF EXISTS public.assign_economic_activity_to_org(UUID);
+DROP FUNCTION IF EXISTS public.unassign_economic_activity_from_org(UUID);
 
 CREATE OR REPLACE FUNCTION public.assign_tax_category_to_org(
   p_category_id UUID,

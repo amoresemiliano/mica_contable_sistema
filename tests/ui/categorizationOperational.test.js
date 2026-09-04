@@ -232,3 +232,95 @@ describe('Multitenant Organization Context & Categorization Isolation Matrix', (
         expect(assignedOrgs.includes('MICA')).toBe(false);
     });
 });
+
+describe('M017 Auth & Multitenant Security Adversarial Verification', () => {
+
+    test('Zero references to firebase_uid, firebase, or auth.jwt in M017 migration file', async () => {
+        const fs = await import('fs');
+        const path = await import('path');
+        const m017Path = path.join(process.cwd(), 'sql', '017_multitenant_superadmin_context.sql');
+        const content = fs.readFileSync(m017Path, 'utf8');
+
+        expect(content).not.toContain('firebase_uid');
+        expect(content).not.toContain('firebase');
+        expect(content).not.toContain('auth.jwt');
+        expect(content).toContain('auth_user_id = auth.uid()');
+    });
+
+    test('SUPERADMIN can switch to DEMO NORTE/SUR/OESTE and return to GLOBAL MICA mode', async () => {
+        const { appStore } = await import('../../src/js/store.js');
+        appStore.setUserRole('SUPERADMIN');
+
+        // Switch to DEMO NORTE
+        await appStore.switchOrganizationContext('demo-norte-id');
+        expect(appStore.activeOrganizationId).toBe('demo-norte-id');
+        expect(appStore.isGlobalMicaMode()).toBe(false);
+
+        // Switch to DEMO SUR
+        await appStore.switchOrganizationContext('demo-sur-id');
+        expect(appStore.activeOrganizationId).toBe('demo-sur-id');
+        expect(appStore.isGlobalMicaMode()).toBe(false);
+
+        // Switch to DEMO OESTE
+        await appStore.switchOrganizationContext('demo-oeste-id');
+        expect(appStore.activeOrganizationId).toBe('demo-oeste-id');
+        expect(appStore.isGlobalMicaMode()).toBe(false);
+
+        // Return to GLOBAL MICA mode
+        await appStore.switchOrganizationContext(null);
+        expect(appStore.activeOrganizationId).toBeNull();
+        expect(appStore.isGlobalMicaMode()).toBe(true);
+        expect(appStore.getActiveOrganizationName()).toBe('MICA (Modo Global)');
+    });
+
+    test('ADMIN role cannot switch organization context (clears active org)', async () => {
+        const { appStore } = await import('../../src/js/store.js');
+        appStore.setUserRole('ADMIN');
+        expect(appStore.isSuperAdmin()).toBe(false);
+        expect(appStore.activeOrganizationId).toBeNull();
+        expect(appStore.isGlobalMicaMode()).toBe(false);
+    });
+
+    test('USER role cannot switch organization context (clears active org)', async () => {
+        const { appStore } = await import('../../src/js/store.js');
+        appStore.setUserRole('USER');
+        expect(appStore.isSuperAdmin()).toBe(false);
+        expect(appStore.activeOrganizationId).toBeNull();
+    });
+
+    test('GLOBAL MICA mode does not become DEMO NORTE', async () => {
+        const { appStore } = await import('../../src/js/store.js');
+        appStore.setUserRole('SUPERADMIN');
+        await appStore.switchOrganizationContext(null);
+
+        expect(appStore.getActiveOrganizationName()).not.toBe('DEMO NORTE');
+        expect(appStore.getActiveOrganizationName()).toBe('MICA (Modo Global)');
+    });
+
+    test('Preflight SQL check verifies auth_user_id and forbids firebase_uid', async () => {
+        const fs = await import('fs');
+        const path = await import('path');
+        const preflightPath = path.join(process.cwd(), 'sql', '017_preflight_check.sql');
+        const content = fs.readFileSync(preflightPath, 'utf8');
+
+        expect(content).toContain('auth_user_id');
+        expect(content).toContain('firebase_uid MUST NOT exist');
+        expect(content).toContain('private.org_id()');
+        expect(content).toContain('private.func_role()');
+        expect(content).toContain('auth.uid()');
+    });
+
+    test('Down migration restores pre-017 RPC contracts and RLS policies', async () => {
+        const fs = await import('fs');
+        const path = await import('path');
+        const downPath = path.join(process.cwd(), 'sql', '017_multitenant_superadmin_context_down.sql');
+        const content = fs.readFileSync(downPath, 'utf8');
+
+        expect(content).toContain('DROP FUNCTION IF EXISTS public.switch_superadmin_org_context(UUID);');
+        expect(content).toContain('assign_tax_category_to_org');
+        expect(content).toContain('unassign_tax_category_from_org');
+        expect(content).toContain('assign_economic_activity_to_org');
+        expect(content).toContain('unassign_economic_activity_from_org');
+    });
+});
+
