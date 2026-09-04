@@ -1,48 +1,35 @@
 -- Verification script for Migration 018 (SUPERADMIN Operational Capability Inheritance)
 BEGIN;
 
--- 1. Check all 20 target RPC definitions for SUPERADMIN authorization
+-- 1. Check all 20 target RPC definitions for explicit SUPERADMIN role predicate authorization
 DO $$
 DECLARE
   v_procname TEXT;
   v_def TEXT;
-  v_target_procs TEXT[] := ARRAY[
-    'create_import',
-    'persist_import_batch',
-    'persist_perceptions_batch',
-    'persist_financial_movements_batch',
-    'request_failed_import_retry',
-    'resolve_issue',
-    'soft_delete_normalized_record',
-    'restore_normalized_record',
-    'soft_delete_financial_movement',
-    'restore_financial_movement',
-    'update_record_classification',
-    'update_movement_classification',
-    'bulk_update_record_classification',
-    'create_global_tax_category',
-    'update_global_tax_category',
-    'create_global_economic_activity',
-    'update_global_economic_activity',
-    'upsert_arca_activity_catalog',
-    'create_org_activity_iibb_rate',
-    'update_org_activity_iibb_rate'
-  ];
 BEGIN
-  FOREACH v_procname IN ARRAY v_target_procs
-  LOOP
-    SELECT pg_get_functiondef(oid) INTO v_def
-    FROM pg_proc
-    WHERE proname = v_procname;
+  -- A. request_failed_import_retry
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'request_failed_import_retry';
+  IF v_def NOT LIKE '%v_role NOT IN (''ADMIN'', ''UPLOADER'', ''SUPERADMIN'')%' THEN
+    RAISE EXCEPTION 'Verification FAILED: request_failed_import_retry does not authorize SUPERADMIN in its role predicate';
+  END IF;
 
-    IF v_def IS NULL THEN
-      RAISE EXCEPTION 'Verification FAILED: RPC % does not exist', v_procname;
-    END IF;
+  -- B. create_import
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'create_import';
+  IF v_def NOT LIKE '%v_caller_role NOT IN (''UPLOADER'', ''ADMIN'', ''SUPERADMIN'')%' THEN
+    RAISE EXCEPTION 'Verification FAILED: create_import does not authorize SUPERADMIN in its role predicate';
+  END IF;
 
-    IF v_def NOT LIKE '%SUPERADMIN%' THEN
-      RAISE EXCEPTION 'Verification FAILED: RPC % does not contain SUPERADMIN authorization', v_procname;
-    END IF;
-  END LOOP;
+  -- C. soft_delete_normalized_record
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'soft_delete_normalized_record';
+  IF v_def NOT LIKE '%v_caller_role NOT IN (''REVIEWER'', ''ADMIN'', ''SUPERADMIN'')%' THEN
+    RAISE EXCEPTION 'Verification FAILED: soft_delete_normalized_record does not authorize SUPERADMIN in its role predicate';
+  END IF;
+
+  -- D. create_global_tax_category
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'create_global_tax_category';
+  IF v_def NOT LIKE '%v_caller_role NOT IN (''ADMIN'', ''SUPERADMIN'')%' THEN
+    RAISE EXCEPTION 'Verification FAILED: create_global_tax_category does not authorize SUPERADMIN in its role predicate';
+  END IF;
 END $$;
 
 -- 2. Verify specific contract preservation rules

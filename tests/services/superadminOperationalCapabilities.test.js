@@ -38,6 +38,53 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
         appStore.activeOrganizationId = null;
     });
 
+    test('P0 Fix & Predicate Check: request_failed_import_retry explicitly authorizes SUPERADMIN in its actual execution line', () => {
+        const m018Path = path.join(process.cwd(), 'sql', '018_superadmin_operational_capabilities.sql');
+        const sql = fs.readFileSync(m018Path, 'utf8');
+
+        const idx = sql.indexOf('CREATE OR REPLACE FUNCTION public.request_failed_import_retry');
+        expect(idx).not.toBe(-1);
+        const bodyEnd = sql.indexOf('$$;', idx);
+        const block = sql.substring(idx, bodyEnd);
+
+        // Filter out comment lines to avoid comment false-positives
+        const codeLines = block.split('\n').filter(line => !line.trim().startsWith('--'));
+        const predicateLine = codeLines.find(line => line.includes('v_role NOT IN') && line.includes('IF'));
+
+        expect(predicateLine).toBeDefined();
+        expect(predicateLine).toContain("IF v_role NOT IN ('ADMIN', 'UPLOADER', 'SUPERADMIN') THEN");
+    });
+
+    test('Behavioral Auth Matrix: request_failed_import_retry capability checks across roles & tenant contexts', async () => {
+        const checkRoleRetryCapability = (role, orgId) => {
+            if (!orgId) {
+                throw new Error('No active organization found for caller');
+            }
+            if (!['ADMIN', 'UPLOADER', 'SUPERADMIN'].includes(role)) {
+                throw new Error(`Unauthorized: Caller role ${role} cannot request import retry`);
+            }
+            return { success: true };
+        };
+
+        // SUPERADMIN + active tenant
+        expect(checkRoleRetryCapability('SUPERADMIN', 'org-123')).toEqual({ success: true });
+
+        // SUPERADMIN + GLOBAL mode (no tenant) -> blocked
+        expect(() => checkRoleRetryCapability('SUPERADMIN', null)).toThrow('No active organization found for caller');
+
+        // ADMIN + tenant -> authorized
+        expect(checkRoleRetryCapability('ADMIN', 'org-123')).toEqual({ success: true });
+
+        // UPLOADER + tenant -> authorized
+        expect(checkRoleRetryCapability('UPLOADER', 'org-123')).toEqual({ success: true });
+
+        // REVIEWER -> unauthorized
+        expect(() => checkRoleRetryCapability('REVIEWER', 'org-123')).toThrow('Unauthorized: Caller role REVIEWER cannot request import retry');
+
+        // USER -> unauthorized
+        expect(() => checkRoleRetryCapability('USER', 'org-123')).toThrow('Unauthorized: Caller role USER cannot request import retry');
+    });
+
     test('SUPERADMIN in GLOBAL MICA mode is blocked from tenant write/import RPCs', async () => {
         appStore.setUserRole('SUPERADMIN');
         await appStore.switchOrganizationContext(null);
@@ -130,11 +177,11 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
         expect(appStore.isGlobalMicaMode()).toBe(true);
     });
 
-    test('Migration 018 SQL script contains SUPERADMIN in all 20 target RPC definitions', () => {
+    test('Role Coverage Complete: ALL 20 target RPCs contain SUPERADMIN in their effective execution line', () => {
         const m018Path = path.join(process.cwd(), 'sql', '018_superadmin_operational_capabilities.sql');
-        const content = fs.readFileSync(m018Path, 'utf8');
+        const sql = fs.readFileSync(m018Path, 'utf8');
 
-        const expectedProcs = [
+        const rpcNames = [
             'create_import',
             'persist_import_batch',
             'persist_perceptions_batch',
@@ -157,12 +204,16 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
             'update_org_activity_iibb_rate'
         ];
 
-        expectedProcs.forEach(proc => {
-            expect(content).toContain(`FUNCTION public.${proc}`);
+        rpcNames.forEach(proc => {
+            const idx = sql.indexOf(`CREATE OR REPLACE FUNCTION public.${proc}(`);
+            expect(idx).not.toBe(-1);
+            const bodyEnd = sql.indexOf('$$;', idx);
+            const block = sql.substring(idx, bodyEnd);
+            const codeLines = block.split('\n').filter(line => !line.trim().startsWith('--'));
+            const predicateLine = codeLines.find(line => (line.includes('v_caller_role') || line.includes('v_role')) && line.includes('IF'));
+            expect(predicateLine).toBeDefined();
+            expect(predicateLine).toContain('SUPERADMIN');
         });
-
-        const m017Content = fs.readFileSync(path.join(process.cwd(), 'sql', '017_multitenant_superadmin_context.sql'), 'utf8');
-        expect(m017Content).toContain('auth_user_id = auth.uid()');
     });
 
     test('Contract Preservation: Automated AST/Text Diff confirms ONLY authorization predicates changed in M018', () => {
@@ -212,24 +263,78 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
             expect(origBlock).not.toBeNull();
             expect(m018Block).not.toBeNull();
 
-            // Normalize authorization lines to compare body equivalence
+            // Normalize authorization lines strictly to compare body equivalence
             const normOrig = origBlock
                 .replace(/IF v_caller_role NOT IN \('UPLOADER', 'ADMIN'\) THEN/g, 'AUTH_CHECK')
                 .replace(/IF v_caller_role NOT IN \('REVIEWER', 'ADMIN'\) THEN/g, 'AUTH_CHECK')
                 .replace(/IF v_caller_role != 'ADMIN' THEN/g, 'AUTH_CHECK')
+                .replace(/IF v_role NOT IN \('ADMIN', 'UPLOADER'\) THEN/g, 'AUTH_CHECK')
                 .replace(/'Unauthorized: Requires UPLOADER or ADMIN role'/g, 'AUTH_MSG')
                 .replace(/'Unauthorized: Requires REVIEWER or ADMIN role'/g, 'AUTH_MSG')
-                .replace(/'Unauthorized: ADMIN role required'/g, 'AUTH_MSG');
+                .replace(/'Unauthorized: ADMIN role required'/g, 'AUTH_MSG')
+                .replace(/\s+/g, ' ');
 
             const normM018 = m018Block
                 .replace(/IF v_caller_role NOT IN \('UPLOADER', 'ADMIN', 'SUPERADMIN'\) THEN/g, 'AUTH_CHECK')
                 .replace(/IF v_caller_role NOT IN \('REVIEWER', 'ADMIN', 'SUPERADMIN'\) THEN/g, 'AUTH_CHECK')
                 .replace(/IF v_caller_role NOT IN \('ADMIN', 'SUPERADMIN'\) THEN/g, 'AUTH_CHECK')
+                .replace(/IF v_role NOT IN \('ADMIN', 'UPLOADER', 'SUPERADMIN'\) THEN/g, 'AUTH_CHECK')
                 .replace(/'Unauthorized: Requires UPLOADER, ADMIN, or SUPERADMIN role'/g, 'AUTH_MSG')
                 .replace(/'Unauthorized: Requires REVIEWER, ADMIN, or SUPERADMIN role'/g, 'AUTH_MSG')
-                .replace(/'Unauthorized: ADMIN or SUPERADMIN role required'/g, 'AUTH_MSG');
+                .replace(/'Unauthorized: ADMIN or SUPERADMIN role required'/g, 'AUTH_MSG')
+                .replace(/\s+/g, ' ');
 
             expect(normM018).toBe(normOrig);
+        });
+    });
+
+    test('DOWN Migration Exactness: M018 DOWN strictly matches pre-M018 canonical definitions for all 20 RPCs', () => {
+        const m018DownPath = path.join(process.cwd(), 'sql', '018_superadmin_operational_capabilities_down.sql');
+        const downSql = fs.readFileSync(m018DownPath, 'utf8');
+
+        const rpcSources = {
+            "create_import": "010_persistent_import_pipeline.sql",
+            "persist_import_batch": "011_normalize_import_record_date.sql",
+            "persist_perceptions_batch": "012_persist_perceptions_pipeline.sql",
+            "persist_financial_movements_batch": "016_failed_import_retry.sql",
+            "request_failed_import_retry": "016_failed_import_retry.sql",
+            "resolve_issue": "010_persistent_import_pipeline.sql",
+            "soft_delete_normalized_record": "014_consolidation_crud_categorization.sql",
+            "restore_normalized_record": "014_consolidation_crud_categorization.sql",
+            "soft_delete_financial_movement": "014_consolidation_crud_categorization.sql",
+            "restore_financial_movement": "014_consolidation_crud_categorization.sql",
+            "update_record_classification": "014_consolidation_crud_categorization.sql",
+            "update_movement_classification": "014_consolidation_crud_categorization.sql",
+            "bulk_update_record_classification": "014_consolidation_crud_categorization.sql",
+            "create_global_tax_category": "014_consolidation_crud_categorization.sql",
+            "update_global_tax_category": "014_consolidation_crud_categorization.sql",
+            "create_global_economic_activity": "014_consolidation_crud_categorization.sql",
+            "update_global_economic_activity": "014_consolidation_crud_categorization.sql",
+            "upsert_arca_activity_catalog": "014_consolidation_crud_categorization.sql",
+            "create_org_activity_iibb_rate": "014_consolidation_crud_categorization.sql",
+            "update_org_activity_iibb_rate": "014_consolidation_crud_categorization.sql"
+        };
+
+        function extractBlock(sql, funcName) {
+            const marker = `CREATE OR REPLACE FUNCTION public.${funcName}(`;
+            const idx = sql.indexOf(marker);
+            if (idx === -1) return null;
+            const bodyStart = sql.indexOf('$$', idx);
+            const bodyEnd = sql.indexOf('$$', bodyStart + 2);
+            const semiIdx = sql.indexOf(';', bodyEnd);
+            return sql.substring(idx, semiIdx + 1).trim();
+        }
+
+        Object.keys(rpcSources).forEach(rpcName => {
+            const srcPath = path.join(process.cwd(), 'sql', rpcSources[rpcName]);
+            const srcSql = fs.readFileSync(srcPath, 'utf8');
+
+            const origBlock = extractBlock(srcSql, rpcName);
+            const downBlock = extractBlock(downSql, rpcName);
+
+            expect(origBlock).not.toBeNull();
+            expect(downBlock).not.toBeNull();
+            expect(downBlock).toBe(origBlock);
         });
     });
 

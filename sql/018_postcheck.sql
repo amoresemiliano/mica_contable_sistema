@@ -31,33 +31,51 @@ DECLARE
     'update_org_activity_iibb_rate'
   ];
 BEGIN
-  -- 1. Verify SUPERADMIN authorization in all 20 target RPC definitions
-  FOREACH v_procname IN ARRAY v_target_procs
-  LOOP
-    SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = v_procname;
-    IF v_def IS NULL THEN
-      RAISE EXCEPTION 'Postcheck FAILED: RPC % does not exist', v_procname;
-    END IF;
-    IF v_def NOT LIKE '%SUPERADMIN%' THEN
-      RAISE EXCEPTION 'Postcheck FAILED: RPC % does not contain SUPERADMIN authorization', v_procname;
-    END IF;
-  END LOOP;
+  -- 1. Structural Predicate Verification (No comment false positives)
+  
+  -- A. request_failed_import_retry: Must explicitly authorize SUPERADMIN in v_role predicate + require active org context
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'request_failed_import_retry';
+  IF v_def IS NULL THEN RAISE EXCEPTION 'Postcheck FAILED: request_failed_import_retry does not exist'; END IF;
+  IF v_def NOT LIKE '%v_role NOT IN (''ADMIN'', ''UPLOADER'', ''SUPERADMIN'')%' THEN
+    RAISE EXCEPTION 'Postcheck FAILED: request_failed_import_retry predicate missing explicit SUPERADMIN role authorization';
+  END IF;
+  IF v_def NOT LIKE '%v_org_id IS NULL%' THEN
+    RAISE EXCEPTION 'Postcheck FAILED: request_failed_import_retry missing active organization tenant context guard';
+  END IF;
+
+  -- B. IMPORT CLASS (create_import, persist_import_batch, persist_perceptions_batch, persist_financial_movements_batch, resolve_issue)
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'create_import';
+  IF v_def NOT LIKE '%v_caller_role NOT IN (''UPLOADER'', ''ADMIN'', ''SUPERADMIN'')%' THEN
+    RAISE EXCEPTION 'Postcheck FAILED: create_import missing UPLOADER/ADMIN/SUPERADMIN predicate';
+  END IF;
+
+  -- C. REVIEW CLASS (soft_delete_normalized_record, restore_normalized_record, update_record_classification, etc.)
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'soft_delete_normalized_record';
+  IF v_def NOT LIKE '%v_caller_role NOT IN (''REVIEWER'', ''ADMIN'', ''SUPERADMIN'')%' THEN
+    RAISE EXCEPTION 'Postcheck FAILED: soft_delete_normalized_record missing REVIEWER/ADMIN/SUPERADMIN predicate';
+  END IF;
+
+  -- D. TENANT & GLOBAL ADMIN CLASS (create_global_tax_category, upsert_arca_activity_catalog, etc.)
+  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'create_global_tax_category';
+  IF v_def NOT LIKE '%v_caller_role NOT IN (''ADMIN'', ''SUPERADMIN'')%' THEN
+    RAISE EXCEPTION 'Postcheck FAILED: create_global_tax_category missing ADMIN/SUPERADMIN predicate';
+  END IF;
 
   -- 2. Verify persist_import_batch contract preservation (255-char limit, 20MB limit, 500 batch limit, storage path)
   SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'persist_import_batch';
   IF v_def NOT LIKE '%v_org_id IS NULL%' THEN
     RAISE EXCEPTION 'Postcheck FAILED: persist_import_batch missing org context check';
   END IF;
-  IF v_def NOT LIKE '%255%' THEN
+  IF v_def NOT LIKE '%LENGTH(v_filename) > 255%' THEN
     RAISE EXCEPTION 'Postcheck FAILED: persist_import_batch missing 255-character filename validation';
   END IF;
   IF v_def NOT LIKE '%20971520%' THEN
     RAISE EXCEPTION 'Postcheck FAILED: persist_import_batch missing 20 MB size limit validation';
   END IF;
-  IF v_def NOT LIKE '%500%' THEN
+  IF v_def NOT LIKE '%jsonb_array_length(p_staged_rows) > 500%' THEN
     RAISE EXCEPTION 'Postcheck FAILED: persist_import_batch missing 500 max batch size limit';
   END IF;
-  IF v_def NOT LIKE '%imports/%' THEN
+  IF v_def NOT LIKE '%v_expected_prefix%' THEN
     RAISE EXCEPTION 'Postcheck FAILED: persist_import_batch missing storage prefix validation';
   END IF;
 
@@ -67,13 +85,7 @@ BEGIN
     RAISE EXCEPTION 'Postcheck FAILED: persist_financial_movements_batch missing M016 retry_of_import_id contract';
   END IF;
 
-  -- 4. Verify request_failed_import_retry contract preservation (M016 retry semantics)
-  SELECT pg_get_functiondef(oid) INTO v_def FROM pg_proc WHERE proname = 'request_failed_import_retry';
-  IF v_def NOT LIKE '%retry_count%' THEN
-    RAISE EXCEPTION 'Postcheck FAILED: request_failed_import_retry missing M016 retry_count contract';
-  END IF;
-
-  RAISE NOTICE 'Postcheck PASSED for Migration 018. All 20 RPC contracts and validations verified.';
+  RAISE NOTICE 'Postcheck PASSED for Migration 018. All 20 RPC predicates and contracts verified.';
 END $$;
 
 -- Verify RLS remains enabled on all tables

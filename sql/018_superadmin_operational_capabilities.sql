@@ -1073,7 +1073,7 @@ BEGIN
     END IF;
 
     v_role := private.func_role();
-    IF v_role NOT IN ('ADMIN', 'UPLOADER') THEN
+    IF v_role NOT IN ('ADMIN', 'UPLOADER', 'SUPERADMIN') THEN
         RAISE EXCEPTION 'Unauthorized: Caller role % cannot persist financial movements', COALESCE(v_role, 'NONE');
     END IF;
 
@@ -1388,7 +1388,7 @@ BEGIN
     END IF;
 
     v_role := private.func_role();
-    IF v_role NOT IN ('ADMIN', 'UPLOADER') THEN
+    IF v_role NOT IN ('ADMIN', 'UPLOADER', 'SUPERADMIN') THEN
         RAISE EXCEPTION 'Unauthorized: Caller role % cannot request import retry', COALESCE(v_role, 'NONE');
     END IF;
 
