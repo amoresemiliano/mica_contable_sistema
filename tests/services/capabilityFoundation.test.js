@@ -341,4 +341,17 @@ describe('WP-A1 Capability Foundation & Security Isolation Tests', () => {
             { table: 'public.eco_organization_members', contype: 'u', columns: ['id', 'user_profile_id'] }
         ])).toBe(false);
     });
+
+    test('Real Schema Compliance: DB verification script 019_capability_foundation.sql uses only canonical eco_user_profiles columns', () => {
+        const dbTestPath = path.join(process.cwd(), 'tests', 'db', '019_capability_foundation.sql');
+        const dbTestContent = fs.readFileSync(dbTestPath, 'utf8');
+
+        // Must not contain non-existent columns email, full_name or removed firebase_uid
+        expect(dbTestContent).not.toContain('email');
+        expect(dbTestContent).not.toContain('full_name');
+        expect(dbTestContent).not.toContain('firebase_uid');
+
+        // Must use canonical auth_user_id column
+        expect(dbTestContent).toContain('auth_user_id');
+    });
 });

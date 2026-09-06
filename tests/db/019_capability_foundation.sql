@@ -83,9 +83,9 @@ BEGIN
   VALUES ('11111111-1111-1111-1111-111111111111'::UUID, 'WP-A1 TEST ORG')
   RETURNING id INTO v_org_id;
 
-  -- Create test profile
-  INSERT INTO public.eco_user_profiles (id, auth_user_id, email, full_name, role, is_active)
-  VALUES ('22222222-2222-2222-2222-222222222222'::UUID, v_user_auth_id, 'wpa1test@example.com', 'WP-A1 Tester', 'USER', TRUE)
+  -- Create test profile using real schema columns
+  INSERT INTO public.eco_user_profiles (id, auth_user_id, role, is_active)
+  VALUES ('22222222-2222-2222-2222-222222222222'::UUID, v_user_auth_id, 'USER', TRUE)
   RETURNING id INTO v_profile_id;
 
   -- MANDATORY NEGATIVE TEST 1 & 12: Profile with no new authorization assignment fails closed
@@ -156,6 +156,12 @@ BEGIN
   END IF;
 
   -- MANDATORY NEGATIVE TEST 14: FK ON DELETE SET NULL test on active context
+  -- Delete test membership records first so org deletion is not blocked by membership FK
+  IF v_membership_id IS NOT NULL THEN
+    DELETE FROM public.eco_membership_capability_overrides WHERE membership_id = v_membership_id;
+    DELETE FROM public.eco_organization_members WHERE id = v_membership_id;
+  END IF;
+
   DELETE FROM public.eco_organizations WHERE id = v_org_id;
 
   IF EXISTS (SELECT 1 FROM public.eco_user_active_context WHERE user_profile_id = v_profile_id AND organization_id IS NOT NULL) THEN
