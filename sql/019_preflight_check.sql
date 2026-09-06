@@ -28,11 +28,17 @@ BEGIN
   -- 3. Verify membership unique invariant UNIQUE(organization_id, user_profile_id)
   IF NOT EXISTS (
     SELECT 1
-    FROM pg_constraint
-    WHERE conrelid = 'public.eco_organization_members'::regclass
-      AND contype IN ('u', 'p')
+    FROM pg_constraint c
+    WHERE c.conrelid = 'public.eco_organization_members'::regclass
+      AND c.contype IN ('u', 'p')
+      AND (
+        SELECT ARRAY_AGG(attname ORDER BY attname)
+        FROM pg_attribute
+        WHERE attrelid = c.conrelid
+          AND attnum = ANY(c.conkey)
+      ) = ARRAY['organization_id', 'user_profile_id']::name[]
   ) THEN
-    RAISE EXCEPTION 'Preflight FAILED: eco_organization_members missing unique membership constraint';
+    RAISE EXCEPTION 'Preflight FAILED: eco_organization_members missing composite UNIQUE(organization_id, user_profile_id) constraint';
   END IF;
 
   -- 4. Verify legacy profile columns remain intact

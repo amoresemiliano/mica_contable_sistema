@@ -26,6 +26,22 @@ BEGIN
     RAISE EXCEPTION 'DB Verification FAILED: role_template_id missing from eco_organization_members';
   END IF;
 
+  -- Exact composite UNIQUE(organization_id, user_profile_id) check
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    WHERE c.conrelid = 'public.eco_organization_members'::regclass
+      AND c.contype IN ('u', 'p')
+      AND (
+        SELECT ARRAY_AGG(attname ORDER BY attname)
+        FROM pg_attribute
+        WHERE attrelid = c.conrelid
+          AND attnum = ANY(c.conkey)
+      ) = ARRAY['organization_id', 'user_profile_id']::name[]
+  ) THEN
+    RAISE EXCEPTION 'DB Verification FAILED: Composite UNIQUE(organization_id, user_profile_id) missing on eco_organization_members';
+  END IF;
+
   -- Seed counts check
   SELECT COUNT(*) INTO v_count FROM public.eco_capabilities;
   IF v_count < 42 THEN

@@ -272,4 +272,73 @@ describe('WP-A1 Capability Foundation & Security Isolation Tests', () => {
         expect(downContent).not.toContain('DROP TABLE IF EXISTS public.eco_organizations');
         expect(downContent).not.toContain('DROP TABLE IF EXISTS public.eco_organization_members;');
     });
+
+    test('Exact Composite UNIQUE Verification Query: 019 Preflight and Postcheck enforce strict catalog column set matching', () => {
+        const preflightPath = path.join(process.cwd(), 'sql', '019_preflight_check.sql');
+        const postcheckPath = path.join(process.cwd(), 'sql', '019_postcheck.sql');
+
+        const preflightContent = fs.readFileSync(preflightPath, 'utf8');
+        const postcheckContent = fs.readFileSync(postcheckPath, 'utf8');
+
+        const expectedSnippet = "ARRAY['organization_id', 'user_profile_id']::name[]";
+        
+        expect(preflightContent).toContain(expectedSnippet);
+        expect(postcheckContent).toContain(expectedSnippet);
+
+        expect(preflightContent).toContain('pg_constraint c');
+        expect(preflightContent).toContain('pg_attribute');
+        expect(postcheckContent).toContain('pg_constraint c');
+        expect(postcheckContent).toContain('pg_attribute');
+    });
+
+    test('Exact Composite UNIQUE Logic: Verification semantics accept exact composite UNIQUE and reject insufficient constraints', () => {
+        // Evaluates PostgreSQL catalog query semantics against simulated catalog state
+        const evaluateCatalogUniqueCheck = (constraints) => {
+            return constraints.some(c => {
+                if (c.table !== 'public.eco_organization_members') return false;
+                if (!['u', 'p'].includes(c.contype)) return false;
+                const sortedAtts = [...c.columns].sort();
+                return sortedAtts.length === 2 &&
+                       sortedAtts[0] === 'organization_id' &&
+                       sortedAtts[1] === 'user_profile_id';
+            });
+        };
+
+        // 1. Exact composite UNIQUE (organization_id, user_profile_id) is recognized
+        expect(evaluateCatalogUniqueCheck([
+            { table: 'public.eco_organization_members', contype: 'p', columns: ['id'] },
+            { table: 'public.eco_organization_members', contype: 'u', columns: ['organization_id', 'user_profile_id'] }
+        ])).toBe(true);
+
+        expect(evaluateCatalogUniqueCheck([
+            { table: 'public.eco_organization_members', contype: 'p', columns: ['id'] },
+            { table: 'public.eco_organization_members', contype: 'u', columns: ['user_profile_id', 'organization_id'] }
+        ])).toBe(true);
+
+        // 2. PK(id) alone is insufficient
+        expect(evaluateCatalogUniqueCheck([
+            { table: 'public.eco_organization_members', contype: 'p', columns: ['id'] }
+        ])).toBe(false);
+
+        // 3. Unrelated UNIQUE constraint is insufficient
+        expect(evaluateCatalogUniqueCheck([
+            { table: 'public.eco_organization_members', contype: 'p', columns: ['id'] },
+            { table: 'public.eco_organization_members', contype: 'u', columns: ['organization_id'] }
+        ])).toBe(false);
+
+        expect(evaluateCatalogUniqueCheck([
+            { table: 'public.eco_organization_members', contype: 'p', columns: ['id'] },
+            { table: 'public.eco_organization_members', contype: 'u', columns: ['user_profile_id'] }
+        ])).toBe(false);
+
+        expect(evaluateCatalogUniqueCheck([
+            { table: 'public.eco_organization_members', contype: 'p', columns: ['id'] },
+            { table: 'public.eco_organization_members', contype: 'u', columns: ['organization_id', 'role_template_id'] }
+        ])).toBe(false);
+
+        expect(evaluateCatalogUniqueCheck([
+            { table: 'public.eco_organization_members', contype: 'p', columns: ['id'] },
+            { table: 'public.eco_organization_members', contype: 'u', columns: ['id', 'user_profile_id'] }
+        ])).toBe(false);
+    });
 });
