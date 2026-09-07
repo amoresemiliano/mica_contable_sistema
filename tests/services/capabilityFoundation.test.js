@@ -342,16 +342,26 @@ describe('WP-A1 Capability Foundation & Security Isolation Tests', () => {
         ])).toBe(false);
     });
 
-    test('Real Schema Compliance: DB verification script 019_capability_foundation.sql uses only canonical eco_user_profiles columns', () => {
+    test('Real Schema Compliance & Dynamic Profile Selection: DB verification script 019_capability_foundation.sql uses existing active profile without inserting fake profiles/users', () => {
         const dbTestPath = path.join(process.cwd(), 'tests', 'db', '019_capability_foundation.sql');
         const dbTestContent = fs.readFileSync(dbTestPath, 'utf8');
+
+        // Must not insert into auth.users or eco_user_profiles
+        expect(dbTestContent).not.toContain('INSERT INTO auth.users');
+        expect(dbTestContent).not.toContain('INSERT INTO public.eco_user_profiles');
 
         // Must not contain non-existent columns email, full_name or removed firebase_uid
         expect(dbTestContent).not.toContain('email');
         expect(dbTestContent).not.toContain('full_name');
         expect(dbTestContent).not.toContain('firebase_uid');
 
-        // Must use canonical auth_user_id column
-        expect(dbTestContent).toContain('auth_user_id');
+        // Must dynamically select an existing active profile and auth_user_id
+        expect(dbTestContent).toContain('SELECT p.id, p.auth_user_id INTO v_profile_id, v_user_auth_id');
+        expect(dbTestContent).toContain('FROM public.eco_user_profiles p');
+        expect(dbTestContent).toContain('WHERE p.is_active = TRUE');
+
+        // Must be transactional (BEGIN ... ROLLBACK)
+        expect(dbTestContent.trim().startsWith('-- Verification script for Migration 019 (WP-A1 Capability Foundation)\nBEGIN;') || dbTestContent.includes('BEGIN;')).toBe(true);
+        expect(dbTestContent.includes('ROLLBACK;')).toBe(true);
     });
 });

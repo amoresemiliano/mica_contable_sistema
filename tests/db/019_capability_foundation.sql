@@ -58,7 +58,7 @@ END $$;
 DO $$
 DECLARE
   v_org_id UUID;
-  v_user_auth_id UUID := '00000000-0000-0000-0000-000000000001'::UUID;
+  v_user_auth_id UUID;
   v_profile_id UUID;
   v_membership_id UUID;
   v_platform_superadmin_template_id UUID;
@@ -69,6 +69,21 @@ DECLARE
   v_cap_org_settings_manage_id UUID;
   v_res BOOLEAN;
 BEGIN
+  -- Dynamically select an existing active user profile for behavioral verification
+  SELECT p.id, p.auth_user_id INTO v_profile_id, v_user_auth_id
+  FROM public.eco_user_profiles p
+  WHERE p.is_active = TRUE
+    AND p.auth_user_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM public.eco_user_platform_role WHERE user_profile_id = p.id
+    )
+  ORDER BY p.created_at ASC
+  LIMIT 1;
+
+  IF v_profile_id IS NULL OR v_user_auth_id IS NULL THEN
+    RAISE EXCEPTION 'DB Verification FAILED: No active user profile without platform role available for testing';
+  END IF;
+
   -- Fetch template IDs
   SELECT id INTO v_platform_superadmin_template_id FROM public.eco_role_templates WHERE code = 'PLATFORM_SUPERADMIN';
   SELECT id INTO v_acct_superadmin_template_id FROM public.eco_role_templates WHERE code = 'ACCOUNTING_SUPERADMIN';
@@ -82,11 +97,6 @@ BEGIN
   INSERT INTO public.eco_organizations (id, name)
   VALUES ('11111111-1111-1111-1111-111111111111'::UUID, 'WP-A1 TEST ORG')
   RETURNING id INTO v_org_id;
-
-  -- Create test profile using real schema columns
-  INSERT INTO public.eco_user_profiles (id, auth_user_id, role, is_active)
-  VALUES ('22222222-2222-2222-2222-222222222222'::UUID, v_user_auth_id, 'USER', TRUE)
-  RETURNING id INTO v_profile_id;
 
   -- MANDATORY NEGATIVE TEST 1 & 12: Profile with no new authorization assignment fails closed
   -- Simulation: Test helper logic under profile context
