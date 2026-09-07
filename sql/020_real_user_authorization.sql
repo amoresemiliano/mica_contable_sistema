@@ -82,15 +82,11 @@ BEGIN
   -- ============================================================
   -- A) vegendigital -> PLATFORM_SUPERADMIN
   INSERT INTO public.eco_user_platform_role (user_profile_id, role_template_id, is_active)
-  VALUES (v_vegen_profile_id, v_platform_superadmin_tpl_id, TRUE)
-  ON CONFLICT (user_profile_id, role_template_id)
-  DO UPDATE SET is_active = TRUE;
+  VALUES (v_vegen_profile_id, v_platform_superadmin_tpl_id, TRUE);
 
   -- B) drcmarianela -> ACCOUNTING_SUPERADMIN
   INSERT INTO public.eco_user_platform_role (user_profile_id, role_template_id, is_active)
-  VALUES (v_marianela_profile_id, v_acct_superadmin_tpl_id, TRUE)
-  ON CONFLICT (user_profile_id, role_template_id)
-  DO UPDATE SET is_active = TRUE;
+  VALUES (v_marianela_profile_id, v_acct_superadmin_tpl_id, TRUE);
 
 
   -- ============================================================

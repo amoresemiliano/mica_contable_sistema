@@ -35,11 +35,14 @@ describe('WP-A2 Real User Authorization Assignments Contract & Isolation Tests',
         expect(upContent).not.toContain(legacyMica);
     });
 
-    test('Idempotency & Contract Preservation: 020 Forward migration uses ON CONFLICT and preserves legacy profile fields', () => {
+    test('Idempotency & Contract Preservation: 020 Forward migration uses real schema ON CONFLICT targets and preserves legacy profile fields', () => {
         const upPath = path.join(process.cwd(), 'sql', '020_real_user_authorization.sql');
         const upContent = fs.readFileSync(upPath, 'utf8');
 
-        expect(upContent).toContain('ON CONFLICT (user_profile_id, role_template_id)');
+        // M020 must NOT use invalid ON CONFLICT (user_profile_id, role_template_id) because eco_user_platform_role PK is user_profile_id
+        expect(upContent).not.toContain('ON CONFLICT (user_profile_id, role_template_id)');
+
+        // Verified ON CONFLICT targets for eco_organization_members and eco_user_active_context
         expect(upContent).toContain('ON CONFLICT (organization_id, user_profile_id)');
         expect(upContent).toContain('ON CONFLICT (user_profile_id)');
 
@@ -49,9 +52,18 @@ describe('WP-A2 Real User Authorization Assignments Contract & Isolation Tests',
         expect(upContent).not.toContain('ALTER TABLE public.eco_user_profiles');
     });
 
-    test('Preflight Privilege & Pre-condition Safety: 020 Preflight checks auth.users privilege and fail-closed handling', () => {
+    test('M019 Schema & Preflight Compliance: 020 checks eco_user_platform_role PRIMARY KEY contract and fail-closed handling', () => {
+        const m019Path = path.join(process.cwd(), 'sql', '019_capability_foundation.sql');
+        const m019Content = fs.readFileSync(m019Path, 'utf8');
         const preflightPath = path.join(process.cwd(), 'sql', '020_preflight_check.sql');
         const preflightContent = fs.readFileSync(preflightPath, 'utf8');
+
+        // 1. Prove M019 models eco_user_platform_role uniqueness as PRIMARY KEY(user_profile_id)
+        expect(m019Content).toContain('user_profile_id UUID PRIMARY KEY REFERENCES public.eco_user_profiles(id)');
+
+        // 2 & 3. Preflight rejects ANY existing platform role row for vegendigital and Marianela
+        expect(preflightContent).toContain('vegendigital already has a pre-existing platform role row in eco_user_platform_role.');
+        expect(preflightContent).toContain('drcmarianela already has a pre-existing platform role row in eco_user_platform_role.');
 
         // Explicit read check on auth.users
         expect(preflightContent).toContain('SELECT COUNT(*) INTO v_auth_count FROM auth.users;');
@@ -70,8 +82,8 @@ describe('WP-A2 Real User Authorization Assignments Contract & Isolation Tests',
         const preflightContent = fs.readFileSync(preflightPath, 'utf8');
 
         // Platform roles absence checks
-        expect(preflightContent).toContain('vegendigital already has pre-existing PLATFORM_SUPERADMIN platform role row');
-        expect(preflightContent).toContain('drcmarianela already has pre-existing ACCOUNTING_SUPERADMIN platform role row');
+        expect(preflightContent).toContain('vegendigital already has a pre-existing platform role row in eco_user_platform_role.');
+        expect(preflightContent).toContain('drcmarianela already has a pre-existing platform role row in eco_user_platform_role.');
 
         // Target memberships absence checks
         expect(preflightContent).toContain('drcmarianela already has pre-existing membership in DEMO NORTE, SUR, or OESTE');

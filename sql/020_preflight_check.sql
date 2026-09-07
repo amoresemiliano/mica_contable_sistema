@@ -130,21 +130,19 @@ BEGIN
   SELECT p.id INTO v_emiliano_profile_id  FROM public.eco_user_profiles p JOIN auth.users u ON u.id = p.auth_user_id WHERE u.email = 'emilianodirosa1@gmail.com';
   SELECT p.id INTO v_edravi_profile_id    FROM public.eco_user_profiles p JOIN auth.users u ON u.id = p.auth_user_id WHERE u.email = 'edravi77@gmail.com';
 
-  -- 8.1 Platform roles absence check
+  -- 8.1 Platform roles absence check (ANY pre-existing row for target user_profile_id)
   IF v_vegen_profile_id IS NOT NULL AND EXISTS (
-    SELECT 1 FROM public.eco_user_platform_role pr
-    JOIN public.eco_role_templates rt ON rt.id = pr.role_template_id
-    WHERE pr.user_profile_id = v_vegen_profile_id AND rt.code = 'PLATFORM_SUPERADMIN'
+    SELECT 1 FROM public.eco_user_platform_role
+    WHERE user_profile_id = v_vegen_profile_id
   ) THEN
-    RAISE EXCEPTION 'Preflight FAILED: vegendigital already has pre-existing PLATFORM_SUPERADMIN platform role row.';
+    RAISE EXCEPTION 'Preflight FAILED: vegendigital already has a pre-existing platform role row in eco_user_platform_role.';
   END IF;
 
   IF v_marianela_profile_id IS NOT NULL AND EXISTS (
-    SELECT 1 FROM public.eco_user_platform_role pr
-    JOIN public.eco_role_templates rt ON rt.id = pr.role_template_id
-    WHERE pr.user_profile_id = v_marianela_profile_id AND rt.code = 'ACCOUNTING_SUPERADMIN'
+    SELECT 1 FROM public.eco_user_platform_role
+    WHERE user_profile_id = v_marianela_profile_id
   ) THEN
-    RAISE EXCEPTION 'Preflight FAILED: drcmarianela already has pre-existing ACCOUNTING_SUPERADMIN platform role row.';
+    RAISE EXCEPTION 'Preflight FAILED: drcmarianela already has a pre-existing platform role row in eco_user_platform_role.';
   END IF;
 
   -- 8.2 Target memberships absence check
