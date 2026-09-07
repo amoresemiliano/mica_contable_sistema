@@ -62,7 +62,7 @@ BEGIN
     SELECT COUNT(*) INTO v_auth_count FROM auth.users;
   EXCEPTION WHEN OTHERS THEN
     RAISE EXCEPTION 'Preflight FAILED: auth.users table is inaccessible or caller lacks SELECT privilege: %', SQLERRM;
-  END BEGIN;
+  END;
 
   -- 3. Verify target organizations exist with exact names and frozen UUIDs
   SELECT COUNT(*) INTO v_org_count
