@@ -13,6 +13,10 @@ DECLARE
   v_profile_count INT;
   v_calle_auth_id UUID;
   v_calle_profile_id UUID;
+  v_vegen_profile_id UUID;
+  v_marianela_profile_id UUID;
+  v_emiliano_profile_id UUID;
+  v_edravi_profile_id UUID;
 BEGIN
   -- 1. Verify M019 capability foundation schema prerequisites
   IF EXISTS (
@@ -118,6 +122,72 @@ BEGIN
     RAISE NOTICE 'Preflight info: Calle user profile pre-exists (CASE 2).';
   ELSE
     RAISE NOTICE 'Preflight info: Calle user profile will be created during migration using canonical contract (CASE 3).';
+  END IF;
+
+  -- 8. Target M020 authorization relationship absence checks (Reversibility Safety Preflight)
+  SELECT p.id INTO v_vegen_profile_id     FROM public.eco_user_profiles p JOIN auth.users u ON u.id = p.auth_user_id WHERE u.email = 'vegendigital@gmail.com';
+  SELECT p.id INTO v_marianela_profile_id FROM public.eco_user_profiles p JOIN auth.users u ON u.id = p.auth_user_id WHERE u.email = 'drcmarianela@gmail.com';
+  SELECT p.id INTO v_emiliano_profile_id  FROM public.eco_user_profiles p JOIN auth.users u ON u.id = p.auth_user_id WHERE u.email = 'emilianodirosa1@gmail.com';
+  SELECT p.id INTO v_edravi_profile_id    FROM public.eco_user_profiles p JOIN auth.users u ON u.id = p.auth_user_id WHERE u.email = 'edravi77@gmail.com';
+
+  -- 8.1 Platform roles absence check
+  IF v_vegen_profile_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.eco_user_platform_role pr
+    JOIN public.eco_role_templates rt ON rt.id = pr.role_template_id
+    WHERE pr.user_profile_id = v_vegen_profile_id AND rt.code = 'PLATFORM_SUPERADMIN'
+  ) THEN
+    RAISE EXCEPTION 'Preflight FAILED: vegendigital already has pre-existing PLATFORM_SUPERADMIN platform role row.';
+  END IF;
+
+  IF v_marianela_profile_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.eco_user_platform_role pr
+    JOIN public.eco_role_templates rt ON rt.id = pr.role_template_id
+    WHERE pr.user_profile_id = v_marianela_profile_id AND rt.code = 'ACCOUNTING_SUPERADMIN'
+  ) THEN
+    RAISE EXCEPTION 'Preflight FAILED: drcmarianela already has pre-existing ACCOUNTING_SUPERADMIN platform role row.';
+  END IF;
+
+  -- 8.2 Target memberships absence check
+  IF v_marianela_profile_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.eco_organization_members
+    WHERE user_profile_id = v_marianela_profile_id
+      AND organization_id IN ('38419581-8163-482c-9813-616fa6214d71'::UUID, 'c7af5a5c-1aac-4add-9873-8073044bf979'::UUID, '1f5d071f-a09e-4825-9f12-88533383599e'::UUID)
+  ) THEN
+    RAISE EXCEPTION 'Preflight FAILED: drcmarianela already has pre-existing membership in DEMO NORTE, SUR, or OESTE.';
+  END IF;
+
+  IF v_emiliano_profile_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.eco_organization_members
+    WHERE user_profile_id = v_emiliano_profile_id AND organization_id = '38419581-8163-482c-9813-616fa6214d71'::UUID
+  ) THEN
+    RAISE EXCEPTION 'Preflight FAILED: emilianodirosa1 already has pre-existing membership in DEMO NORTE.';
+  END IF;
+
+  IF v_edravi_profile_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.eco_organization_members
+    WHERE user_profile_id = v_edravi_profile_id AND organization_id = 'c7af5a5c-1aac-4add-9873-8073044bf979'::UUID
+  ) THEN
+    RAISE EXCEPTION 'Preflight FAILED: edravi77 already has pre-existing membership in DEMO SUR.';
+  END IF;
+
+  IF v_calle_profile_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.eco_organization_members
+    WHERE user_profile_id = v_calle_profile_id AND organization_id = '1f5d071f-a09e-4825-9f12-88533383599e'::UUID
+  ) THEN
+    RAISE EXCEPTION 'Preflight FAILED: calleelcalvario16 already has pre-existing membership in DEMO OESTE.';
+  END IF;
+
+  -- 8.3 Active context absence check
+  IF EXISTS (
+    SELECT 1 FROM public.eco_user_active_context
+    WHERE user_profile_id IN (
+      v_vegen_profile_id,
+      v_marianela_profile_id,
+      v_emiliano_profile_id,
+      v_edravi_profile_id
+    ) OR (v_calle_profile_id IS NOT NULL AND user_profile_id = v_calle_profile_id)
+  ) THEN
+    RAISE EXCEPTION 'Preflight FAILED: One or more target accounts already have a pre-existing active context row.';
   END IF;
 
   RAISE NOTICE 'Preflight check PASSED for Migration 020 (WP-A2 Real User Authorization Assignments).';

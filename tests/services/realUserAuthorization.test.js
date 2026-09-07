@@ -65,16 +65,42 @@ describe('WP-A2 Real User Authorization Assignments Contract & Isolation Tests',
         expect(preflightContent).toContain('calleelcalvario16@gmail.com');
     });
 
-    test('Targeted Rollback: 020 DOWN removes only M020 assignments and retains Calle profile identity', () => {
+    test('Reversibility Safety Preflight: 020 Preflight rejects pre-existing target platform roles, memberships, or active contexts', () => {
+        const preflightPath = path.join(process.cwd(), 'sql', '020_preflight_check.sql');
+        const preflightContent = fs.readFileSync(preflightPath, 'utf8');
+
+        // Platform roles absence checks
+        expect(preflightContent).toContain('vegendigital already has pre-existing PLATFORM_SUPERADMIN platform role row');
+        expect(preflightContent).toContain('drcmarianela already has pre-existing ACCOUNTING_SUPERADMIN platform role row');
+
+        // Target memberships absence checks
+        expect(preflightContent).toContain('drcmarianela already has pre-existing membership in DEMO NORTE, SUR, or OESTE');
+        expect(preflightContent).toContain('emilianodirosa1 already has pre-existing membership in DEMO NORTE');
+        expect(preflightContent).toContain('edravi77 already has pre-existing membership in DEMO SUR');
+        expect(preflightContent).toContain('calleelcalvario16 already has pre-existing membership in DEMO OESTE');
+
+        // Active context absence check
+        expect(preflightContent).toContain('One or more target accounts already have a pre-existing active context row');
+    });
+
+    test('Targeted Rollback Safety: 020 DOWN removes only M020 assignments, retains Calle profile identity, and contains no broad deletes/truncates', () => {
         const downPath = path.join(process.cwd(), 'sql', '020_real_user_authorization_down.sql');
         const downContent = fs.readFileSync(downPath, 'utf8');
 
+        // Targeted DELETEs
         expect(downContent).toContain('DELETE FROM public.eco_user_active_context');
         expect(downContent).toContain('DELETE FROM public.eco_organization_members');
         expect(downContent).toContain('DELETE FROM public.eco_user_platform_role');
 
         // Must not blindly delete Calle's profile identity
         expect(downContent).not.toContain('DELETE FROM public.eco_user_profiles WHERE auth_user_id = v_calle_auth_id');
+        expect(downContent).not.toContain('DELETE FROM public.eco_user_profiles;');
+
+        // No broad un-scoped DELETEs or TRUNCATEs
+        expect(downContent).not.toContain('TRUNCATE');
+        expect(downContent).not.toMatch(/DELETE\s+FROM\s+public\.eco_user_active_context\s*;/i);
+        expect(downContent).not.toMatch(/DELETE\s+FROM\s+public\.eco_organization_members\s*;/i);
+        expect(downContent).not.toMatch(/DELETE\s+FROM\s+public\.eco_user_platform_role\s*;/i);
     });
 
     test('M020 WP-A2 Target User Authorization Model Simulation', () => {

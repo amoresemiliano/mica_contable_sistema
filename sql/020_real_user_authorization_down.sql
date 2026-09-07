@@ -7,6 +7,10 @@
 --      Preserves legacy MICA memberships untouched.
 --   3. Removes active context assignments for the 5 target profiles.
 --   4. Retains Calle profile identity (IDENTITY_PROFILE_RETENTION = SAFE_NON_AUTHORIZATION_STATE).
+--
+-- Safety note: Reversibility safety depends on 020_preflight_check.sql proving that all
+-- target M020 authorization rows (platform roles, memberships, active context) were absent
+-- prior to M020 execution.
 
 BEGIN;
 
