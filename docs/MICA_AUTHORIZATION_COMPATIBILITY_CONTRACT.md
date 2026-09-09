@@ -38,27 +38,56 @@ To prevent legacy state (`eco_user_profiles.role`, `eco_user_profiles.organizati
 |                        AUTHORIZATION CHANGE FREEZE CONTRACT                       |
 +-----------------------------------------------------------------------------------+
 | FREEZE START CONDITION: Execution of WP-A3.2.0 in DEV/Staging database.           |
-| FREEZE END CONDITION: Complete closing of WP-A3.2.x (Legacy Deprecation).         |
+| FREEZE END CONDITION: Complete closing of WP-A3.3 (Frontend & Active Context).    |
 +-----------------------------------------------------------------------------------+
 ```
 
 ### Prohibited Actions During Freeze
-Except through controlled WP migration scripts, no user or script may perform:
-1. Manual SQL updates to `public.eco_user_profiles.role` or `organization_id`.
-2. Manual RPC calls to `public.change_user_role` or `public.set_user_active`.
-3. Manual insertion/deletion of `public.eco_organization_members` or `public.eco_user_platform_role` rows.
-4. Direct mutation of `public.eco_role_template_capabilities` or `public.eco_capabilities`.
+During the phased cutover across WP-A3.2 and WP-A3.3, **no manual or runtime authorization mutation is allowed outside the controlled WP migration scripts**.
+
+Specifically, the following are strictly frozen:
+1. `public.eco_user_profiles.role` (legacy role field)
+2. `public.eco_user_profiles.organization_id` (legacy organization assignment)
+3. `public.eco_organization_members` (tenant memberships)
+4. `public.eco_organization_members.role_template_id` (membership role assignment)
+5. `public.eco_user_platform_role` (platform role assignments)
+6. `public.eco_user_capability_overrides` & `public.eco_org_member_capability_overrides` (capability overrides)
+7. Direct mutation of `public.eco_role_template_capabilities` or `public.eco_capabilities`
+
+> [!IMPORTANT]
+> **Operational UI Freeze & No Dual-Write**: If the legacy UI or legacy RPCs expose role-change actions (`change_user_role`, `switch_superadmin_org_context`), those actions must be treated as **operationally frozen** during phased cutover. Dual-write or continuous synchronization between legacy and capability models will **NOT** be implemented. The `AUTHORIZATION_CHANGE_FREEZE` is the sole mechanism preventing shadow-state divergence. If this freeze cannot be operationally maintained, A3.2 must **STOP** immediately and a formal synchronization design must be approved before continuing.
 
 ### Permitted Controlled Exceptions
 - Automated WP-A3.2 migration scripts executing via version-controlled SQL files.
 - Re-running deterministic preflight and postcheck validation scripts.
 
-### Unauthorized State Mutation Recovery Procedure
-If unauthorized state mutation or divergence between legacy fields and capability assignments is detected:
-1. **STOP**: Immediately freeze all WP-A3.2 migration steps.
-2. **AUDIT**: Execute `sql/020_postcheck.sql` and `tests/db/020_real_user_authorization.sql` to identify broken invariants.
-3. **REVERT**: Run targeted rollback scripts (`sql/020_real_user_authorization_down.sql`) to restore known baseline state.
-4. **RE-VERIFY**: Execute full test suite (`npm test`) before resuming execution.
+### Targeted Divergence Recovery Protocol (M020 Down Removal)
+`sql/020_real_user_authorization_down.sql` defines the destructive rollback for WP-A2 itself. It **MUST NEVER** be used as a generic recovery mechanism for authorization divergence during the phased rollout of WP-A3.2. Once any A3.2 domain depends on capability state, rolling M020 down would destroy authorization required by already-cut-over domains.
+
+When authorization divergence or drift is detected during A3.2, the following **Targeted Reconciliation Protocol** must be executed:
+
+```
+DETECT DIVERGENCE
+  ↓
+STOP CUTOVER (Halt all active migration steps immediately)
+  ↓
+SNAPSHOT CURRENT AUTHORIZATION STATE (Export eco_user_profiles, eco_organization_members, eco_user_platform_role)
+  ↓
+COMPARE AGAINST FROZEN EXPECTED BASELINE (Diff against M020 baseline manifest)
+  ↓
+IDENTIFY PRECISE DRIFT (Isolate specific altered users, memberships, or capabilities)
+  ↓
+TARGETED REPAIR / RECONCILIATION (Apply idempotent reconciliation SQL for drifted entities only)
+  ↓
+RUN POSTCHECKS (Execute sql/020_postcheck.sql)
+  ↓
+RUN DB BEHAVIORAL TESTS (Execute tests/db/020_real_user_authorization.sql and full Jest suite)
+  ↓
+RESUME ONLY AFTER VERIFIED CONSISTENCY
+```
+
+> [!CAUTION]
+> `sql/020_real_user_authorization_down.sql` is reserved **EXCLUSIVELY** for the full rollback of WP-A2 itself and is strictly barred from A3.2 recovery procedures.
 
 ---
 

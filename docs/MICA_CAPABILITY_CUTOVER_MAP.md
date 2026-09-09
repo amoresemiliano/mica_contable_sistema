@@ -68,9 +68,31 @@ WP-A3.1 establishes the bridge between legacy coarse roles (`SUPERADMIN`, `ADMIN
 
 ---
 
-## 4. Summary of Equivalence Counts
+## 4. Summary of Equivalence Counts & Critical Mappings
 
-- **CAPABILITY_EXACT**: 19 RPCs
-- **CAPABILITY_NARROWER**: 7 RPCs
-- **CAPABILITY_BROADER**: 1 RPC (`switch_superadmin_org_context` — BLOCKED from automatic cutover)
+- **CAPABILITY_EXACT**: 19 RPCs (Direct 1-to-1 capability matches)
+- **CAPABILITY_NARROWER**: 7 Functional Capability Groups (8 RPCs) — **`DESIRED_SECURITY_TIGHTENING`**
+- **CAPABILITY_BROADER**: 1 RPC — **`BLOCKED_FROM_AUTOMATIC_CUTOVER`**
 - **CAPABILITY_NO_EQUIVALENT**: 0 RPCs (All RPCs successfully mapped to M019 primitives)
+
+### Explicit BROADER Mapping (1 RPC — Blocked from Automatic Cutover)
+- `public.switch_superadmin_org_context`:
+  - Target: `SUPPORT_IMPERSONATE` / `ACCESS_ANY_ORG`
+  - Classification: `BLOCKED_FROM_AUTOMATIC_CUTOVER`
+  - Resolution: Will **NOT** be automatically cut over. Will be deprecated in favor of active context selection + explicit capability evaluation, pending WP-A3.3 frontend session cutover.
+
+### Explicit NARROWER Mappings (7 Functional Capability Groups — Desired Security Tightening)
+1. `public.persist_perceptions_batch` → `PERCEPTION_IMPORT`:
+   - `DESIRED_SECURITY_TIGHTENING`: Decomposes legacy coarse `UPLOADER` role into a perception-specific import capability.
+2. `public.persist_financial_movements_batch` → `BANK_IMPORT` / `PAYROLL_IMPORT`:
+   - `DESIRED_SECURITY_TIGHTENING`: Decomposes legacy coarse `UPLOADER` role into bank and payroll import capabilities.
+3. `public.create_org_activity_iibb_rate` → `ORG_SETTINGS_MANAGE` (own org) OR `RATE_MANAGE_ANY_ORG` (platform):
+   - `DESIRED_SECURITY_TIGHTENING`: Restricts standard tenant admins to their own organization; requires explicit platform rate capability for foreign orgs.
+4. `public.update_org_activity_iibb_rate` → `ORG_SETTINGS_MANAGE` (own org) OR `RATE_MANAGE_ANY_ORG` (platform):
+   - `DESIRED_SECURITY_TIGHTENING`: Prevents unauthorized cross-tenant IIBB rate mutations.
+5. `public.assign_tax_category_to_org` → `ORG_SETTINGS_MANAGE` (own org) OR `CATALOG_ASSIGN_ANY_ORG` (platform):
+   - `DESIRED_SECURITY_TIGHTENING`: Enforces target organization ownership or explicit platform catalog authority.
+6. `public.unassign_tax_category_from_org` → `ORG_SETTINGS_MANAGE` (own org) OR `CATALOG_ASSIGN_ANY_ORG` (platform):
+   - `DESIRED_SECURITY_TIGHTENING`: Enforces target organization ownership or explicit platform catalog authority.
+7. `public.assign_economic_activity_to_org` & `public.unassign_economic_activity_from_org` → `ORG_SETTINGS_MANAGE` (own org) OR `CATALOG_ASSIGN_ANY_ORG` (platform):
+   - `DESIRED_SECURITY_TIGHTENING`: Enforces target organization ownership or explicit platform catalog authority.

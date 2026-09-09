@@ -16,10 +16,15 @@
 | **MEDIUM Risk Dependencies** | **10** | Tenant-scoped reads, org configuration reads |
 | **LOW Risk Dependencies** | **3** | Non-security UI visibility |
 | **RPC Functions Reviewed** | **27** | All SECURITY DEFINER mutation & data access RPCs |
-| **SECURITY DEFINER Functions** | **32** | 27 public RPCs + 5 private helper functions |
-| **Dynamic SQL Present** | **0** | `DYNAMIC_SQL_PRESENT: FALSE` across all security-relevant functions |
-| **SECURITY DEFINER With Audit** | **20** | Explicit `eco_audit_events` or `eco_review_actions` logged |
-| **SECURITY DEFINER Without Audit** | **12** | Read-only helpers or non-audited helper functions |
+| **SECURITY DEFINER Functions Total** | **32** | 27 public RPCs + 5 private helper functions |
+| **Dynamic SQL Present** | **0** | `REPOSITORY_SECURITY_DEFINER_DYNAMIC_SQL_EVIDENCE: NONE_FOUND` |
+| **SECURITY DEFINER With Security Audit** | **20** | Explicit immutable security log writes to `eco_audit_events` |
+| **SECURITY DEFINER With Functional History Only** | **1** | Writes to `eco_review_actions` (`resolve_issue`); not immutable audit |
+| **SECURITY DEFINER Without Security Audit** | **11** | Read-only helpers or non-audited helper functions |
+| **Failed Privileged Attempts Audited** | **NO** | `FAILED_PRIVILEGED_ATTEMPTS_AUDITED: NO` (Target design gap for later cutover WPs) |
+| **Client-Supplied Org Dependencies** | **11** | 6 Server RPCs accepting `p_target_org_id` + 5 Frontend dispatchers |
+| **Multi-Org Implemented Dependencies** | **0** | `MULTI_ORG_IMPLEMENTED_DEPENDENCIES: 0` (`MULTI_ORG_TARGET_DESIGN_PATTERN: DEFINED`) |
+| **Cross-Organization Dependencies** | **0** | `CROSS_ORGANIZATION_DEPENDENCIES: 0` |
 | **RLS Policies Total** | **14** | 14 table policies (`USING` and `WITH CHECK` analyzed independently) |
 | **Storage Policies Total** | **3** | 3 policies on `eco-imports-private-staging` bucket |
 | **Database Triggers Total** | **1** | `enforce_append_only_audit` on `eco_audit_events` |
@@ -31,23 +36,35 @@
 
 ## 2. Dependency Taxonomy & Classification
 
+### Dynamic SQL Audit Evidence
+Repository search across all 32 SECURITY DEFINER functions in migration SQL files for dynamic SQL execution patterns:
+- `EXECUTE`
+- `EXECUTE format(`
+- `format(...)`
+Result: `REPOSITORY_SECURITY_DEFINER_DYNAMIC_SQL_EVIDENCE: NONE_FOUND`. No dynamic SQL construction was discovered in security-relevant database functions within repository visibility.
+
+### Security Audit vs Functional History Separation
+- `eco_audit_events`: Immutable security audit log protected by `enforce_append_only_audit` trigger.
+- `eco_review_actions`: Functional workflow history for import issues. Not an immutable security audit log.
+- `FAILED_PRIVILEGED_ATTEMPTS_AUDITED: NO`: Currently, unauthorized RPC attempts fail with exceptions (`RAISE EXCEPTION`) before writing an audit event. This is recorded as an explicit target-design gap to be addressed in subsequent capability cutovers.
+
+### Scope & Multi-Org Classification
+- `PLATFORM`: System-wide platform administrative capability (9 dependencies).
+- `ORGANIZATION`: Single tenant-scoped capability (36 dependencies).
+- `MULTI_ORG`: Operation executing across a specified set of organizations (`MULTI_ORG_IMPLEMENTED_DEPENDENCIES: 0`; target design pattern defined for future reporting in A3.2.7).
+- `CROSS_ORGANIZATION`: Multi-tenant comparative or consolidated capability requiring explicit membership (`CROSS_ORGANIZATION_DEPENDENCIES: 0`).
+
 ### Dependency Types
 - `LEGACY_ROLE_CHECK`: Code checks legacy `role` (`ADMIN`, `SUPERADMIN`, `UPLOADER`, `REVIEWER`, `USER`).
 - `LEGACY_ORG_LOOKUP`: Function calls `private.org_id()` or resolves tenant from `eco_user_profiles.organization_id`.
 - `LEGACY_ROLE_AND_ORG`: Combination of legacy role assertion and legacy organization resolution.
 - `ACTIVE_CONTEXT_ASSUMPTION`: Logic assumes active selected context implies authorization (VIOLATES FROZEN INVARIANT).
-- `CLIENT_SUPPLIED_ORG`: Function or caller accepts `organization_id` as input from client.
+- `CLIENT_SUPPLIED_ORG`: Function or caller accepts `organization_id` or `p_target_org_id` from client (11 dependencies).
 - `SECURITY_DEFINER_AUTH`: RPC bypasses RLS using `SECURITY DEFINER` and executes custom authorization logic.
 - `RLS_AUTHORIZATION`: Database table policy restricts row visibility or insertion.
 - `STORAGE_AUTHORIZATION`: Supabase Storage bucket policy checks path prefix or profile.
 - `TRIGGER_AUTHORIZATION`: Database trigger enforces append-only or immutability rules.
 - `FRONTEND_AUTHORITY_ASSUMPTION`: Client UI conditionally renders or allows action based on cached profile role.
-
-### Scope Types
-- `PLATFORM`: System-wide platform administrative capability.
-- `ORGANIZATION`: Single tenant-scoped capability.
-- `CROSS_ORGANIZATION`: Multi-tenant comparative or consolidated capability requiring explicit membership.
-- `MULTI_ORG`: Operation executing across a specified set of organizations.
 
 ---
 
