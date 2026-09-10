@@ -10,12 +10,14 @@ describe('WP-A3.2.0 Authorization Primitives Safety & Performance Validation', (
         const downPath = path.join(process.cwd(), 'sql', '021_authorization_primitives_down.sql');
         const postcheckPath = path.join(process.cwd(), 'sql', '021_postcheck.sql');
         const dbTestPath = path.join(process.cwd(), 'tests', 'db', '021_authorization_primitives.sql');
+        const benchPath = path.join(process.cwd(), 'tests', 'db', '021_authorization_performance_benchmark.sql');
 
         expect(fs.existsSync(preflightPath)).toBe(true);
         expect(fs.existsSync(upPath)).toBe(true);
         expect(fs.existsSync(downPath)).toBe(true);
         expect(fs.existsSync(postcheckPath)).toBe(true);
         expect(fs.existsSync(dbTestPath)).toBe(true);
+        expect(fs.existsSync(benchPath)).toBe(true);
 
         const upContent = fs.readFileSync(upPath, 'utf8');
         expect(upContent).toContain('idx_eco_org_members_covering');
@@ -28,6 +30,14 @@ describe('WP-A3.2.0 Authorization Primitives Safety & Performance Validation', (
         expect(downContent).toContain('DROP INDEX IF EXISTS public.idx_eco_org_members_covering');
         // DOWN must strictly avoid touching M019 or M020 tables
         expect(downContent).not.toContain('DROP TABLE');
+
+        const benchContent = fs.readFileSync(benchPath, 'utf8');
+        expect(benchContent).toContain('BEGIN;');
+        expect(benchContent).toContain('ROLLBACK;');
+        expect(benchContent).toContain('EXPLAIN (ANALYZE, BUFFERS');
+        expect(benchContent).toContain('temp_bench_financial_records');
+        expect(benchContent).toContain('private.can_org(organization_id, \'RECORD_VIEW\')');
+        expect(benchContent).toContain('private.authorized_orgs_for_capability(\'RECORD_VIEW\')');
     });
 
     test('Semantic Truth Table & Synthetic Override Isolation Evaluation', () => {
