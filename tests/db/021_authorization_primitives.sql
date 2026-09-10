@@ -108,6 +108,33 @@ BEGIN
   -- 2. SYNTHETIC FIXTURE TESTS (OVERRIDE PRECEDENCE & ISOLATION)
   -- ============================================================
 
+  -- Create synthetic auth user in auth.users to satisfy foreign key constraint
+  INSERT INTO auth.users (
+    id,
+    instance_id,
+    aud,
+    role,
+    email,
+    encrypted_password,
+    email_confirmed_at,
+    raw_app_meta_data,
+    raw_user_meta_data,
+    created_at,
+    updated_at
+  ) VALUES (
+    v_synth_auth_id,
+    '00000000-0000-0000-0000-000000000000',
+    'authenticated',
+    'authenticated',
+    'synthetic_test_wp_a320_' || v_synth_auth_id::text || '@mica.test',
+    'fake_encrypted_password',
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{}'::jsonb,
+    now(),
+    now()
+  );
+
   -- Create synthetic user profile
   INSERT INTO public.eco_user_profiles (auth_user_id, role, is_active)
   VALUES (v_synth_auth_id, 'USER', TRUE)
