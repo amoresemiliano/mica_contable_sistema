@@ -109,8 +109,8 @@ BEGIN
   -- ============================================================
 
   -- Create synthetic user profile
-  INSERT INTO public.eco_user_profiles (auth_user_id, email, full_name, role, is_active)
-  VALUES (v_synth_auth_id, 'synth_test_user@mica.test', 'Synthetic Test User', 'USER', TRUE)
+  INSERT INTO public.eco_user_profiles (auth_user_id, role, is_active)
+  VALUES (v_synth_auth_id, 'USER', TRUE)
   RETURNING id INTO v_synth_profile_id;
 
   -- A. BASE_DENY + OVERRIDE_ALLOW:
