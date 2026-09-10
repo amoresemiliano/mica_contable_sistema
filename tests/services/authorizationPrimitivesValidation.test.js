@@ -11,6 +11,9 @@ describe('WP-A3.2.0 Authorization Primitives Safety & Performance Validation', (
         const postcheckPath = path.join(process.cwd(), 'sql', '021_postcheck.sql');
         const dbTestPath = path.join(process.cwd(), 'tests', 'db', '021_authorization_primitives.sql');
         const benchPath = path.join(process.cwd(), 'tests', 'db', '021_authorization_performance_benchmark.sql');
+        const benchAPath = path.join(process.cwd(), 'tests', 'db', '021_benchmark_a_direct_can_org.sql');
+        const benchBPath = path.join(process.cwd(), 'tests', 'db', '021_benchmark_b_set_based_in.sql');
+        const benchCPath = path.join(process.cwd(), 'tests', 'db', '021_benchmark_c_set_based_join.sql');
 
         expect(fs.existsSync(preflightPath)).toBe(true);
         expect(fs.existsSync(upPath)).toBe(true);
@@ -18,6 +21,9 @@ describe('WP-A3.2.0 Authorization Primitives Safety & Performance Validation', (
         expect(fs.existsSync(postcheckPath)).toBe(true);
         expect(fs.existsSync(dbTestPath)).toBe(true);
         expect(fs.existsSync(benchPath)).toBe(true);
+        expect(fs.existsSync(benchAPath)).toBe(true);
+        expect(fs.existsSync(benchBPath)).toBe(true);
+        expect(fs.existsSync(benchCPath)).toBe(true);
 
         const upContent = fs.readFileSync(upPath, 'utf8');
         expect(upContent).toContain('idx_eco_org_members_covering');
@@ -31,13 +37,23 @@ describe('WP-A3.2.0 Authorization Primitives Safety & Performance Validation', (
         // DOWN must strictly avoid touching M019 or M020 tables
         expect(downContent).not.toContain('DROP TABLE');
 
-        const benchContent = fs.readFileSync(benchPath, 'utf8');
-        expect(benchContent).toContain('BEGIN;');
-        expect(benchContent).toContain('ROLLBACK;');
-        expect(benchContent).toContain('EXPLAIN (ANALYZE, BUFFERS');
-        expect(benchContent).toContain('temp_bench_financial_records');
-        expect(benchContent).toContain('private.can_org(organization_id, \'RECORD_VIEW\')');
-        expect(benchContent).toContain('private.authorized_orgs_for_capability(\'RECORD_VIEW\')');
+        [benchPath, benchAPath, benchBPath, benchCPath].forEach(filePath => {
+            const content = fs.readFileSync(filePath, 'utf8');
+            expect(content).toContain('BEGIN;');
+            expect(content).toContain('ROLLBACK;');
+            expect(content).toContain('EXPLAIN (ANALYZE, BUFFERS');
+            expect(content).toContain('temp_bench_financial_records');
+            expect(content).toContain('ON COMMIT DROP;');
+        });
+
+        const benchAContent = fs.readFileSync(benchAPath, 'utf8');
+        expect(benchAContent).toContain('WHERE private.can_org(organization_id, \'RECORD_VIEW\')');
+
+        const benchBContent = fs.readFileSync(benchBPath, 'utf8');
+        expect(benchBContent).toContain('WHERE organization_id IN (');
+
+        const benchCContent = fs.readFileSync(benchCPath, 'utf8');
+        expect(benchCContent).toContain('JOIN private.authorized_orgs_for_capability(\'RECORD_VIEW\') a');
     });
 
     test('Semantic Truth Table & Synthetic Override Isolation Evaluation', () => {
