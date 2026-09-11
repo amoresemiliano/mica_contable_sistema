@@ -1,8 +1,8 @@
 # MICA Authorization Performance Test Plan & Benchmark Specification (WP-A3.2.0)
 
 > **Work Package**: WP-A3.2.0 — Authorization Primitives Safety & Performance Validation  
-> **Status**: BENCHMARK SPECIFICATION & DEV REPRODUCIBILITY HARNESS  
-> **Evidence Taxonomy**: Explicitly segmented into `OBSERVED_DEV_EVIDENCE`, `NOT_YET_OBSERVED_DEV`, `UNVERIFIED_PREVIOUS_DESIGN_CLAIM`, and `ARCHITECTURAL_PRINCIPLE`.
+> **Status**: OBSERVED DEV PERFORMANCE EVIDENCE CONSOLIDATED & HARNESS SPECIFICATION  
+> **Evidence Taxonomy**: Explicitly segmented into `OBSERVED_DEV_EVIDENCE` and `ARCHITECTURAL_PRINCIPLE`.
 
 ---
 
@@ -11,15 +11,15 @@
 | Classification | Target Context | Row Count Range | Status & Purpose |
 | :--- | :--- | :--- | :--- |
 | **`OBSERVED_DEV_EVIDENCE`** | Supabase DEV Environment | **10,000 synthetic rows** | Empirically captured metrics from executed benchmark scripts in Supabase SQL Editor |
-| **`NOT_YET_OBSERVED_DEV`** | Supabase DEV Environment | **10,000 synthetic rows** | Benchmark scripts prepared and ready for individual manual execution in Supabase SQL Editor |
-| **`UNVERIFIED_PREVIOUS_DESIGN_CLAIM`** | Prior Theoretical / Design Estimations | N/A | Previously recorded metrics (e.g. 14.8x speedup) prior to full three-way manual DEV benchmark reproduction |
-| **`ARCHITECTURAL_PRINCIPLE`** | System Design Invariants | All volumes | Per-row authorization function evaluation vs set-based indexable filtering |
+| **`ARCHITECTURAL_PRINCIPLE`** | System Design Invariants | All volumes | Per-row authorization function evaluation vs set-based indexable/relational filtering |
+
+*Governance Note*: Prior theoretical design claims (e.g. hypothetical universal speedup multiples) and rigid artificial thresholds have been retired. All metrics recorded below are point-in-time observations in Supabase DEV and must not be interpreted as universal performance SLAs.
 
 ---
 
 ## 2. Supabase SQL Editor Harness Architecture
 
-Because Supabase SQL Editor executes scripts in batch mode and only displays the output of the final statement in a multi-statement transaction before `ROLLBACK`, the benchmark harness is structured into **three self-contained, independent SQL files**:
+Because Supabase SQL Editor executes scripts in batch mode and displays only the output of the final statement in a multi-statement transaction before `ROLLBACK`, the benchmark harness is structured into **three self-contained, independent SQL files**:
 
 1. [`tests/db/021_benchmark_a_direct_can_org.sql`](file:///c:/Users/Emiliano/Documents/1.%20Sistemas/Contable/sistema/tests/db/021_benchmark_a_direct_can_org.sql) — **Pattern A** (Direct Per-Row `can_org`)
 2. [`tests/db/021_benchmark_b_set_based_in.sql`](file:///c:/Users/Emiliano/Documents/1.%20Sistemas/Contable/sistema/tests/db/021_benchmark_b_set_based_in.sql) — **Pattern B** (Set-Based `IN` Predicate)
@@ -37,11 +37,11 @@ Each file executes atomically within `BEGIN ... ROLLBACK` and guarantees zero pe
 
 ---
 
-## 3. Benchmark Execution Patterns & Observed Evidence
+## 3. Benchmark Execution Patterns & Observed DEV Evidence
 
 ### Pattern A: Direct Per-Row `can_org` Invocation
 - **File**: [`tests/db/021_benchmark_a_direct_can_org.sql`](file:///c:/Users/Emiliano/Documents/1.%20Sistemas/Contable/sistema/tests/db/021_benchmark_a_direct_can_org.sql)
-- **Status**: `NOT_YET_OBSERVED_DEV` (Pending individual run in Supabase SQL Editor)
+- **Status**: `OBSERVED_DEV_EVIDENCE` (Empirically verified in Supabase DEV)
 - **Query**:
   ```sql
   EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
@@ -49,13 +49,21 @@ Each file executes atomically within `BEGIN ... ROLLBACK` and guarantees zero pe
   FROM temp_bench_financial_records
   WHERE private.can_org(organization_id, 'RECORD_VIEW');
   ```
-- **Expected Plan Shape**: Sequential scan (`Seq Scan`) with per-row filter predicate invoking `private.can_org`.
+- **Observed Execution Metrics (Supabase DEV)**:
+  - **Plan Type**: `Seq Scan on temp_bench_financial_records`
+  - **Filter Predicate**: `private.can_org(organization_id, 'RECORD_VIEW'::text)`
+  - **Authorized Rows Returned**: 5,000
+  - **Rows Removed by Filter**: 5,000
+  - **Buffers**: `shared hit=90348`, `local hit=121`
+  - **Planning Time**: `0.118 ms`
+  - **Execution Time**: `507.199 ms`
+  - **Observation**: Per-row evaluation forces 10,000 PL/pgSQL function evaluations, generating 90,348 buffer hits and excessive execution latency.
 
 ---
 
 ### Pattern B: Set-Based IN Subquery via `authorized_orgs_for_capability`
 - **File**: [`tests/db/021_benchmark_b_set_based_in.sql`](file:///c:/Users/Emiliano/Documents/1.%20Sistemas/Contable/sistema/tests/db/021_benchmark_b_set_based_in.sql)
-- **Status**: `NOT_YET_OBSERVED_DEV` (Pending individual run in Supabase SQL Editor)
+- **Status**: `OBSERVED_DEV_EVIDENCE` (Empirically verified in Supabase DEV)
 - **Query**:
   ```sql
   EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
@@ -66,7 +74,14 @@ Each file executes atomically within `BEGIN ... ROLLBACK` and guarantees zero pe
       FROM private.authorized_orgs_for_capability('RECORD_VIEW')
   );
   ```
-- **Expected Plan Shape**: Single `InitPlan` execution of `private.authorized_orgs_for_capability`, followed by index-driven filtering.
+- **Observed Execution Metrics (Supabase DEV)**:
+  - **Plan Type**: `Hash Join` (Seq Scan over 10,000 target rows hashed with Function Scan)
+  - **Helper Function Scan**: `private.authorized_orgs_for_capability` executed with `rows=1`, `loops=1`
+  - **Authorized Rows Returned**: 5,000
+  - **Buffers**: `shared hit=353`, `local hit=121`
+  - **Planning Time**: `0.223 ms`
+  - **Execution Time**: `4.574 ms`
+  - **Planner Autonomy Note**: `idx_temp_bench_records_org` was **not** selected by the query planner for Pattern B. Given the selectivity (50% of the table matching), the planner determined that a `Seq Scan` + `Hash Join` was more efficient than index traversal. Despite not using an index, execution time dropped from 507.2 ms to 4.574 ms due to single helper invocation (`loops=1`).
 
 ---
 
@@ -83,26 +98,46 @@ Each file executes atomically within `BEGIN ... ROLLBACK` and guarantees zero pe
   ```
 - **Observed Execution Metrics (Supabase DEV)**:
   - **Plan Type**: `Merge Join`
-  - **Authorized Rows Returned**: 5,000 (out of 10,000 total scanned)
-  - **Helper Function Scan**: `private.authorized_orgs_for_capability` executed with `loops=1` (constant single execution)
-  - **Index Scan**: `idx_temp_bench_records_org` utilized
+  - **Helper Function Scan**: `private.authorized_orgs_for_capability` executed with `rows=1`, `loops=1`
+  - **Target Index Scan**: `idx_temp_bench_records_org` utilized
+  - **Authorized Rows Returned**: 5,000
   - **Planning Time**: `0.065 ms`
   - **Execution Time**: `3.661 ms`
-  - *Note*: This point measurement reflects the indexed join plan shape in DEV. It is documented as observed empirical evidence and not as an inflexible system-wide SLA.
+  - **Observation**: Demonstrates that an indexed Merge Join plan is selected when expressed as an explicit relational join, executing in 3.661 ms.
 
 ---
 
-## 4. Index Evaluation & Observations
+## 4. Empirical Interpretation & Findings
+
+Point-in-time DEV comparison across 10,000 synthetic records:
+- **Pattern A (Per-Row `can_org`)**: `507.199 ms` (`shared hit=90348`)
+- **Pattern B (Set-Based `IN`)**: `4.574 ms` (`shared hit=353`)
+- **Pattern C (Set-Based `JOIN`)**: `3.661 ms` (`loops=1`, Merge Join with Index)
+
+### Key Conclusions:
+1. **Per-Row Evaluation Bottleneck**: Direct per-row `private.can_org` calls cause repeated authorization resolution on every row scanned, producing massive buffer churn and severe execution penalties on large tables.
+2. **Set-Based Efficiency**: Both Pattern B and Pattern C resolve authorized organizations exactly once (`loops=1`), reducing shared buffer hits by over 99.6% (from 90,348 to 353).
+3. **Planner Autonomy Validation**: Pattern B proves that set-based authorization yields dramatic performance improvements even when the PostgreSQL planner chooses `Seq Scan` + `Hash Join` over an index scan based on data distribution. Pattern C proves that indexed join paths remain available and fast.
+
+---
+
+## 5. Index Evaluation & Status
 
 Migration 021 introduced two covering indexes:
 1. `idx_eco_org_members_covering` on `public.eco_organization_members (user_profile_id, is_active) INCLUDE (organization_id, role_template_id)`:
-   - **Expected Value**: Supports index-only scans when `private.authorized_orgs_for_capability` fetches active memberships for a profile without reading table heap blocks.
+   - **Evidence Status**: `EVALUATION_DEFERRED`. The top-level benchmark encapsulates membership lookups inside `private.authorized_orgs_for_capability` (reported as `Function Scan`), making internal index usage invisible to top-level `EXPLAIN`. Its value is structurally sound for index-only scans, but unproven at top level without function-internal instrumentation.
 2. `idx_eco_user_platform_role_covering` on `public.eco_user_platform_role (user_profile_id, is_active) INCLUDE (role_template_id)`:
-   - **Observation**: `eco_user_platform_role` already has `PRIMARY KEY (user_profile_id)`. Because each user has at most one platform role row, the primary key index already provides direct point lookups. The covering index should be observed under DEV workload before declaring proven performance benefit over the PK index.
+   - **Evidence Status**: `UNPROVEN_OVER_PK`. Because `eco_user_platform_role` has `PRIMARY KEY (user_profile_id)` and cardinality is at most 1 row per user, the covering index provides negligible benefit over the primary key index.
+
+*Governance Decision*: Neither index will be modified or dropped during WP-A3.2.0. Their status is documented for ongoing observation in subsequent phases.
 
 ---
 
-## 5. Architectural Guidance for Future Work Packages (A3.2.1+)
+## 6. Architectural Rules Frozen for Future Work Packages (A3.2.1+)
 
-- **Low-Cardinality Tables & Configuration Entities**: Direct scalar helper calls or simple tenant matching may be evaluated where table size is structurally bounded.
-- **High-Volume Tables (e.g. `eco_normalized_records`, `eco_financial_movements`, `eco_audit_events`)**: MUST adopt set-based authorization patterns (`private.authorized_orgs_for_capability` in joins or `IN` clauses) to ensure indexable scan paths and prevent $O(N)$ function evaluation overhead.
+For subsequent vertical slices and RLS policy implementations:
+
+1. **No Per-Row Scalar Authorization on High-Volume Tables**: Tables with high or unbounded volume (e.g. `eco_normalized_records`, `eco_financial_movements`, `eco_audit_events`, `eco_invoices`) MUST NOT use direct `private.can_org(organization_id, capability)` in per-row RLS predicates.
+2. **Set-Based Authorization Standard**: High-volume policies MUST adopt set-based filtering via `private.authorized_orgs_for_capability(capability)` (using `IN` subqueries or `JOIN` expressions).
+3. **Preserve Query Planner Autonomy**: The query planner is free to select `Hash Join`, `Merge Join`, `Nested Loop`, `Bitmap Scan`, `Index Scan`, or `Seq Scan` based on actual data volume, selectivity, and distribution. Work package acceptance criteria MUST NOT mandate a specific physical scan type (e.g. "must use index").
+4. **Low-Cardinality & Configuration Entities**: Direct scalar helpers or simpler tenant matching may be considered only for bounded, low-cardinality configuration tables when explicitly justified during slice review.
