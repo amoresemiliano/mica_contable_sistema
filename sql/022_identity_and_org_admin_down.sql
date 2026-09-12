@@ -12,6 +12,7 @@ DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT);
 DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT, UUID);
 DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN);
 DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN, UUID);
+DROP FUNCTION IF EXISTS public.set_global_user_active(UUID, BOOLEAN);
 
 -- 1. Restore change_user_role to 009 definition
 CREATE OR REPLACE FUNCTION public.change_user_role(

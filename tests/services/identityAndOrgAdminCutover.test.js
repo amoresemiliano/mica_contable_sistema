@@ -22,6 +22,8 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(upContent).toContain('ORG_MEMBER_PERMISSION_MANAGE');
         expect(upContent).toContain('CREATE OR REPLACE FUNCTION public.set_user_active');
         expect(upContent).toContain('ORG_MEMBER_MANAGE');
+        expect(upContent).toContain('CREATE OR REPLACE FUNCTION public.set_global_user_active');
+        expect(upContent).toContain('GLOBAL_USER_MANAGE');
         expect(upContent).toContain('CREATE OR REPLACE FUNCTION public.switch_superadmin_org_context');
         expect(upContent).toContain('SUPPORT_IMPERSONATE');
         expect(upContent).toContain('authorized_orgs_for_capability(\'ORG_VIEW\')');
@@ -36,6 +38,7 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         const downContent = fs.readFileSync(downPath, 'utf8');
         expect(downContent).toContain('CREATE OR REPLACE FUNCTION public.change_user_role');
         expect(downContent).toContain('CREATE OR REPLACE FUNCTION public.set_user_active');
+        expect(downContent).toContain('DROP FUNCTION IF EXISTS public.set_global_user_active');
         expect(downContent).toContain('CREATE OR REPLACE FUNCTION public.switch_superadmin_org_context');
         expect(downContent).toContain('private.func_role() <> \'ADMIN\'');
         expect(downContent).toContain('v_caller_role != \'SUPERADMIN\'');
@@ -47,6 +50,7 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(dbTestContent).toContain('sql/022_identity_and_org_admin.sql');
         expect(dbTestContent).toContain('SELF_ROLE_CHANGE_NOT_ALLOWED');
         expect(dbTestContent).toContain('SELF_DEACTIVATION_NOT_ALLOWED');
+        expect(dbTestContent).toContain('set_global_user_active');
         expect(dbTestContent).toContain('AMBIGUOUS_ORGANIZATION_CONTEXT');
     });
 
@@ -58,6 +62,7 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         const targetUser = {
             id: 'prof-multi',
             profile_org_id: SUR, // Stale single-org column
+            role: 'USER', // Stale single-org role
             is_active: true,
             memberships: [
                 { id: 'mem-norte', org_id: NORTE, template: 'UPLOADER', is_active: true },
@@ -70,6 +75,12 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
             active_context: null,
             memberships: [{ org_id: NORTE, template: 'TENANT_ADMIN', is_active: true }],
             capabilities: { [NORTE]: ['ORG_MEMBER_PERMISSION_MANAGE', 'ORG_MEMBER_MANAGE', 'ORG_MEMBER_VIEW'] }
+        };
+
+        const platformSuperadmin = {
+            id: 'prof-vegen',
+            active_context: NORTE, // Active context set to NORTE
+            platformCapabilities: ['GLOBAL_USER_MANAGE', 'PLATFORM_MANAGE', 'SUPPORT_IMPERSONATE']
         };
 
         const superAdminBoth = {
@@ -96,7 +107,7 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
             // Find candidate memberships where caller holds required capability
             const candidateOrgs = target.memberships
                 .map(m => m.org_id)
-                .filter(orgId => caller.capabilities[orgId] && caller.capabilities[orgId].includes(capability));
+                .filter(orgId => caller.capabilities && caller.capabilities[orgId] && caller.capabilities[orgId].includes(capability));
 
             if (candidateOrgs.length > 1) throw new Error('AMBIGUOUS_ORGANIZATION_CONTEXT');
             if (candidateOrgs.length === 0) return null;
@@ -119,12 +130,29 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(targetUser.memberships.find(m => m.org_id === SUR).is_active).toBe(true); // Untouched
         expect(targetUser.is_active).toBe(true); // Global profile untouched
 
-        // 4. Superadmin in BOTH orgs without active context or explicit org fails closed on ambiguity
+        // 4. Global deactivation via Platform Superadmin: mutates ONLY global profile, zero effect from active_context
+        const executeGlobalDeactivation = (caller, target, activeState) => {
+            if (!caller.platformCapabilities || !caller.platformCapabilities.includes('GLOBAL_USER_MANAGE')) {
+                throw new Error('FORBIDDEN');
+            }
+            target.is_active = activeState; // Mutates global profile only
+        };
+
+        executeGlobalDeactivation(platformSuperadmin, targetUser, false);
+        expect(targetUser.is_active).toBe(false);
+        expect(targetUser.memberships.find(m => m.org_id === SUR).is_active).toBe(true); // Membership row untouched
+
+        // 5. Tenant admin attempting global deactivation fails with FORBIDDEN
+        expect(() => {
+            executeGlobalDeactivation(adminNorte, targetUser, true);
+        }).toThrow('FORBIDDEN');
+
+        // 6. Superadmin in BOTH orgs without active context or explicit org fails closed on ambiguity
         expect(() => {
             resolveTargetOrg(superAdminBoth, targetUser, 'ORG_MEMBER_PERMISSION_MANAGE');
         }).toThrow('AMBIGUOUS_ORGANIZATION_CONTEXT');
 
-        // 5. Superadmin with explicit p_org_id resolves cleanly
+        // 7. Superadmin with explicit p_org_id resolves cleanly
         const explicitOrg = resolveTargetOrg(superAdminBoth, targetUser, 'ORG_MEMBER_PERMISSION_MANAGE', NORTE);
         expect(explicitOrg).toBe(NORTE);
     });

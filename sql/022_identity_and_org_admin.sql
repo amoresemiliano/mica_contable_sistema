@@ -7,8 +7,9 @@ BEGIN;
 -- context switching, and organization/profile/audit RLS policies
 -- to the frozen M019/M021 capability foundation.
 --
--- Canonical authority resides in eco_organization_members.
--- eco_user_profiles.organization_id is NEVER used as authorization authority.
+-- Canonical authority resides exclusively in eco_organization_members.
+-- eco_user_profiles.organization_id and eco_user_profiles.role are
+-- NEVER used as authorization authority.
 -- ============================================================
 
 -- Drop existing functions before recreation to guarantee clean signature binding
@@ -16,14 +17,15 @@ DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT);
 DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT, UUID);
 DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN);
 DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN, UUID);
+DROP FUNCTION IF EXISTS public.set_global_user_active(UUID, BOOLEAN);
 
 -- ============================================================
--- 1. RPC: change_user_role
+-- 1. RPC: change_user_role (Tenant Scoped)
 -- ============================================================
 -- Governed by ORG_MEMBER_PERMISSION_MANAGE capability.
 -- Operates on canonical eco_organization_members.role_template_id.
 -- Target organization is deterministically resolved from p_org_id,
--- active context, or unique authorized membership (fail-closed on ambiguity).
+-- active context selector, or unique authorized membership.
 
 CREATE OR REPLACE FUNCTION public.change_user_role(
   target_user_id UUID,
@@ -137,7 +139,7 @@ BEGIN
   SET role_template_id = v_new_tpl_id
   WHERE id = v_target_membership_id;
 
-  -- 9. Maintain legacy profile.role for session compatibility
+  -- 9. Maintain legacy profile.role for session display compatibility (lossy scalar)
   UPDATE public.eco_user_profiles
   SET role = new_role
   WHERE id = target_user_id;
@@ -159,12 +161,11 @@ GRANT EXECUTE ON FUNCTION public.change_user_role(UUID, TEXT, UUID) TO authentic
 
 
 -- ============================================================
--- 2. RPC: set_user_active
+-- 2. RPC: set_user_active (Tenant Scoped Membership Operation)
 -- ============================================================
--- Governed by ORG_MEMBER_MANAGE capability for tenant membership
--- activation/deactivation, and GLOBAL_USER_MANAGE/PLATFORM_MANAGE
--- for global profile account deactivation.
--- Mutates eco_organization_members.is_active for tenant administration.
+-- Governed exclusively by ORG_MEMBER_MANAGE capability.
+-- Mutates ONLY eco_organization_members.is_active for the target
+-- membership. NEVER mutates eco_user_profiles.is_active.
 
 CREATE OR REPLACE FUNCTION public.set_user_active(
   target_user_id UUID,
@@ -182,7 +183,6 @@ DECLARE
   v_target_membership_id UUID;
   v_current_state BOOLEAN;
   v_match_count INT;
-  v_is_platform_admin BOOLEAN := FALSE;
 BEGIN
   -- 1. Resolve caller profile ID via canonical helper (requires is_active = TRUE)
   v_caller_id := private.current_profile_id();
@@ -194,8 +194,6 @@ BEGIN
   IF target_user_id = v_caller_id AND new_active = FALSE THEN
     RAISE EXCEPTION 'SELF_DEACTIVATION_NOT_ALLOWED';
   END IF;
-
-  v_is_platform_admin := private.can_platform('GLOBAL_USER_MANAGE') OR private.can_platform('PLATFORM_MANAGE');
 
   -- 3. Deterministic Target Organization Resolution
   IF p_org_id IS NOT NULL THEN
@@ -229,66 +227,44 @@ BEGIN
     END IF;
   END IF;
 
-  -- 4. If target organization resolved, execute tenant membership activation/deactivation
-  IF v_target_org_id IS NOT NULL THEN
-    -- Enforce capability in target organization
-    IF NOT private.can_org(v_target_org_id, 'ORG_MEMBER_MANAGE') THEN
-      RAISE EXCEPTION 'FORBIDDEN';
-    END IF;
+  IF v_target_org_id IS NULL THEN
+    RAISE EXCEPTION 'TARGET_NOT_FOUND';
+  END IF;
 
-    SELECT id, is_active
-    INTO v_target_membership_id, v_current_state
-    FROM public.eco_organization_members
-    WHERE organization_id = v_target_org_id
-      AND user_profile_id = target_user_id;
+  -- 4. Enforce tenant capability
+  IF NOT private.can_org(v_target_org_id, 'ORG_MEMBER_MANAGE') THEN
+    RAISE EXCEPTION 'FORBIDDEN';
+  END IF;
 
-    IF v_target_membership_id IS NULL THEN
-      RAISE EXCEPTION 'TARGET_NOT_FOUND';
-    END IF;
+  SELECT id, is_active
+  INTO v_target_membership_id, v_current_state
+  FROM public.eco_organization_members
+  WHERE organization_id = v_target_org_id
+    AND user_profile_id = target_user_id;
 
-    -- Idempotent short-circuit
-    IF v_current_state = new_active THEN
-      RETURN;
-    END IF;
+  IF v_target_membership_id IS NULL THEN
+    RAISE EXCEPTION 'TARGET_NOT_FOUND';
+  END IF;
 
-    -- Update canonical tenant membership status
-    UPDATE public.eco_organization_members
-    SET is_active = new_active
-    WHERE id = v_target_membership_id;
-
-    -- Audit event
-    INSERT INTO public.eco_audit_events (
-      organization_id,
-      event_type
-    )
-    VALUES (
-      v_target_org_id,
-      'USER_ACTIVE_CHANGED'
-    );
+  -- 5. Idempotent short-circuit
+  IF v_current_state = new_active THEN
     RETURN;
   END IF;
 
-  -- 5. If no tenant organization matched, check if caller is Platform Superadmin managing global account
-  IF v_is_platform_admin THEN
-    SELECT is_active INTO v_current_state
-    FROM public.eco_user_profiles
-    WHERE id = target_user_id;
+  -- 6. Update canonical tenant membership status ONLY
+  UPDATE public.eco_organization_members
+  SET is_active = new_active
+  WHERE id = v_target_membership_id;
 
-    IF v_current_state IS NULL THEN
-      RAISE EXCEPTION 'TARGET_NOT_FOUND';
-    END IF;
-
-    IF v_current_state = new_active THEN
-      RETURN;
-    END IF;
-
-    UPDATE public.eco_user_profiles
-    SET is_active = new_active
-    WHERE id = target_user_id;
-    RETURN;
-  END IF;
-
-  RAISE EXCEPTION 'TARGET_NOT_FOUND';
+  -- 7. Audit event
+  INSERT INTO public.eco_audit_events (
+    organization_id,
+    event_type
+  )
+  VALUES (
+    v_target_org_id,
+    'USER_ACTIVE_CHANGED'
+  );
 END;
 $$;
 
@@ -297,7 +273,68 @@ GRANT EXECUTE ON FUNCTION public.set_user_active(UUID, BOOLEAN, UUID) TO authent
 
 
 -- ============================================================
--- 3. RPC: switch_superadmin_org_context
+-- 3. RPC: set_global_user_active (Platform Scoped Account Operation)
+-- ============================================================
+-- Governed exclusively by GLOBAL_USER_MANAGE or PLATFORM_MANAGE.
+-- Mutates ONLY eco_user_profiles.is_active for system-wide account state.
+-- Has ZERO dependence on active tenant context.
+
+CREATE OR REPLACE FUNCTION public.set_global_user_active(
+  target_user_id UUID,
+  new_active BOOLEAN
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_caller_id UUID;
+  v_current_state BOOLEAN;
+BEGIN
+  -- 1. Resolve caller profile ID (requires is_active = TRUE)
+  v_caller_id := private.current_profile_id();
+  IF v_caller_id IS NULL THEN
+    RAISE EXCEPTION 'UNAUTHORIZED';
+  END IF;
+
+  -- 2. Enforce platform capability
+  IF NOT (private.can_platform('GLOBAL_USER_MANAGE') OR private.can_platform('PLATFORM_MANAGE')) THEN
+    RAISE EXCEPTION 'FORBIDDEN';
+  END IF;
+
+  -- 3. Prevent self-deactivation
+  IF target_user_id = v_caller_id AND new_active = FALSE THEN
+    RAISE EXCEPTION 'SELF_DEACTIVATION_NOT_ALLOWED';
+  END IF;
+
+  -- 4. Lookup target profile
+  SELECT is_active INTO v_current_state
+  FROM public.eco_user_profiles
+  WHERE id = target_user_id;
+
+  IF v_current_state IS NULL THEN
+    RAISE EXCEPTION 'TARGET_NOT_FOUND';
+  END IF;
+
+  -- 5. Idempotent short-circuit
+  IF v_current_state = new_active THEN
+    RETURN;
+  END IF;
+
+  -- 6. Update global account status
+  UPDATE public.eco_user_profiles
+  SET is_active = new_active
+  WHERE id = target_user_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.set_global_user_active(UUID, BOOLEAN) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_global_user_active(UUID, BOOLEAN) TO authenticated;
+
+
+-- ============================================================
+-- 4. RPC: switch_superadmin_org_context (Platform Context Switch)
 -- ============================================================
 -- Governed by SUPPORT_IMPERSONATE / ACCESS_ANY_ORG platform capabilities.
 -- Syncs both legacy eco_user_profiles.organization_id and canonical
@@ -359,7 +396,7 @@ GRANT EXECUTE ON FUNCTION public.switch_superadmin_org_context(UUID) TO authenti
 
 
 -- ============================================================
--- 4. RLS POLICIES
+-- 5. RLS POLICIES
 -- ============================================================
 
 -- A. eco_organizations: Governed by ORG_VIEW capability (set-based)

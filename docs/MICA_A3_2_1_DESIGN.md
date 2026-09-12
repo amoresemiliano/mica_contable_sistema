@@ -1,58 +1,37 @@
 # MICA Authorization Design Specification: Identity, Profiles & Org Admin (WP-A3.2.1)
 
 > **Work Package**: WP-A3.2.1 — Identity, Profiles & Organization Administration  
-> **Status**: DESIGN FROZEN & UPDATED (MULTI-ORG TARGET RESOLUTION)  
-> **Baseline Commit**: `e2f9c5baed420d0d1b1e98f2fc260f36505dc6f8`  
+> **Status**: DESIGN FROZEN & UPDATED (GLOBAL VS TENANT STATE SEPARATION & MULTI-ORG RESOLUTION)  
+> **Baseline Commit**: `fab6e49633228d10b86e0439db879f32c57e6b97`  
 > **Target Schema Migration**: M022 (`sql/022_identity_and_org_admin.sql`)  
 
 ---
 
-## 1. Executive Summary & Core Architectural Principle
+## 1. Executive Summary & Core Architectural Principles
 
 WP-A3.2.1 executes the **first vertical authorization cutover** in MICA, transitioning Identity, User Profiles, Member Administration, and Organization-Scoped Audit Visibility from legacy role-string authorization (`private.func_role() = 'ADMIN'` / `private.org_id()`) to the frozen M019/M021 capability foundation.
 
-### Fundamental Tenancy Invariant:
-> **`eco_user_profiles.organization_id` IS LEGACY AND NON-AUTHORITATIVE.**  
-> Canonical tenant authority, membership roles, and organization-scoped active states reside **exclusively in `public.eco_organization_members`**.  
-> Under no circumstances does `eco_user_profiles.organization_id` confer authorization, select target permissions, or restrict administrative actions.
+### Three Fundamental Invariants:
+1. **ACTIVE CONTEXT != AUTHORIZATION**:
+   - `private.active_org_id()` is an operation selector for tenant actions when `p_org_id` is omitted. It is **never** an authorization grant or blocker for global platform capabilities.
+2. **GLOBAL PROFILE STATE vs TENANT MEMBERSHIP STATE SEPARATION**:
+   - Platform account activation (`eco_user_profiles.is_active`) and Tenant membership activation (`eco_organization_members.is_active`) are distinct scopes governed by separate explicit RPCs.
+3. **`eco_user_profiles.organization_id` & `eco_user_profiles.role` ARE NON-AUTHORITATIVE**:
+   - Canonical tenant authority, membership roles, and organization-scoped active states reside **exclusively in `public.eco_organization_members`**.
+   - `eco_user_profiles.role` is synchronized purely as a lossy compatibility artifact for frontend session display (`src/js/ui.js`); **zero** backend authorization paths evaluate it.
 
 ---
 
-## 2. Operation Scope & Multi-Org Target Resolution
+## 2. Operation Scopes & RPC Design
 
-### 2.1 Operation Scope Analysis
+### 2.1 Operation Scope Table
 
-| RPC Function | Operation Scope | Primary Target Entity | Mutation Target |
-| :--- | :--- | :--- | :--- |
-| `public.change_user_role` | **ORGANIZATION_MEMBERSHIP** (with legacy profile wrapper sync) | `eco_organization_members` | Mutates `role_template_id` on the target user's membership in the authorized organization. Syncs `eco_user_profiles.role` for legacy session readers. |
-| `public.set_user_active` | **ORGANIZATION_MEMBERSHIP** (Tenant Admin) / **GLOBAL_PROFILE** (Platform Admin) | `eco_organization_members` / `eco_user_profiles` | For tenant admins holding `ORG_MEMBER_MANAGE`, mutates `eco_organization_members.is_active` in that organization. For platform superadmins holding `GLOBAL_USER_MANAGE`, mutates `eco_user_profiles.is_active`. |
-| `public.switch_superadmin_org_context` | **PLATFORM_CONTEXT_SWITCH** | `eco_user_active_context` & `eco_user_profiles` | Upserts `eco_user_active_context` and updates `eco_user_profiles.organization_id` to maintain UI session compatibility until WP-A3.3. |
-
-### 2.2 Deterministic Target Organization Resolution Algorithm
-
-When `change_user_role` or `set_user_active` is called without an explicit organization parameter:
-
-```
-[START: Target Org Resolution]
-  |
-  +--> 1. Was `p_org_id` explicitly supplied by the caller?
-  |      YES: Target Org = `p_org_id`.
-  |
-  +--> 2. Is `private.active_org_id()` set AND does the target user have a membership in that org?
-  |      YES: Target Org = `active_org_id()`.
-  |
-  +--> 3. Query `eco_organization_members` for target user where caller holds required capability:
-  |      - If COUNT = 1: Target Org = that unique organization.
-  |      - If COUNT > 1: RAISE EXCEPTION 'AMBIGUOUS_ORGANIZATION_CONTEXT' (Fail-Closed).
-  |      - If COUNT = 0: Target Org = NULL -> RAISE EXCEPTION 'TARGET_NOT_FOUND'.
-  |
-  +--> 4. Enforce `private.can_org(Target Org, Capability)`. If FALSE -> RAISE EXCEPTION 'FORBIDDEN'.
-```
-
-This ensures:
-1. Stale `profile.organization_id` has **zero** effect on authorization.
-2. A multi-org user can be managed in Org A by Admin A without Admin A needing authority in Org B.
-3. Ambiguity in multi-tenant contexts is never guessed; it fails closed unless explicitly scoped.
+| RPC Function | Operation Scope | Required Capability | Primary Target Entity | State Mutated |
+| :--- | :--- | :--- | :--- | :--- |
+| `public.change_user_role` | **ORGANIZATION_MEMBERSHIP** (with legacy profile wrapper sync) | `ORG_MEMBER_PERMISSION_MANAGE` (Org) | `eco_organization_members` | Mutates `role_template_id` on the target user's membership in the authorized org. Syncs `eco_user_profiles.role` for legacy UI compatibility only. |
+| `public.set_user_active` | **ORGANIZATION_MEMBERSHIP** | `ORG_MEMBER_MANAGE` (Org) | `eco_organization_members` | Mutates `eco_organization_members.is_active` in the resolved target organization. **Never** mutates `eco_user_profiles.is_active`. |
+| `public.set_global_user_active` | **GLOBAL_PROFILE** | `GLOBAL_USER_MANAGE` or `PLATFORM_MANAGE` (Platform) | `eco_user_profiles` | Mutates `eco_user_profiles.is_active`. Has zero dependence on `active_org_id()` and **never** mutates tenant memberships. |
+| `public.switch_superadmin_org_context` | **PLATFORM_CONTEXT_SWITCH** | `SUPPORT_IMPERSONATE` or `ACCESS_ANY_ORG` (Platform) | `eco_user_active_context` & `eco_user_profiles` | Upserts `eco_user_active_context` and updates `eco_user_profiles.organization_id` to maintain UI session compatibility until WP-A3.3. |
 
 ---
 
@@ -71,29 +50,40 @@ This ensures:
      - `'UPLOADER'` &rarr; `UPLOADER`
      - `'REVIEWER'` &rarr; `REVIEWER`
      - `'USER'` / `'READ_ONLY'` &rarr; `READ_ONLY`
-  4. Resolve target organization via Deterministic Resolution Algorithm.
+  4. Deterministic target org resolution:
+     - If `p_org_id` provided &rarr; target org = `p_org_id`.
+     - Else if `private.active_org_id()` matches a target membership &rarr; target org = `active_org_id()`.
+     - Else query target's memberships where caller has `ORG_MEMBER_PERMISSION_MANAGE`: if 1 &rarr; unique org; if > 1 &rarr; `AMBIGUOUS_ORGANIZATION_CONTEXT`; if 0 &rarr; `TARGET_NOT_FOUND`.
   5. Enforce capability: `IF NOT private.can_org(v_target_org_id, 'ORG_MEMBER_PERMISSION_MANAGE') THEN RAISE EXCEPTION 'FORBIDDEN'; END IF;`.
   6. Update `public.eco_organization_members SET role_template_id = v_new_tpl_id WHERE organization_id = v_target_org_id AND user_profile_id = target_user_id;`.
-  7. Maintain legacy `eco_user_profiles.role = new_role` for session compatibility.
+  7. Update legacy `eco_user_profiles.role = new_role` for display compatibility only.
   8. Write audit event to `public.eco_audit_events`.
 
-### 3.2 RPC: `public.set_user_active`
+### 3.2 RPC: `public.set_user_active` (Tenant Membership Only)
 - **Signature**: `public.set_user_active(target_user_id UUID, new_active BOOLEAN, p_org_id UUID DEFAULT NULL) RETURNS VOID`
 - **Security**: `SECURITY DEFINER`, `SET search_path = ''`
-- **Capability**: `ORG_MEMBER_MANAGE` (Tenant level) / `GLOBAL_USER_MANAGE` (Platform level)
+- **Capability**: `ORG_MEMBER_MANAGE` (Scope: `ORGANIZATION`)
 - **Execution Flow**:
   1. Resolve caller profile ID via `private.current_profile_id()`. If NULL &rarr; `UNAUTHORIZED`.
   2. Self-protection: `IF target_user_id = v_caller_id AND new_active = FALSE THEN RAISE EXCEPTION 'SELF_DEACTIVATION_NOT_ALLOWED'; END IF;`.
-  3. Resolve target organization via Deterministic Resolution Algorithm.
-  4. If target organization resolved:
-     - Enforce `private.can_org(v_target_org_id, 'ORG_MEMBER_MANAGE')`. If FALSE &rarr; `FORBIDDEN`.
-     - Update `public.eco_organization_members SET is_active = new_active WHERE organization_id = v_target_org_id AND user_profile_id = target_user_id;`.
-     - Write audit event.
-  5. If no tenant organization matched, check if caller is Platform Superadmin (`GLOBAL_USER_MANAGE` / `PLATFORM_MANAGE`):
-     - Update `public.eco_user_profiles SET is_active = new_active WHERE id = target_user_id;`.
-     - Return cleanly.
+  3. Deterministic target org resolution (explicit `p_org_id`, `active_org_id()`, or unique authorized membership).
+  4. Enforce `private.can_org(v_target_org_id, 'ORG_MEMBER_MANAGE')`. If FALSE &rarr; `FORBIDDEN`.
+  5. Update `public.eco_organization_members SET is_active = new_active WHERE organization_id = v_target_org_id AND user_profile_id = target_user_id;`.
+  6. Write tenant-scoped audit event.
 
-### 3.3 RPC: `public.switch_superadmin_org_context`
+### 3.3 RPC: `public.set_global_user_active` (Global Profile Only)
+- **Signature**: `public.set_global_user_active(target_user_id UUID, new_active BOOLEAN) RETURNS VOID`
+- **Security**: `SECURITY DEFINER`, `SET search_path = ''`
+- **Capability**: `GLOBAL_USER_MANAGE` or `PLATFORM_MANAGE` (Scope: `PLATFORM`)
+- **Execution Flow**:
+  1. Resolve caller profile ID via `private.current_profile_id()`. If NULL &rarr; `UNAUTHORIZED`.
+  2. Verify platform capability: `IF NOT (private.can_platform('GLOBAL_USER_MANAGE') OR private.can_platform('PLATFORM_MANAGE')) THEN RAISE EXCEPTION 'FORBIDDEN'; END IF;`.
+  3. Self-protection: `IF target_user_id = v_caller_id AND new_active = FALSE THEN RAISE EXCEPTION 'SELF_DEACTIVATION_NOT_ALLOWED'; END IF;`.
+  4. Verify target exists in `eco_user_profiles`. If not &rarr; `TARGET_NOT_FOUND`.
+  5. Update `public.eco_user_profiles SET is_active = new_active WHERE id = target_user_id;`.
+  6. Write audit event (`organization_id = NULL`).
+
+### 3.4 RPC: `public.switch_superadmin_org_context`
 - **Signature**: `public.switch_superadmin_org_context(p_org_id UUID) RETURNS VOID`
 - **Security**: `SECURITY DEFINER`, `SET search_path = ''`
 - **Capability**: `SUPPORT_IMPERSONATE` or `ACCESS_ANY_ORG` (Scope: `PLATFORM`)
@@ -115,4 +105,4 @@ This ensures:
 
 ## 5. Rollback Boundary
 
-Migration `022_identity_and_org_admin_down.sql` drops the 3-argument/default parameter functions and cleanly restores pre-M022 2-parameter definitions and legacy RLS policies without touching M019, M020, or M021.
+Migration `022_identity_and_org_admin_down.sql` drops `set_global_user_active` and the 3-argument/default parameter functions, cleanly restoring pre-M022 2-parameter definitions and legacy RLS policies without touching M019, M020, or M021.

@@ -34,8 +34,9 @@
    - Execute `change_user_role` on self: Expected Error `SELF_ROLE_CHANGE_NOT_ALLOWED`.
    - Execute `change_user_role` on an ID from `DEMO SUR` only: Expected Error `TARGET_NOT_FOUND` / `FORBIDDEN`.
 5. **Member Status Toggling (Membership State Isolation)**:
-   - Deactivate a member in `DEMO NORTE`: Expected Success (deactivates `eco_organization_members` for `DEMO NORTE`).
+   - Deactivate a member in `DEMO NORTE` via `set_user_active`: Expected Success (deactivates `eco_organization_members` for `DEMO NORTE`).
    - For a multi-org user, verify deactivation in `DEMO NORTE` leaves their `DEMO SUR` membership and global profile active.
+   - Attempt to call `set_global_user_active`: Expected Error `FORBIDDEN`.
 6. **Context Switch Attempt**:
    - Attempt executing `switch_superadmin_org_context`: Expected Error `Unauthorized: Only SUPERADMIN can switch organization context`.
 
@@ -47,7 +48,10 @@
    - Execute `switch_superadmin_org_context(DEMO NORTE)`: Expected Success.
    - Execute `switch_superadmin_org_context(DEMO SUR)`: Expected Success.
    - Execute `switch_superadmin_org_context(NULL)` (Global mode): Expected Success.
-3. **Tenant Administration Isolation**:
+3. **Global Profile State Administration (Active Context Independence)**:
+   - Execute `set_global_user_active(target, false)` with active context set to `DEMO NORTE`: Expected Success (mutates `eco_user_profiles.is_active = FALSE`, leaves memberships untouched).
+   - Execute `set_global_user_active(target, true)` with active context set to `NULL`: Expected Success (identical authorization and result).
+4. **Tenant Administration Isolation**:
    - Attempt executing tenant `change_user_role` or `set_user_active` directly: Expected Error `TARGET_NOT_FOUND` / `FORBIDDEN` (No tenant membership; Platform Superadmin does not bypass tenant capability checks).
 
 ---
