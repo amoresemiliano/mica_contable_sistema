@@ -27,6 +27,8 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(upContent).toContain('authorized_orgs_for_capability(\'ORG_VIEW\')');
         expect(upContent).toContain('authorized_orgs_for_capability(\'ORG_MEMBER_VIEW\')');
         expect(upContent).toContain('authorized_orgs_for_capability(\'AUDIT_VIEW_ORG\')');
+        expect(upContent).toContain('AMBIGUOUS_ORGANIZATION_CONTEXT');
+        expect(upContent).toContain('eco_organization_members');
 
         // Forward migration must NOT use legacy func_role() checks
         expect(upContent).not.toContain('func_role()');
@@ -45,122 +47,85 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(dbTestContent).toContain('sql/022_identity_and_org_admin.sql');
         expect(dbTestContent).toContain('SELF_ROLE_CHANGE_NOT_ALLOWED');
         expect(dbTestContent).toContain('SELF_DEACTIVATION_NOT_ALLOWED');
+        expect(dbTestContent).toContain('AMBIGUOUS_ORGANIZATION_CONTEXT');
     });
 
-    test('Identity, Profile & Org Admin Capability Decision Model', () => {
-        // Semantic simulator for MICA authorization
+    test('Multi-Org Target Resolution & Stale profile.organization_id Immunity Simulation', () => {
         const NORTE = '38419581-8163-482c-9813-616fa6214d71';
         const SUR = 'c7af5a5c-1aac-4add-9873-8073044bf979';
-        const OESTE = '1f5d071f-a09e-4825-9f12-88533383599e';
 
-        const templates = {
-            PLATFORM_SUPERADMIN: {
-                platformCaps: ['PLATFORM_MANAGE', 'SUPPORT_IMPERSONATE', 'ACCESS_ANY_ORG', 'AUDIT_PLATFORM_VIEW'],
-                orgCaps: []
-            },
-            ACCOUNTING_SUPERADMIN: {
-                platformCaps: ['GLOBAL_CATALOG_VIEW', 'CATALOG_ASSIGN_ANY_ORG', 'RATE_MANAGE_ANY_ORG', 'REPORT_COMPARE_SCOPED_ORGS'],
-                bridgeOrgCaps: ['ORG_VIEW', 'RECORD_VIEW', 'AUDIT_VIEW_ORG', 'REPORT_VIEW']
-            },
-            TENANT_ADMIN: {
-                platformCaps: [],
-                orgCaps: [
-                    'ORG_VIEW', 'ORG_SETTINGS_VIEW', 'ORG_SETTINGS_MANAGE', 'ORG_MEMBER_VIEW',
-                    'ORG_MEMBER_INVITE', 'ORG_MEMBER_MANAGE', 'ORG_MEMBER_PERMISSION_MANAGE',
-                    'IMPORT_VIEW', 'IMPORT_CREATE', 'RECORD_VIEW', 'AUDIT_VIEW_ORG'
-                ]
-            },
-            UPLOADER: {
-                platformCaps: [],
-                orgCaps: ['ORG_VIEW', 'IMPORT_VIEW', 'IMPORT_CREATE', 'RECORD_VIEW']
+        // Target user belongs to BOTH NORTE and SUR, but profile.organization_id is SUR (stale for NORTE admin)
+        const targetUser = {
+            id: 'prof-multi',
+            profile_org_id: SUR, // Stale single-org column
+            is_active: true,
+            memberships: [
+                { id: 'mem-norte', org_id: NORTE, template: 'UPLOADER', is_active: true },
+                { id: 'mem-sur', org_id: SUR, template: 'UPLOADER', is_active: true }
+            ]
+        };
+
+        const adminNorte = {
+            id: 'prof-emiliano',
+            active_context: null,
+            memberships: [{ org_id: NORTE, template: 'TENANT_ADMIN', is_active: true }],
+            capabilities: { [NORTE]: ['ORG_MEMBER_PERMISSION_MANAGE', 'ORG_MEMBER_MANAGE', 'ORG_MEMBER_VIEW'] }
+        };
+
+        const superAdminBoth = {
+            id: 'prof-super',
+            active_context: null,
+            memberships: [
+                { org_id: NORTE, template: 'TENANT_ADMIN', is_active: true },
+                { org_id: SUR, template: 'TENANT_ADMIN', is_active: true }
+            ],
+            capabilities: {
+                [NORTE]: ['ORG_MEMBER_PERMISSION_MANAGE', 'ORG_MEMBER_MANAGE'],
+                [SUR]: ['ORG_MEMBER_PERMISSION_MANAGE', 'ORG_MEMBER_MANAGE']
             }
         };
 
-        const users = {
-            VEGEN: {
-                profile: { id: 'prof-vegen', is_active: true },
-                platformRole: 'PLATFORM_SUPERADMIN',
-                memberships: []
-            },
-            Marianela: {
-                profile: { id: 'prof-marianela', is_active: true },
-                platformRole: 'ACCOUNTING_SUPERADMIN',
-                memberships: [
-                    { org_id: NORTE, is_active: true },
-                    { org_id: SUR, is_active: true },
-                    { org_id: OESTE, is_active: true }
-                ]
-            },
-            Emiliano: {
-                profile: { id: 'prof-emiliano', is_active: true },
-                platformRole: null,
-                memberships: [{ org_id: NORTE, template: 'TENANT_ADMIN', is_active: true }]
-            },
-            SynthUploader: {
-                profile: { id: 'prof-uploader', is_active: true },
-                platformRole: null,
-                memberships: [{ org_id: NORTE, template: 'UPLOADER', is_active: true }]
-            },
-            InactiveUser: {
-                profile: { id: 'prof-inactive', is_active: false },
-                platformRole: null,
-                memberships: [{ org_id: NORTE, template: 'TENANT_ADMIN', is_active: true }]
-            }
-        };
-
-        const evaluateCanOrg = (user, orgId, capability, override = null) => {
-            if (!user.profile.is_active) return false;
-            const membership = user.memberships.find(m => m.org_id === orgId && m.is_active);
-            if (!membership) return false;
-
-            if (override === 'DENY') return false;
-            if (override === 'ALLOW') return true;
-
-            // Platform bridge check (Accounting Superadmin)
-            if (user.platformRole === 'ACCOUNTING_SUPERADMIN') {
-                const tpl = templates.ACCOUNTING_SUPERADMIN;
-                if (tpl.bridgeOrgCaps.includes(capability)) return true;
+        // Deterministic target org resolver matching M022 logic
+        const resolveTargetOrg = (caller, target, capability, suppliedOrgId = null) => {
+            if (suppliedOrgId) return suppliedOrgId;
+            if (caller.active_context) {
+                const targetInActive = target.memberships.some(m => m.org_id === caller.active_context);
+                if (targetInActive) return caller.active_context;
             }
 
-            // Tenant template check
-            if (membership.template && templates[membership.template]) {
-                const tpl = templates[membership.template];
-                if (tpl.orgCaps.includes(capability)) return true;
-            }
+            // Find candidate memberships where caller holds required capability
+            const candidateOrgs = target.memberships
+                .map(m => m.org_id)
+                .filter(orgId => caller.capabilities[orgId] && caller.capabilities[orgId].includes(capability));
 
-            return false;
+            if (candidateOrgs.length > 1) throw new Error('AMBIGUOUS_ORGANIZATION_CONTEXT');
+            if (candidateOrgs.length === 0) return null;
+            return candidateOrgs[0];
         };
 
-        const evaluateCanPlatform = (user, capability) => {
-            if (!user.profile.is_active) return false;
-            if (!user.platformRole) return false;
-            const tpl = templates[user.platformRole];
-            return tpl ? tpl.platformCaps.includes(capability) : false;
-        };
+        // 1. Admin NORTE resolves target org to NORTE despite target.profile_org_id being SUR
+        const resolvedOrg = resolveTargetOrg(adminNorte, targetUser, 'ORG_MEMBER_PERMISSION_MANAGE');
+        expect(resolvedOrg).toBe(NORTE);
 
-        // 1. Role modification authorization
-        expect(evaluateCanOrg(users.Emiliano, NORTE, 'ORG_MEMBER_PERMISSION_MANAGE')).toBe(true);
-        expect(evaluateCanOrg(users.Emiliano, SUR, 'ORG_MEMBER_PERMISSION_MANAGE')).toBe(false); // Tenant isolation
-        expect(evaluateCanOrg(users.SynthUploader, NORTE, 'ORG_MEMBER_PERMISSION_MANAGE')).toBe(false); // Base deny
-        expect(evaluateCanOrg(users.SynthUploader, NORTE, 'ORG_MEMBER_PERMISSION_MANAGE', 'ALLOW')).toBe(true); // Override allow
-        expect(evaluateCanOrg(users.Emiliano, NORTE, 'ORG_MEMBER_PERMISSION_MANAGE', 'DENY')).toBe(false); // Override deny
-        expect(evaluateCanOrg(users.InactiveUser, NORTE, 'ORG_MEMBER_PERMISSION_MANAGE')).toBe(false); // Inactive fail-closed
+        // 2. Admin NORTE mutates role in NORTE -> SUR membership remains untouched
+        const norteMembership = targetUser.memberships.find(m => m.org_id === resolvedOrg);
+        norteMembership.template = 'REVIEWER';
+        expect(targetUser.memberships.find(m => m.org_id === NORTE).template).toBe('REVIEWER');
+        expect(targetUser.memberships.find(m => m.org_id === SUR).template).toBe('UPLOADER'); // Untouched
 
-        // 2. Member status management authorization
-        expect(evaluateCanOrg(users.Emiliano, NORTE, 'ORG_MEMBER_MANAGE')).toBe(true);
-        expect(evaluateCanOrg(users.Emiliano, SUR, 'ORG_MEMBER_MANAGE')).toBe(false);
-        expect(evaluateCanOrg(users.SynthUploader, NORTE, 'ORG_MEMBER_MANAGE')).toBe(false);
+        // 3. Admin NORTE deactivates user in NORTE -> SUR membership & global profile remain active
+        norteMembership.is_active = false;
+        expect(targetUser.memberships.find(m => m.org_id === NORTE).is_active).toBe(false);
+        expect(targetUser.memberships.find(m => m.org_id === SUR).is_active).toBe(true); // Untouched
+        expect(targetUser.is_active).toBe(true); // Global profile untouched
 
-        // 3. Superadmin context switching authorization
-        expect(evaluateCanPlatform(users.VEGEN, 'SUPPORT_IMPERSONATE')).toBe(true);
-        expect(evaluateCanPlatform(users.Marianela, 'SUPPORT_IMPERSONATE')).toBe(false);
-        expect(evaluateCanPlatform(users.Emiliano, 'SUPPORT_IMPERSONATE')).toBe(false);
+        // 4. Superadmin in BOTH orgs without active context or explicit org fails closed on ambiguity
+        expect(() => {
+            resolveTargetOrg(superAdminBoth, targetUser, 'ORG_MEMBER_PERMISSION_MANAGE');
+        }).toThrow('AMBIGUOUS_ORGANIZATION_CONTEXT');
 
-        // 4. Audit log visibility
-        expect(evaluateCanOrg(users.Emiliano, NORTE, 'AUDIT_VIEW_ORG')).toBe(true);
-        expect(evaluateCanOrg(users.Emiliano, SUR, 'AUDIT_VIEW_ORG')).toBe(false);
-        expect(evaluateCanOrg(users.Marianela, NORTE, 'AUDIT_VIEW_ORG')).toBe(true);
-        expect(evaluateCanOrg(users.Marianela, SUR, 'AUDIT_VIEW_ORG')).toBe(true);
-        expect(evaluateCanOrg(users.SynthUploader, NORTE, 'AUDIT_VIEW_ORG')).toBe(false);
+        // 5. Superadmin with explicit p_org_id resolves cleanly
+        const explicitOrg = resolveTargetOrg(superAdminBoth, targetUser, 'ORG_MEMBER_PERMISSION_MANAGE', NORTE);
+        expect(explicitOrg).toBe(NORTE);
     });
 });

@@ -8,6 +8,11 @@ BEGIN;
 -- Does NOT modify M019/M020/M021 tables or helpers.
 -- ============================================================
 
+DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT, UUID);
+DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN);
+DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN, UUID);
+
 -- 1. Restore change_user_role to 009 definition
 CREATE OR REPLACE FUNCTION public.change_user_role(
   target_user_id UUID,

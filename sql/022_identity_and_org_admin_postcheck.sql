@@ -37,6 +37,10 @@ BEGIN
         RAISE EXCEPTION 'Postcheck FAILED: public.change_user_role does not enforce ORG_MEMBER_PERMISSION_MANAGE';
     END IF;
 
+    IF v_proc_def NOT ILIKE '%eco_organization_members%' THEN
+        RAISE EXCEPTION 'Postcheck FAILED: public.change_user_role does not update eco_organization_members';
+    END IF;
+
     -- 2. Check set_user_active definition & properties
     SELECT prosrc, prosecdef, v_search_path
     INTO v_proc_def, v_sec_def, v_search_path
@@ -58,6 +62,10 @@ BEGIN
 
     IF v_proc_def NOT ILIKE '%ORG_MEMBER_MANAGE%' THEN
         RAISE EXCEPTION 'Postcheck FAILED: public.set_user_active does not enforce ORG_MEMBER_MANAGE';
+    END IF;
+
+    IF v_proc_def NOT ILIKE '%eco_organization_members%' THEN
+        RAISE EXCEPTION 'Postcheck FAILED: public.set_user_active does not operate on eco_organization_members';
     END IF;
 
     -- 3. Check switch_superadmin_org_context definition & properties

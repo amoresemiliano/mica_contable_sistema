@@ -6,18 +6,29 @@ BEGIN;
 -- Cuts over user role modification, user activation, superadmin
 -- context switching, and organization/profile/audit RLS policies
 -- to the frozen M019/M021 capability foundation.
+--
+-- Canonical authority resides in eco_organization_members.
+-- eco_user_profiles.organization_id is NEVER used as authorization authority.
 -- ============================================================
+
+-- Drop existing functions before recreation to guarantee clean signature binding
+DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT);
+DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT, UUID);
+DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN);
+DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN, UUID);
 
 -- ============================================================
 -- 1. RPC: change_user_role
 -- ============================================================
 -- Governed by ORG_MEMBER_PERMISSION_MANAGE capability.
--- Enforces same-org authorization, fail-closed inactive checks,
--- and prevents self-role modification.
+-- Operates on canonical eco_organization_members.role_template_id.
+-- Target organization is deterministically resolved from p_org_id,
+-- active context, or unique authorized membership (fail-closed on ambiguity).
 
 CREATE OR REPLACE FUNCTION public.change_user_role(
   target_user_id UUID,
-  new_role TEXT
+  new_role TEXT,
+  p_org_id UUID DEFAULT NULL
 )
 RETURNS VOID
 LANGUAGE plpgsql
@@ -27,6 +38,10 @@ AS $$
 DECLARE
   v_caller_id UUID;
   v_target_org_id UUID;
+  v_target_membership_id UUID;
+  v_new_tpl_id UUID;
+  v_match_count INT;
+  v_tpl_code TEXT;
 BEGIN
   -- 1. Resolve caller profile ID via canonical helper (requires is_active = TRUE)
   v_caller_id := private.current_profile_id();
@@ -40,38 +55,94 @@ BEGIN
   END IF;
 
   -- 3. Validate requested role string
-  IF new_role NOT IN ('USER', 'UPLOADER', 'REVIEWER', 'ADMIN') THEN
+  IF new_role NOT IN ('USER', 'UPLOADER', 'REVIEWER', 'ADMIN', 'ACCOUNTANT', 'READ_ONLY') THEN
     RAISE EXCEPTION 'INVALID_ROLE';
   END IF;
 
-  -- 4. Lookup active target profile and target organization
-  SELECT organization_id
-  INTO v_target_org_id
-  FROM public.eco_user_profiles
-  WHERE id = target_user_id
-    AND is_active = TRUE;
+  -- 4. Map role string to role template code
+  v_tpl_code := CASE new_role
+    WHEN 'ADMIN' THEN 'TENANT_ADMIN'
+    WHEN 'ACCOUNTANT' THEN 'ACCOUNTANT'
+    WHEN 'UPLOADER' THEN 'UPLOADER'
+    WHEN 'REVIEWER' THEN 'REVIEWER'
+    WHEN 'USER' THEN 'READ_ONLY'
+    WHEN 'READ_ONLY' THEN 'READ_ONLY'
+    ELSE 'READ_ONLY'
+  END;
+
+  SELECT id INTO v_new_tpl_id
+  FROM public.eco_role_templates
+  WHERE code = v_tpl_code AND is_active = TRUE;
+
+  IF v_new_tpl_id IS NULL THEN
+    RAISE EXCEPTION 'INVALID_ROLE';
+  END IF;
+
+  -- 5. Deterministic Target Organization Resolution
+  -- Priority 1: Explicitly supplied p_org_id
+  -- Priority 2: Caller active context (if set and target has membership in that org)
+  -- Priority 3: Exactly one authorized membership where caller holds ORG_MEMBER_PERMISSION_MANAGE
+  IF p_org_id IS NOT NULL THEN
+    v_target_org_id := p_org_id;
+  ELSE
+    v_target_org_id := private.active_org_id();
+
+    IF v_target_org_id IS NOT NULL THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM public.eco_organization_members
+        WHERE organization_id = v_target_org_id AND user_profile_id = target_user_id
+      ) THEN
+        v_target_org_id := NULL; -- Active context not applicable to this target user
+      END IF;
+    END IF;
+
+    IF v_target_org_id IS NULL THEN
+      SELECT COUNT(*), MIN(m.organization_id)
+      INTO v_match_count, v_target_org_id
+      FROM public.eco_organization_members m
+      WHERE m.user_profile_id = target_user_id
+        AND m.organization_id IN (
+          SELECT private.authorized_orgs_for_capability('ORG_MEMBER_PERMISSION_MANAGE')
+        );
+
+      IF v_match_count > 1 THEN
+        RAISE EXCEPTION 'AMBIGUOUS_ORGANIZATION_CONTEXT';
+      ELSIF v_match_count = 0 THEN
+        v_target_org_id := NULL;
+      END IF;
+    END IF;
+  END IF;
 
   IF v_target_org_id IS NULL THEN
     RAISE EXCEPTION 'TARGET_NOT_FOUND';
   END IF;
 
-  -- 5. Enforce capability in target organization
+  -- 6. Enforce capability in resolved target organization
   IF NOT private.can_org(v_target_org_id, 'ORG_MEMBER_PERMISSION_MANAGE') THEN
     RAISE EXCEPTION 'FORBIDDEN';
   END IF;
 
-  -- 6. Atomic role update
-  UPDATE public.eco_user_profiles
-  SET role = new_role
-  WHERE id = target_user_id
-    AND organization_id = v_target_org_id
-    AND is_active = TRUE;
+  -- 7. Locate target membership in target organization
+  SELECT id INTO v_target_membership_id
+  FROM public.eco_organization_members
+  WHERE organization_id = v_target_org_id
+    AND user_profile_id = target_user_id;
 
-  IF NOT FOUND THEN
+  IF v_target_membership_id IS NULL THEN
     RAISE EXCEPTION 'TARGET_NOT_FOUND';
   END IF;
 
-  -- 7. Audit log event
+  -- 8. Mutate canonical membership role template
+  UPDATE public.eco_organization_members
+  SET role_template_id = v_new_tpl_id
+  WHERE id = v_target_membership_id;
+
+  -- 9. Maintain legacy profile.role for session compatibility
+  UPDATE public.eco_user_profiles
+  SET role = new_role
+  WHERE id = target_user_id;
+
+  -- 10. Audit event
   INSERT INTO public.eco_audit_events (
     organization_id,
     event_type
@@ -83,20 +154,22 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.change_user_role(UUID, TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.change_user_role(UUID, TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION public.change_user_role(UUID, TEXT, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.change_user_role(UUID, TEXT, UUID) TO authenticated;
 
 
 -- ============================================================
 -- 2. RPC: set_user_active
 -- ============================================================
--- Governed by ORG_MEMBER_MANAGE capability.
--- Enforces same-org authorization, fail-closed inactive checks,
--- and prevents self-deactivation.
+-- Governed by ORG_MEMBER_MANAGE capability for tenant membership
+-- activation/deactivation, and GLOBAL_USER_MANAGE/PLATFORM_MANAGE
+-- for global profile account deactivation.
+-- Mutates eco_organization_members.is_active for tenant administration.
 
 CREATE OR REPLACE FUNCTION public.set_user_active(
   target_user_id UUID,
-  new_active BOOLEAN
+  new_active BOOLEAN,
+  p_org_id UUID DEFAULT NULL
 )
 RETURNS VOID
 LANGUAGE plpgsql
@@ -106,7 +179,10 @@ AS $$
 DECLARE
   v_caller_id UUID;
   v_target_org_id UUID;
+  v_target_membership_id UUID;
   v_current_state BOOLEAN;
+  v_match_count INT;
+  v_is_platform_admin BOOLEAN := FALSE;
 BEGIN
   -- 1. Resolve caller profile ID via canonical helper (requires is_active = TRUE)
   v_caller_id := private.current_profile_id();
@@ -119,45 +195,105 @@ BEGIN
     RAISE EXCEPTION 'SELF_DEACTIVATION_NOT_ALLOWED';
   END IF;
 
-  -- 3. Lookup target profile state and organization
-  SELECT is_active, organization_id
-  INTO v_current_state, v_target_org_id
-  FROM public.eco_user_profiles
-  WHERE id = target_user_id;
+  v_is_platform_admin := private.can_platform('GLOBAL_USER_MANAGE') OR private.can_platform('PLATFORM_MANAGE');
 
-  IF v_current_state IS NULL THEN
-    RAISE EXCEPTION 'TARGET_NOT_FOUND';
+  -- 3. Deterministic Target Organization Resolution
+  IF p_org_id IS NOT NULL THEN
+    v_target_org_id := p_org_id;
+  ELSE
+    v_target_org_id := private.active_org_id();
+
+    IF v_target_org_id IS NOT NULL THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM public.eco_organization_members
+        WHERE organization_id = v_target_org_id AND user_profile_id = target_user_id
+      ) THEN
+        v_target_org_id := NULL;
+      END IF;
+    END IF;
+
+    IF v_target_org_id IS NULL THEN
+      SELECT COUNT(*), MIN(m.organization_id)
+      INTO v_match_count, v_target_org_id
+      FROM public.eco_organization_members m
+      WHERE m.user_profile_id = target_user_id
+        AND m.organization_id IN (
+          SELECT private.authorized_orgs_for_capability('ORG_MEMBER_MANAGE')
+        );
+
+      IF v_match_count > 1 THEN
+        RAISE EXCEPTION 'AMBIGUOUS_ORGANIZATION_CONTEXT';
+      ELSIF v_match_count = 0 THEN
+        v_target_org_id := NULL;
+      END IF;
+    END IF;
   END IF;
 
-  -- 4. Enforce capability in target organization
-  IF v_target_org_id IS NULL OR NOT private.can_org(v_target_org_id, 'ORG_MEMBER_MANAGE') THEN
-    RAISE EXCEPTION 'FORBIDDEN';
-  END IF;
+  -- 4. If target organization resolved, execute tenant membership activation/deactivation
+  IF v_target_org_id IS NOT NULL THEN
+    -- Enforce capability in target organization
+    IF NOT private.can_org(v_target_org_id, 'ORG_MEMBER_MANAGE') THEN
+      RAISE EXCEPTION 'FORBIDDEN';
+    END IF;
 
-  -- 5. Idempotent short-circuit
-  IF v_current_state = new_active THEN
+    SELECT id, is_active
+    INTO v_target_membership_id, v_current_state
+    FROM public.eco_organization_members
+    WHERE organization_id = v_target_org_id
+      AND user_profile_id = target_user_id;
+
+    IF v_target_membership_id IS NULL THEN
+      RAISE EXCEPTION 'TARGET_NOT_FOUND';
+    END IF;
+
+    -- Idempotent short-circuit
+    IF v_current_state = new_active THEN
+      RETURN;
+    END IF;
+
+    -- Update canonical tenant membership status
+    UPDATE public.eco_organization_members
+    SET is_active = new_active
+    WHERE id = v_target_membership_id;
+
+    -- Audit event
+    INSERT INTO public.eco_audit_events (
+      organization_id,
+      event_type
+    )
+    VALUES (
+      v_target_org_id,
+      'USER_ACTIVE_CHANGED'
+    );
     RETURN;
   END IF;
 
-  -- 6. Atomic status update
-  UPDATE public.eco_user_profiles
-  SET is_active = new_active
-  WHERE id = target_user_id;
+  -- 5. If no tenant organization matched, check if caller is Platform Superadmin managing global account
+  IF v_is_platform_admin THEN
+    SELECT is_active INTO v_current_state
+    FROM public.eco_user_profiles
+    WHERE id = target_user_id;
 
-  -- 7. Audit log event
-  INSERT INTO public.eco_audit_events (
-    organization_id,
-    event_type
-  )
-  VALUES (
-    v_target_org_id,
-    'USER_ACTIVE_CHANGED'
-  );
+    IF v_current_state IS NULL THEN
+      RAISE EXCEPTION 'TARGET_NOT_FOUND';
+    END IF;
+
+    IF v_current_state = new_active THEN
+      RETURN;
+    END IF;
+
+    UPDATE public.eco_user_profiles
+    SET is_active = new_active
+    WHERE id = target_user_id;
+    RETURN;
+  END IF;
+
+  RAISE EXCEPTION 'TARGET_NOT_FOUND';
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.set_user_active(UUID, BOOLEAN) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.set_user_active(UUID, BOOLEAN) TO authenticated;
+REVOKE ALL ON FUNCTION public.set_user_active(UUID, BOOLEAN, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_user_active(UUID, BOOLEAN, UUID) TO authenticated;
 
 
 -- ============================================================

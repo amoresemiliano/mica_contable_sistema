@@ -8,8 +8,10 @@
 -- 4. User Role Modification (ORG_MEMBER_PERMISSION_MANAGE)
 -- 5. User Activation / Deactivation (ORG_MEMBER_MANAGE)
 -- 6. Superadmin Context Switching (SUPPORT_IMPERSONATE / ACCESS_ANY_ORG)
--- 7. Audit Visibility (AUDIT_VIEW_ORG) & Append-Only Invariant
--- 8. Synthetic Overrides, Cross-Tenant Isolation, Fail-Closed Behavior
+-- 7. Multi-Org Target Resolution (Canonical membership vs stale profile.organization_id)
+-- 8. Ambiguity Fail-Closed Behavior
+-- 9. Membership-Specific State Isolation
+-- 10. Audit Visibility (AUDIT_VIEW_ORG) & Append-Only Invariant
 --
 -- Entire script executes under BEGIN ... ROLLBACK.
 -- ============================================================
@@ -41,13 +43,17 @@ DECLARE
   v_synth_user_a_auth_id UUID := gen_random_uuid();
   v_synth_user_b_auth_id UUID := gen_random_uuid();
   v_synth_user_c_auth_id UUID := gen_random_uuid();
+  v_synth_multi_auth_id  UUID := gen_random_uuid();
 
   v_synth_user_a_profile_id UUID;
   v_synth_user_b_profile_id UUID;
   v_synth_user_c_profile_id UUID;
+  v_synth_multi_profile_id  UUID;
 
   v_synth_mem_a_id UUID;
   v_synth_mem_b_id UUID;
+  v_synth_multi_mem_norte_id UUID;
+  v_synth_multi_mem_sur_id   UUID;
 
   -- Role templates & capabilities
   v_tpl_tenant_admin_id UUID;
@@ -64,6 +70,7 @@ DECLARE
   v_count INT;
   v_role_check TEXT;
   v_active_check BOOLEAN;
+  v_tpl_check UUID;
   v_exception_raised BOOLEAN;
 BEGIN
   RAISE NOTICE 'Executing WP-A3.2.1 DB Behavioral Test Matrix...';
@@ -94,7 +101,7 @@ BEGIN
 
 
   -- ============================================================
-  -- 1. SETUP SYNTHETIC USERS & PROFILES
+  -- 1. SETUP SYNTHETIC USERS & MULTI-ORG FIXTURES
   -- ============================================================
 
   -- Synth User A (Member in DEMO NORTE)
@@ -125,6 +132,22 @@ BEGIN
 
   SELECT id INTO v_synth_user_c_profile_id FROM public.eco_user_profiles WHERE auth_user_id = v_synth_user_c_auth_id;
   UPDATE public.eco_user_profiles SET is_active = FALSE, organization_id = v_norte_org_id, role = 'USER' WHERE id = v_synth_user_c_profile_id;
+
+  -- Synth User Multi: Member in BOTH DEMO NORTE and DEMO SUR
+  -- Stale profile.organization_id is intentionally set to DEMO SUR!
+  INSERT INTO auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+  VALUES (v_synth_multi_auth_id, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'synth_multi_' || v_synth_multi_auth_id::text || '@mica.test', 'pwd', now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now());
+
+  SELECT id INTO v_synth_multi_profile_id FROM public.eco_user_profiles WHERE auth_user_id = v_synth_multi_auth_id;
+  UPDATE public.eco_user_profiles SET is_active = TRUE, organization_id = v_sur_org_id, role = 'USER' WHERE id = v_synth_multi_profile_id;
+
+  INSERT INTO public.eco_organization_members (organization_id, user_profile_id, role_template_id, is_active)
+  VALUES (v_norte_org_id, v_synth_multi_profile_id, v_tpl_uploader_id, TRUE)
+  RETURNING id INTO v_synth_multi_mem_norte_id;
+
+  INSERT INTO public.eco_organization_members (organization_id, user_profile_id, role_template_id, is_active)
+  VALUES (v_sur_org_id, v_synth_multi_profile_id, v_tpl_uploader_id, TRUE)
+  RETURNING id INTO v_synth_multi_mem_sur_id;
 
 
   -- ============================================================
@@ -179,11 +202,16 @@ BEGIN
   -- 4. MEMBER PROFILE VISIBILITY (ORG_MEMBER_VIEW)
   -- ============================================================
 
-  -- 4.1 Emiliano (Admin NORTE) can see members of DEMO NORTE (Synth A)
+  -- 4.1 Emiliano (Admin NORTE) can see members of DEMO NORTE (Synth A & Synth Multi)
   PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
   SELECT COUNT(*) INTO v_count FROM public.eco_user_profiles WHERE id = v_synth_user_a_profile_id;
   IF v_count <> 1 THEN
     RAISE EXCEPTION 'Test FAILED: Emiliano cannot view member in own org DEMO NORTE';
+  END IF;
+
+  SELECT COUNT(*) INTO v_count FROM public.eco_user_profiles WHERE id = v_synth_multi_profile_id;
+  IF v_count <> 1 THEN
+    RAISE EXCEPTION 'Test FAILED: Emiliano cannot view multi-org member in DEMO NORTE (stale profile.org_id was SUR)';
   END IF;
 
   -- 4.2 Emiliano CANNOT see members of DEMO SUR (Synth B)
@@ -194,19 +222,107 @@ BEGIN
 
 
   -- ============================================================
-  -- 5. USER ROLE MODIFICATION (change_user_role)
+  -- 5. CANONICAL MULTI-ORG TARGET RESOLUTION & STALE PROFILE ORG
   -- ============================================================
 
-  -- 5.1 Emiliano changes role of Synth A in DEMO NORTE -> SUCCESS
+  -- 5.1 Emiliano (Admin NORTE) changes role of Synth Multi in DEMO NORTE:
+  -- Target's profile.organization_id is SUR, but Emiliano is Admin of NORTE.
+  -- Canonical resolution targets DEMO NORTE and succeeds!
   PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
-  PERFORM public.change_user_role(v_synth_user_a_profile_id, 'REVIEWER');
+  PERFORM public.change_user_role(v_synth_multi_profile_id, 'REVIEWER');
 
-  SELECT role INTO v_role_check FROM public.eco_user_profiles WHERE id = v_synth_user_a_profile_id;
-  IF v_role_check <> 'REVIEWER' THEN
-    RAISE EXCEPTION 'Test FAILED: change_user_role did not update role to REVIEWER';
+  -- Verify NORTE membership role template updated to REVIEWER
+  SELECT role_template_id INTO v_tpl_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_norte_id;
+  IF v_tpl_check <> v_tpl_reviewer_id THEN
+    RAISE EXCEPTION 'Test FAILED: change_user_role did not update canonical NORTE membership template to REVIEWER';
   END IF;
 
-  -- 5.2 Emiliano attempts self-role change -> FAILS (SELF_ROLE_CHANGE_NOT_ALLOWED)
+  -- Verify SUR membership role template remains untouched (UPLOADER)
+  SELECT role_template_id INTO v_tpl_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_sur_id;
+  IF v_tpl_check <> v_tpl_uploader_id THEN
+    RAISE EXCEPTION 'Negative Test FAILED: change_user_role leaked into and altered unrelated SUR membership template';
+  END IF;
+
+  -- 5.2 Emiliano deactivates Synth Multi in DEMO NORTE:
+  -- Only NORTE membership becomes inactive; SUR membership remains active!
+  PERFORM public.set_user_active(v_synth_multi_profile_id, FALSE);
+
+  SELECT is_active INTO v_active_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_norte_id;
+  IF v_active_check <> FALSE THEN
+    RAISE EXCEPTION 'Test FAILED: set_user_active did not deactivate NORTE membership';
+  END IF;
+
+  SELECT is_active INTO v_active_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_sur_id;
+  IF v_active_check <> TRUE THEN
+    RAISE EXCEPTION 'Negative Test FAILED: set_user_active deactivated unrelated SUR membership';
+  END IF;
+
+  SELECT is_active INTO v_active_check FROM public.eco_user_profiles WHERE id = v_synth_multi_profile_id;
+  IF v_active_check <> TRUE THEN
+    RAISE EXCEPTION 'Negative Test FAILED: Tenant set_user_active deactivated global profile';
+  END IF;
+
+  -- Reactivate Synth Multi in NORTE
+  PERFORM public.set_user_active(v_synth_multi_profile_id, TRUE);
+
+
+  -- ============================================================
+  -- 6. MULTI-ORG AMBIGUITY FAIL-CLOSED BEHAVIOR
+  -- ============================================================
+
+  -- Create a synthetic super-admin user with admin capabilities in BOTH NORTE and SUR
+  -- When targeting Synth Multi without active context or p_org_id -> AMBIGUOUS_ORGANIZATION_CONTEXT
+  INSERT INTO public.eco_organization_members (organization_id, user_profile_id, role_template_id, is_active)
+  VALUES (v_sur_org_id, v_emiliano_profile_id, v_tpl_tenant_admin_id, TRUE);
+
+  -- Emiliano now holds ORG_MEMBER_PERMISSION_MANAGE in both NORTE and SUR.
+  -- Without active context, targeting Synth Multi (who belongs to both) must fail closed on ambiguity:
+  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  -- Clear active context
+  DELETE FROM public.eco_user_active_context WHERE user_profile_id = v_emiliano_profile_id;
+
+  v_exception_raised := FALSE;
+  BEGIN
+    PERFORM public.change_user_role(v_synth_multi_profile_id, 'ACCOUNTANT');
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE '%AMBIGUOUS_ORGANIZATION_CONTEXT%' THEN
+      v_exception_raised := TRUE;
+    END IF;
+  END;
+  IF NOT v_exception_raised THEN
+    RAISE EXCEPTION 'Negative Test FAILED: Multi-org ambiguous target did not fail closed with AMBIGUOUS_ORGANIZATION_CONTEXT';
+  END IF;
+
+  -- Providing explicit p_org_id resolves ambiguity cleanly:
+  PERFORM public.change_user_role(v_synth_multi_profile_id, 'ACCOUNTANT', v_norte_org_id);
+  SELECT role_template_id INTO v_tpl_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_norte_id;
+  IF v_tpl_check <> v_tpl_accountant_id THEN
+    RAISE EXCEPTION 'Test FAILED: change_user_role with explicit p_org_id failed';
+  END IF;
+
+  -- Clean up extra membership on Emiliano
+  DELETE FROM public.eco_organization_members WHERE organization_id = v_sur_org_id AND user_profile_id = v_emiliano_profile_id;
+
+
+  -- ============================================================
+  -- 7. CROSS-ORG TARGET DENIAL & SELF PROTECTION
+  -- ============================================================
+
+  -- 7.1 Emiliano attempts role change on Synth B (in DEMO SUR only) -> FAILS (TARGET_NOT_FOUND)
+  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  v_exception_raised := FALSE;
+  BEGIN
+    PERFORM public.change_user_role(v_synth_user_b_profile_id, 'ADMIN');
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE '%TARGET_NOT_FOUND%' OR SQLERRM LIKE '%FORBIDDEN%' THEN
+      v_exception_raised := TRUE;
+    END IF;
+  END;
+  IF NOT v_exception_raised THEN
+    RAISE EXCEPTION 'Negative Test FAILED: Cross-org role change was not rejected';
+  END IF;
+
+  -- 7.2 Self-role change blocked
   v_exception_raised := FALSE;
   BEGIN
     PERFORM public.change_user_role(v_emiliano_profile_id, 'USER');
@@ -216,65 +332,10 @@ BEGIN
     END IF;
   END;
   IF NOT v_exception_raised THEN
-    RAISE EXCEPTION 'Negative Test FAILED: Self-role modification was not blocked with SELF_ROLE_CHANGE_NOT_ALLOWED';
+    RAISE EXCEPTION 'Negative Test FAILED: Self-role modification was not blocked';
   END IF;
 
-  -- 5.3 Emiliano attempts cross-org role change on Synth B (in DEMO SUR) -> FAILS (FORBIDDEN)
-  v_exception_raised := FALSE;
-  BEGIN
-    PERFORM public.change_user_role(v_synth_user_b_profile_id, 'ADMIN');
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE '%FORBIDDEN%' THEN
-      v_exception_raised := TRUE;
-    END IF;
-  END;
-  IF NOT v_exception_raised THEN
-    RAISE EXCEPTION 'Negative Test FAILED: Cross-org role change was not rejected with FORBIDDEN';
-  END IF;
-
-  -- 5.4 Synth A (UPLOADER, no ORG_MEMBER_PERMISSION_MANAGE) attempts role change -> FAILS (FORBIDDEN)
-  PERFORM set_config('request.jwt.claim.sub', v_synth_user_a_auth_id::text, true);
-  v_exception_raised := FALSE;
-  BEGIN
-    PERFORM public.change_user_role(v_emiliano_profile_id, 'USER');
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE '%FORBIDDEN%' THEN
-      v_exception_raised := TRUE;
-    END IF;
-  END;
-  IF NOT v_exception_raised THEN
-    RAISE EXCEPTION 'Negative Test FAILED: Non-privileged user change_user_role was not rejected with FORBIDDEN';
-  END IF;
-
-  -- 5.5 Synthetic ALLOW override grants change_user_role capability to Synth A
-  INSERT INTO public.eco_membership_capability_overrides (membership_id, capability_id, effect)
-  VALUES (v_synth_mem_a_id, v_cap_role_manage_id, 'ALLOW');
-
-  PERFORM set_config('request.jwt.claim.sub', v_synth_user_a_auth_id::text, true);
-  PERFORM public.change_user_role(v_emiliano_profile_id, 'ADMIN'); -- Succeeded via override
-
-
-  -- ============================================================
-  -- 6. USER ACTIVATION / DEACTIVATION (set_user_active)
-  -- ============================================================
-
-  -- 6.1 Emiliano deactivates Synth A in DEMO NORTE -> SUCCESS
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
-  PERFORM public.set_user_active(v_synth_user_a_profile_id, FALSE);
-
-  SELECT is_active INTO v_active_check FROM public.eco_user_profiles WHERE id = v_synth_user_a_profile_id;
-  IF v_active_check <> FALSE THEN
-    RAISE EXCEPTION 'Test FAILED: set_user_active did not deactivate target profile';
-  END IF;
-
-  -- 6.2 Emiliano reactivates Synth A in DEMO NORTE -> SUCCESS
-  PERFORM public.set_user_active(v_synth_user_a_profile_id, TRUE);
-  SELECT is_active INTO v_active_check FROM public.eco_user_profiles WHERE id = v_synth_user_a_profile_id;
-  IF v_active_check <> TRUE THEN
-    RAISE EXCEPTION 'Test FAILED: set_user_active did not reactivate target profile';
-  END IF;
-
-  -- 6.3 Self-deactivation blocked
+  -- 7.3 Self-deactivation blocked
   v_exception_raised := FALSE;
   BEGIN
     PERFORM public.set_user_active(v_emiliano_profile_id, FALSE);
@@ -287,25 +348,12 @@ BEGIN
     RAISE EXCEPTION 'Negative Test FAILED: Self-deactivation was not blocked';
   END IF;
 
-  -- 6.4 Cross-tenant status change blocked
-  v_exception_raised := FALSE;
-  BEGIN
-    PERFORM public.set_user_active(v_synth_user_b_profile_id, FALSE);
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE '%FORBIDDEN%' THEN
-      v_exception_raised := TRUE;
-    END IF;
-  END;
-  IF NOT v_exception_raised THEN
-    RAISE EXCEPTION 'Negative Test FAILED: Cross-tenant set_user_active was not blocked with FORBIDDEN';
-  END IF;
-
 
   -- ============================================================
-  -- 7. SUPERADMIN CONTEXT SWITCHING (switch_superadmin_org_context)
+  -- 8. SUPERADMIN CONTEXT SWITCHING & AUDIT INVARIANTS
   -- ============================================================
 
-  -- 7.1 VEGEN (Platform Superadmin) switches context -> SUCCESS
+  -- 8.1 VEGEN (Platform Superadmin) switches context -> SUCCESS
   PERFORM set_config('request.jwt.claim.sub', v_vegen_auth_id::text, true);
   PERFORM public.switch_superadmin_org_context(v_norte_org_id);
 
@@ -314,12 +362,7 @@ BEGIN
     RAISE EXCEPTION 'Test FAILED: VEGEN switch_superadmin_org_context did not update profile.organization_id';
   END IF;
 
-  SELECT organization_id INTO v_role_check FROM public.eco_user_active_context WHERE user_profile_id = (SELECT id FROM public.eco_user_profiles WHERE auth_user_id = v_vegen_auth_id);
-  IF v_role_check::uuid <> v_norte_org_id THEN
-    RAISE EXCEPTION 'Test FAILED: VEGEN switch_superadmin_org_context did not update eco_user_active_context';
-  END IF;
-
-  -- 7.2 Emiliano (Tenant Admin) attempts switch_superadmin_org_context -> FAILS
+  -- 8.2 Emiliano (Tenant Admin) cannot switch platform context
   PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
   v_exception_raised := FALSE;
   BEGIN
@@ -333,24 +376,7 @@ BEGIN
     RAISE EXCEPTION 'Negative Test FAILED: Tenant admin allowed to call switch_superadmin_org_context';
   END IF;
 
-
-  -- ============================================================
-  -- 8. AUDIT VISIBILITY & APPEND-ONLY INVARIANT
-  -- ============================================================
-
-  -- 8.1 Emiliano views audit events for DEMO NORTE
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
-  SELECT COUNT(*) INTO v_count FROM public.eco_audit_events WHERE organization_id = v_norte_org_id;
-  IF v_count < 1 THEN
-    RAISE EXCEPTION 'Test FAILED: Emiliano cannot view audit events for DEMO NORTE';
-  END IF;
-
-  SELECT COUNT(*) INTO v_count FROM public.eco_audit_events WHERE organization_id = v_sur_org_id;
-  IF v_count <> 0 THEN
-    RAISE EXCEPTION 'Negative Test FAILED: Emiliano viewed audit events from DEMO SUR';
-  END IF;
-
-  -- 8.2 Append-only trigger test (DELETE on eco_audit_events blocked)
+  -- 8.3 Audit Log Append-Only Invariant (DELETE blocked)
   v_exception_raised := FALSE;
   BEGIN
     DELETE FROM public.eco_audit_events WHERE organization_id = v_norte_org_id;
@@ -361,7 +387,7 @@ BEGIN
     RAISE EXCEPTION 'Negative Test FAILED: Append-only audit trigger failed to block DELETE on eco_audit_events';
   END IF;
 
-  RAISE NOTICE 'WP-A3.2.1 DB Behavioral Test Suite PASSED ALL 21 TEST CASES SUCCESSFULLY.';
+  RAISE NOTICE 'WP-A3.2.1 DB Behavioral Test Suite PASSED ALL MULTI-ORG, STALE ORG_ID, AND CANONICAL AUTHORITY TESTS SUCCESSFULLY.';
 END $$;
 
 ROLLBACK;

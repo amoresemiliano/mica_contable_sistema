@@ -28,11 +28,15 @@
    - Querying `eco_user_profiles` returns Emiliano's profile and active members of `DEMO NORTE`. It must NOT list members belonging exclusively to `DEMO SUR` or `DEMO OESTE`.
 3. **Audit Visibility**:
    - Audit event viewer / query on `eco_audit_events` returns events matching `organization_id = DEMO NORTE`.
-4. **Member Role Administration**:
+4. **Member Role Administration (Canonical Membership Update)**:
    - Execute `change_user_role` on a member of `DEMO NORTE`: Expected Success.
+   - For a user belonging to both `DEMO NORTE` and `DEMO SUR`, verify modifying role in `DEMO NORTE` only updates `role_template_id` for `DEMO NORTE`.
    - Execute `change_user_role` on self: Expected Error `SELF_ROLE_CHANGE_NOT_ALLOWED`.
-   - Execute `change_user_role` on an ID from `DEMO SUR`: Expected Error `FORBIDDEN` or `TARGET_NOT_FOUND`.
-5. **Context Switch Attempt**:
+   - Execute `change_user_role` on an ID from `DEMO SUR` only: Expected Error `TARGET_NOT_FOUND` / `FORBIDDEN`.
+5. **Member Status Toggling (Membership State Isolation)**:
+   - Deactivate a member in `DEMO NORTE`: Expected Success (deactivates `eco_organization_members` for `DEMO NORTE`).
+   - For a multi-org user, verify deactivation in `DEMO NORTE` leaves their `DEMO SUR` membership and global profile active.
+6. **Context Switch Attempt**:
    - Attempt executing `switch_superadmin_org_context`: Expected Error `Unauthorized: Only SUPERADMIN can switch organization context`.
 
 ---
@@ -44,7 +48,7 @@
    - Execute `switch_superadmin_org_context(DEMO SUR)`: Expected Success.
    - Execute `switch_superadmin_org_context(NULL)` (Global mode): Expected Success.
 3. **Tenant Administration Isolation**:
-   - Attempt executing tenant `change_user_role` or `set_user_active` directly: Expected Error `FORBIDDEN` (No tenant membership; Platform Superadmin does not bypass tenant capability checks).
+   - Attempt executing tenant `change_user_role` or `set_user_active` directly: Expected Error `TARGET_NOT_FOUND` / `FORBIDDEN` (No tenant membership; Platform Superadmin does not bypass tenant capability checks).
 
 ---
 
