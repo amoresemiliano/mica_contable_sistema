@@ -5,8 +5,12 @@ BEGIN;
 -- ============================================================
 -- Restores pre-M022 definitions for RPCs and RLS policies
 -- using legacy private.func_role() and private.org_id() checks.
+-- Drops M022-introduced platform audit table and global RPC.
 -- Does NOT modify M019/M020/M021 tables or helpers.
 -- ============================================================
+
+-- Drop M022 platform audit table and its triggers/policies
+DROP TABLE IF EXISTS public.eco_platform_audit_events CASCADE;
 
 DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT);
 DROP FUNCTION IF EXISTS public.change_user_role(UUID, TEXT, UUID);
@@ -104,13 +108,11 @@ BEGIN
     RAISE EXCEPTION 'FORBIDDEN';
   END IF;
 
-  IF target_user_id = v_caller_id
-     AND new_active = FALSE THEN
+  IF target_user_id = v_caller_id AND new_active = FALSE THEN
     RAISE EXCEPTION 'SELF_DEACTIVATION_NOT_ALLOWED';
   END IF;
 
-  SELECT is_active
-  INTO v_current_state
+  SELECT is_active INTO v_current_state
   FROM public.eco_user_profiles
   WHERE id = target_user_id
     AND organization_id = v_org_id;
@@ -150,13 +152,21 @@ CREATE OR REPLACE FUNCTION public.switch_superadmin_org_context(
 RETURNS VOID
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO ''
+SET search_path = ''
 AS $$
 DECLARE
-  v_caller_role TEXT;
   v_caller_id UUID;
+  v_caller_role TEXT;
 BEGIN
-  v_caller_role := private.func_role();
+  SELECT id, role INTO v_caller_id, v_caller_role
+  FROM public.eco_user_profiles
+  WHERE auth_user_id = auth.uid()
+    AND is_active = TRUE;
+
+  IF v_caller_id IS NULL THEN
+    RAISE EXCEPTION 'User profile not found or inactive';
+  END IF;
+
   IF v_caller_role != 'SUPERADMIN' THEN
     RAISE EXCEPTION 'Unauthorized: Only SUPERADMIN can switch organization context';
   END IF;
@@ -165,14 +175,6 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM public.eco_organizations WHERE id = p_org_id) THEN
       RAISE EXCEPTION 'Invalid organization ID';
     END IF;
-  END IF;
-
-  SELECT id INTO v_caller_id
-  FROM public.eco_user_profiles
-  WHERE auth_user_id = auth.uid() AND is_active = TRUE;
-
-  IF v_caller_id IS NULL THEN
-    RAISE EXCEPTION 'User profile not found or inactive';
   END IF;
 
   UPDATE public.eco_user_profiles

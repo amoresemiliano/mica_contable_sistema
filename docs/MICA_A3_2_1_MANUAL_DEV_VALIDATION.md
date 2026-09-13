@@ -28,13 +28,15 @@
    - Querying `eco_user_profiles` returns Emiliano's profile and active members of `DEMO NORTE`. It must NOT list members belonging exclusively to `DEMO SUR` or `DEMO OESTE`.
 3. **Audit Visibility**:
    - Audit event viewer / query on `eco_audit_events` returns events matching `organization_id = DEMO NORTE`.
+   - Querying `eco_platform_audit_events` returns 0 rows (RLS blocks tenant admins).
 4. **Member Role Administration (Canonical Membership Update)**:
    - Execute `change_user_role` on a member of `DEMO NORTE`: Expected Success.
+   - For an inactive member in `DEMO NORTE`, execute `change_user_role`: Expected Success (updates `role_template_id`, membership remains inactive).
    - For a user belonging to both `DEMO NORTE` and `DEMO SUR`, verify modifying role in `DEMO NORTE` only updates `role_template_id` for `DEMO NORTE`.
    - Execute `change_user_role` on self: Expected Error `SELF_ROLE_CHANGE_NOT_ALLOWED`.
    - Execute `change_user_role` on an ID from `DEMO SUR` only: Expected Error `TARGET_NOT_FOUND` / `FORBIDDEN`.
 5. **Member Status Toggling (Membership State Isolation)**:
-   - Deactivate a member in `DEMO NORTE` via `set_user_active`: Expected Success (deactivates `eco_organization_members` for `DEMO NORTE`).
+   - Deactivate a member in `DEMO NORTE` via `set_user_active`: Expected Success (deactivates `eco_organization_members` for `DEMO NORTE`, emits tenant audit to `eco_audit_events`).
    - For a multi-org user, verify deactivation in `DEMO NORTE` leaves their `DEMO SUR` membership and global profile active.
    - Attempt to call `set_global_user_active`: Expected Error `FORBIDDEN`.
 6. **Context Switch Attempt**:
@@ -45,13 +47,15 @@
 ### Scenario 2: VEGEN (Platform Superadmin)
 1. **Login**: Authenticate as `vegendigital@gmail.com`.
 2. **Context Switching**:
-   - Execute `switch_superadmin_org_context(DEMO NORTE)`: Expected Success.
+   - Execute `switch_superadmin_org_context(DEMO NORTE)`: Expected Success (emits `SUPERADMIN_ORG_CONTEXT_SWITCHED` to `eco_platform_audit_events`).
    - Execute `switch_superadmin_org_context(DEMO SUR)`: Expected Success.
    - Execute `switch_superadmin_org_context(NULL)` (Global mode): Expected Success.
-3. **Global Profile State Administration (Active Context Independence)**:
-   - Execute `set_global_user_active(target, false)` with active context set to `DEMO NORTE`: Expected Success (mutates `eco_user_profiles.is_active = FALSE`, leaves memberships untouched).
-   - Execute `set_global_user_active(target, true)` with active context set to `NULL`: Expected Success (identical authorization and result).
-4. **Tenant Administration Isolation**:
+3. **Global Profile State Administration (Active Context Independence & Platform Audit)**:
+   - Execute `set_global_user_active(target, false)` with active context set to `DEMO NORTE`: Expected Success (mutates `eco_user_profiles.is_active = FALSE`, emits `GLOBAL_USER_ACTIVE_CHANGED` to `eco_platform_audit_events`, leaves memberships untouched).
+   - Execute `set_global_user_active(target, true)` with active context set to `NULL`: Expected Success (reactivates and emits 2nd platform audit event).
+4. **Platform Audit Visibility**:
+   - Query `eco_platform_audit_events`: Returns platform audit log records.
+5. **Tenant Administration Isolation**:
    - Attempt executing tenant `change_user_role` or `set_user_active` directly: Expected Error `TARGET_NOT_FOUND` / `FORBIDDEN` (No tenant membership; Platform Superadmin does not bypass tenant capability checks).
 
 ---
@@ -62,6 +66,7 @@
    - Querying `eco_organizations` returns `DEMO NORTE`, `DEMO SUR`, and `DEMO OESTE` (scoped bridge).
    - Legacy `MICA` organization (where Marianela has no membership) is NOT returned.
 3. **Audit Visibility**:
-   - Audit viewer returns events from `DEMO NORTE`, `DEMO SUR`, and `DEMO OESTE`.
+   - Audit viewer returns events from `DEMO NORTE`, `DEMO SUR`, and `DEMO OESTE` on `eco_audit_events`.
+   - Querying `eco_platform_audit_events` returns 0 rows (`ACCOUNTING_SUPERADMIN` has no platform audit view capability).
 4. **Member Role Administration**:
    - Attempt executing `change_user_role`: Expected Error `FORBIDDEN` (`ACCOUNTING_SUPERADMIN` template grants operational accounting capabilities, not tenant user permission management).

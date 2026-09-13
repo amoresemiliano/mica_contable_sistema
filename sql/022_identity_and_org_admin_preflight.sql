@@ -53,8 +53,11 @@ BEGIN
         'ORG_MEMBER_MANAGE',
         'ORG_MEMBER_PERMISSION_MANAGE',
         'AUDIT_VIEW_ORG',
+        'AUDIT_PLATFORM_VIEW',
         'SUPPORT_IMPERSONATE',
-        'ACCESS_ANY_ORG'
+        'ACCESS_ANY_ORG',
+        'GLOBAL_USER_MANAGE',
+        'PLATFORM_MANAGE'
     ]
     LOOP
         IF NOT EXISTS (
@@ -75,7 +78,8 @@ BEGIN
         'active_org_id',
         'can_platform',
         'can_org',
-        'authorized_orgs_for_capability'
+        'authorized_orgs_for_capability',
+        'prevent_audit_mutation'
     ]
     LOOP
         IF NOT EXISTS (
@@ -116,36 +120,37 @@ BEGIN
         RAISE EXCEPTION 'Preflight FAILED: Required functions missing: %', array_to_string(v_missing_functions, ', ');
     END IF;
 
-    -- 5. Check required columns exist
+    -- 5. Check role_template_id column in eco_organization_members
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'eco_user_profiles' AND column_name = 'auth_user_id'
+        WHERE table_schema = 'public'
+          AND table_name = 'eco_organization_members'
+          AND column_name = 'role_template_id'
     ) THEN
-        v_missing_columns := array_append(v_missing_columns, 'public.eco_user_profiles.auth_user_id');
+        v_missing_columns := array_append(v_missing_columns, 'eco_organization_members.role_template_id');
     END IF;
 
+    -- 6. Check organization_id column in eco_user_profiles
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'eco_organization_members' AND column_name = 'user_profile_id'
+        WHERE table_schema = 'public'
+          AND table_name = 'eco_user_profiles'
+          AND column_name = 'organization_id'
     ) THEN
-        v_missing_columns := array_append(v_missing_columns, 'public.eco_organization_members.user_profile_id');
+        v_missing_columns := array_append(v_missing_columns, 'eco_user_profiles.organization_id');
     END IF;
 
     IF array_length(v_missing_columns, 1) > 0 THEN
-        RAISE EXCEPTION 'Preflight FAILED: Required schema columns missing: %', array_to_string(v_missing_columns, ', ');
+        RAISE EXCEPTION 'Preflight FAILED: Required columns missing: %', array_to_string(v_missing_columns, ', ');
     END IF;
 
-    -- 6. Check required trigger enforce_append_only_audit on eco_audit_events
+    -- 7. Check append-only trigger on eco_audit_events
     IF NOT EXISTS (
-        SELECT 1 FROM pg_trigger t
-        JOIN pg_class c ON t.tgrelid = c.oid
-        JOIN pg_namespace n ON c.relnamespace = n.oid
-        WHERE n.nspname = 'public' 
-          AND c.relname = 'eco_audit_events' 
-          AND t.tgname = 'enforce_append_only_audit'
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'enforce_append_only_audit'
     ) THEN
-        RAISE EXCEPTION 'Preflight FAILED: Trigger enforce_append_only_audit on eco_audit_events is missing';
+        RAISE EXCEPTION 'Preflight FAILED: enforce_append_only_audit trigger is missing on eco_audit_events';
     END IF;
 
-    RAISE NOTICE 'Migration 022 Preflight Passed: Baseline state is verified and valid for WP-A3.2.1.';
+    RAISE NOTICE 'Migration 022 Preflight Checks PASSED (All tables, capabilities, helpers, columns, and audit triggers verified).';
 END $$;

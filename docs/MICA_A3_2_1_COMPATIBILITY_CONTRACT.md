@@ -1,8 +1,8 @@
 # MICA Authorization Compatibility Contract (WP-A3.2.1)
 
 > **Work Package**: WP-A3.2.1 — Identity, Profiles & Organization Administration  
-> **Status**: FROZEN & UPDATED (GLOBAL VS TENANT STATE SEPARATION & MULTI-ORG RESOLUTION)  
-> **Baseline Commit**: `fab6e49633228d10b86e0439db879f32c57e6b97`  
+> **Status**: FROZEN & UPDATED (PLATFORM AUDIT SEPARATION & MULTI-ORG RESOLUTION)  
+> **Baseline Commit**: `6208d9db21359a2eb54e84021a176f163b53faf9`  
 
 ---
 
@@ -25,15 +25,20 @@ This document establishes the bidirectional compatibility contract between the c
 
 ## 3. Behavioral Invariants & Semantic Guarantees
 
-1. **Explicit Separation of Global vs Tenant State**:
+1. **Audit Separation & Non-Pollution**:
+   - Tenant operations emit to `public.eco_audit_events` with `organization_id NOT NULL`.
+   - Platform operations (`set_global_user_active`, `switch_superadmin_org_context`) emit to `public.eco_platform_audit_events`.
+   - No fake organization UUIDs are ever used for platform audit events.
+2. **Explicit Separation of Global vs Tenant State**:
    - `set_user_active` operates strictly on `eco_organization_members.is_active` for a specific tenant organization. It **never** mutates `eco_user_profiles.is_active`.
    - `set_global_user_active` operates strictly on `eco_user_profiles.is_active` at platform level. It **never** touches `eco_organization_members`.
-2. **Active Context Independence**:
+3. **Inactive Membership Role Configuration Policy**:
+   - `change_user_role` allows updating `role_template_id` on inactive memberships without activating them (`is_active` remains `FALSE`).
+4. **Active Context Independence**:
    - Platform global operations (`set_global_user_active`) do not depend on, read, or require `active_org_id()`. An active context cannot grant or deny global platform capability.
    - For tenant operations, `active_org_id()` acts solely as an operation selector when `p_org_id` is omitted, never as an authorization bypass.
-3. **Legacy `profile.role` Classification**:
+5. **Legacy `profile.role` Classification**:
    - `eco_user_profiles.role` is classified as `COMPATIBILITY_ONLY / DISPLAY_ONLY`.
    - Backend authorization readers remaining: **ZERO**.
-   - Changes to role in Org A update `eco_organization_members.role_template_id` for Org A only; Org B canonical template is completely isolated.
-4. **Append-Only Audit Guarantee**:
-   - Database trigger `enforce_append_only_audit` on `eco_audit_events` remains active and untouched.
+6. **Append-Only Invariant**:
+   - Both `eco_audit_events` and `eco_platform_audit_events` are strictly append-only, defended by trigger functions preventing `UPDATE` and `DELETE`.

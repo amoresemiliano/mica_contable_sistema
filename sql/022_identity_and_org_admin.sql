@@ -10,6 +10,11 @@ BEGIN;
 -- Canonical authority resides exclusively in eco_organization_members.
 -- eco_user_profiles.organization_id and eco_user_profiles.role are
 -- NEVER used as authorization authority.
+--
+-- Introduces dedicated public.eco_platform_audit_events for
+-- global/platform level operations (e.g. set_global_user_active,
+-- switch_superadmin_org_context), leaving public.eco_audit_events
+-- strictly for organization-scoped tenant events.
 -- ============================================================
 
 -- Drop existing functions before recreation to guarantee clean signature binding
@@ -20,12 +25,60 @@ DROP FUNCTION IF EXISTS public.set_user_active(UUID, BOOLEAN, UUID);
 DROP FUNCTION IF EXISTS public.set_global_user_active(UUID, BOOLEAN);
 
 -- ============================================================
--- 1. RPC: change_user_role (Tenant Scoped)
+-- 1. PLATFORM AUDIT TABLE & GOVERNANCE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.eco_platform_audit_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_user_profile_id UUID NULL REFERENCES public.eco_user_profiles(id) ON DELETE SET NULL,
+  event_type TEXT NOT NULL,
+  target_user_profile_id UUID NULL REFERENCES public.eco_user_profiles(id) ON DELETE SET NULL,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Indexes for efficient lookup and timeline ordering
+CREATE INDEX IF NOT EXISTS idx_eco_platform_audit_created
+ON public.eco_platform_audit_events(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_eco_platform_audit_target
+ON public.eco_platform_audit_events(target_user_profile_id)
+WHERE target_user_profile_id IS NOT NULL;
+
+-- Append-only governance: prevent UPDATE or DELETE
+DROP TRIGGER IF EXISTS enforce_append_only_platform_audit ON public.eco_platform_audit_events;
+
+CREATE TRIGGER enforce_append_only_platform_audit
+BEFORE UPDATE OR DELETE ON public.eco_platform_audit_events
+FOR EACH ROW
+EXECUTE FUNCTION private.prevent_audit_mutation();
+
+-- Permissions & RLS
+ALTER TABLE public.eco_platform_audit_events ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.eco_platform_audit_events FROM PUBLIC;
+GRANT SELECT ON TABLE public.eco_platform_audit_events TO authenticated;
+
+DROP POLICY IF EXISTS "Platform audit events viewable by platform admins" ON public.eco_platform_audit_events;
+
+CREATE POLICY "Platform audit events viewable by platform admins"
+ON public.eco_platform_audit_events
+FOR SELECT
+TO authenticated
+USING (
+  private.can_platform('AUDIT_PLATFORM_VIEW')
+  OR private.can_platform('PLATFORM_MANAGE')
+);
+
+
+-- ============================================================
+-- 2. RPC: change_user_role (Tenant Scoped)
 -- ============================================================
 -- Governed by ORG_MEMBER_PERMISSION_MANAGE capability.
 -- Operates on canonical eco_organization_members.role_template_id.
 -- Target organization is deterministically resolved from p_org_id,
 -- active context selector, or unique authorized membership.
+-- Allows updating role_template_id on inactive memberships (preparing
+-- permissions prior to reactivation) without modifying is_active state.
 
 CREATE OR REPLACE FUNCTION public.change_user_role(
   target_user_id UUID,
@@ -119,12 +172,12 @@ BEGIN
     RAISE EXCEPTION 'TARGET_NOT_FOUND';
   END IF;
 
-  -- 6. Enforce capability in resolved target organization
+  -- 6. Enforce tenant capability
   IF NOT private.can_org(v_target_org_id, 'ORG_MEMBER_PERMISSION_MANAGE') THEN
     RAISE EXCEPTION 'FORBIDDEN';
   END IF;
 
-  -- 7. Locate target membership in target organization
+  -- 7. Lookup membership record (supports active or inactive memberships)
   SELECT id INTO v_target_membership_id
   FROM public.eco_organization_members
   WHERE organization_id = v_target_org_id
@@ -134,17 +187,17 @@ BEGIN
     RAISE EXCEPTION 'TARGET_NOT_FOUND';
   END IF;
 
-  -- 8. Mutate canonical membership role template
+  -- 8. Mutate canonical role_template_id in eco_organization_members
   UPDATE public.eco_organization_members
   SET role_template_id = v_new_tpl_id
   WHERE id = v_target_membership_id;
 
-  -- 9. Maintain legacy profile.role for session display compatibility (lossy scalar)
+  -- 9. Maintain legacy profile.role for UI session display compatibility ONLY (non-authoritative)
   UPDATE public.eco_user_profiles
   SET role = new_role
   WHERE id = target_user_id;
 
-  -- 10. Audit event
+  -- 10. Audit event (Tenant Scoped)
   INSERT INTO public.eco_audit_events (
     organization_id,
     event_type
@@ -161,7 +214,7 @@ GRANT EXECUTE ON FUNCTION public.change_user_role(UUID, TEXT, UUID) TO authentic
 
 
 -- ============================================================
--- 2. RPC: set_user_active (Tenant Scoped Membership Operation)
+-- 3. RPC: set_user_active (Tenant Scoped Membership Operation)
 -- ============================================================
 -- Governed exclusively by ORG_MEMBER_MANAGE capability.
 -- Mutates ONLY eco_organization_members.is_active for the target
@@ -256,7 +309,7 @@ BEGIN
   SET is_active = new_active
   WHERE id = v_target_membership_id;
 
-  -- 7. Audit event
+  -- 7. Audit event (Tenant Scoped)
   INSERT INTO public.eco_audit_events (
     organization_id,
     event_type
@@ -273,11 +326,12 @@ GRANT EXECUTE ON FUNCTION public.set_user_active(UUID, BOOLEAN, UUID) TO authent
 
 
 -- ============================================================
--- 3. RPC: set_global_user_active (Platform Scoped Account Operation)
+-- 4. RPC: set_global_user_active (Platform Scoped Account Operation)
 -- ============================================================
 -- Governed exclusively by GLOBAL_USER_MANAGE or PLATFORM_MANAGE.
 -- Mutates ONLY eco_user_profiles.is_active for system-wide account state.
 -- Has ZERO dependence on active tenant context.
+-- Emits dedicated platform audit event into eco_platform_audit_events.
 
 CREATE OR REPLACE FUNCTION public.set_global_user_active(
   target_user_id UUID,
@@ -326,6 +380,23 @@ BEGIN
   UPDATE public.eco_user_profiles
   SET is_active = new_active
   WHERE id = target_user_id;
+
+  -- 7. Platform Audit event
+  INSERT INTO public.eco_platform_audit_events (
+    actor_user_profile_id,
+    event_type,
+    target_user_profile_id,
+    metadata
+  )
+  VALUES (
+    v_caller_id,
+    'GLOBAL_USER_ACTIVE_CHANGED',
+    target_user_id,
+    jsonb_build_object(
+      'new_active', new_active,
+      'previous_active', v_current_state
+    )
+  );
 END;
 $$;
 
@@ -334,11 +405,12 @@ GRANT EXECUTE ON FUNCTION public.set_global_user_active(UUID, BOOLEAN) TO authen
 
 
 -- ============================================================
--- 4. RPC: switch_superadmin_org_context (Platform Context Switch)
+-- 5. RPC: switch_superadmin_org_context (Platform Context Switch)
 -- ============================================================
 -- Governed by SUPPORT_IMPERSONATE / ACCESS_ANY_ORG platform capabilities.
 -- Syncs both legacy eco_user_profiles.organization_id and canonical
 -- eco_user_active_context.
+-- Emits dedicated platform audit event into eco_platform_audit_events.
 
 CREATE OR REPLACE FUNCTION public.switch_superadmin_org_context(
   p_org_id UUID
@@ -383,11 +455,19 @@ BEGIN
   ON CONFLICT (user_profile_id)
   DO UPDATE SET organization_id = EXCLUDED.organization_id, updated_at = now();
 
-  -- 6. Audit log event
-  IF p_org_id IS NOT NULL THEN
-    INSERT INTO public.eco_audit_events (organization_id, event_type)
-    VALUES (p_org_id, 'SUPERADMIN_ORG_CONTEXT_SWITCHED');
-  END IF;
+  -- 6. Platform Audit log event
+  INSERT INTO public.eco_platform_audit_events (
+    actor_user_profile_id,
+    event_type,
+    target_user_profile_id,
+    metadata
+  )
+  VALUES (
+    v_caller_id,
+    'SUPERADMIN_ORG_CONTEXT_SWITCHED',
+    NULL,
+    jsonb_build_object('target_organization_id', p_org_id)
+  );
 END;
 $$;
 
@@ -396,7 +476,7 @@ GRANT EXECUTE ON FUNCTION public.switch_superadmin_org_context(UUID) TO authenti
 
 
 -- ============================================================
--- 5. RLS POLICIES
+-- 6. RLS POLICIES
 -- ============================================================
 
 -- A. eco_organizations: Governed by ORG_VIEW capability (set-based)

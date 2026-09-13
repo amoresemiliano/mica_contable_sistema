@@ -18,6 +18,9 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(fs.existsSync(dbTestPath)).toBe(true);
 
         const upContent = fs.readFileSync(upPath, 'utf8');
+        expect(upContent).toContain('CREATE TABLE IF NOT EXISTS public.eco_platform_audit_events');
+        expect(upContent).toContain('enforce_append_only_platform_audit');
+        expect(upContent).toContain('AUDIT_PLATFORM_VIEW');
         expect(upContent).toContain('CREATE OR REPLACE FUNCTION public.change_user_role');
         expect(upContent).toContain('ORG_MEMBER_PERMISSION_MANAGE');
         expect(upContent).toContain('CREATE OR REPLACE FUNCTION public.set_user_active');
@@ -36,13 +39,17 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(upContent).not.toContain('func_role()');
 
         const downContent = fs.readFileSync(downPath, 'utf8');
+        expect(downContent).toContain('DROP TABLE IF EXISTS public.eco_platform_audit_events CASCADE;');
         expect(downContent).toContain('CREATE OR REPLACE FUNCTION public.change_user_role');
         expect(downContent).toContain('CREATE OR REPLACE FUNCTION public.set_user_active');
         expect(downContent).toContain('DROP FUNCTION IF EXISTS public.set_global_user_active');
         expect(downContent).toContain('CREATE OR REPLACE FUNCTION public.switch_superadmin_org_context');
         expect(downContent).toContain('private.func_role() <> \'ADMIN\'');
         expect(downContent).toContain('v_caller_role != \'SUPERADMIN\'');
-        expect(downContent).not.toContain('DROP TABLE');
+
+        const postcheckContent = fs.readFileSync(postcheckPath, 'utf8');
+        expect(postcheckContent).toContain('eco_platform_audit_events');
+        expect(postcheckContent).toContain('enforce_append_only_platform_audit');
 
         const dbTestContent = fs.readFileSync(dbTestPath, 'utf8');
         expect(dbTestContent).toContain('BEGIN;');
@@ -51,6 +58,7 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(dbTestContent).toContain('SELF_ROLE_CHANGE_NOT_ALLOWED');
         expect(dbTestContent).toContain('SELF_DEACTIVATION_NOT_ALLOWED');
         expect(dbTestContent).toContain('set_global_user_active');
+        expect(dbTestContent).toContain('eco_platform_audit_events');
         expect(dbTestContent).toContain('AMBIGUOUS_ORGANIZATION_CONTEXT');
     });
 
@@ -80,7 +88,7 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         const platformSuperadmin = {
             id: 'prof-vegen',
             active_context: NORTE, // Active context set to NORTE
-            platformCapabilities: ['GLOBAL_USER_MANAGE', 'PLATFORM_MANAGE', 'SUPPORT_IMPERSONATE']
+            platformCapabilities: ['GLOBAL_USER_MANAGE', 'PLATFORM_MANAGE', 'SUPPORT_IMPERSONATE', 'AUDIT_PLATFORM_VIEW']
         };
 
         const superAdminBoth = {
@@ -95,6 +103,9 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
                 [SUR]: ['ORG_MEMBER_PERMISSION_MANAGE', 'ORG_MEMBER_MANAGE']
             }
         };
+
+        // Platform audit event mock store
+        const platformAuditLog = [];
 
         // Deterministic target org resolver matching M022 logic
         const resolveTargetOrg = (caller, target, capability, suppliedOrgId = null) => {
@@ -130,29 +141,50 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(targetUser.memberships.find(m => m.org_id === SUR).is_active).toBe(true); // Untouched
         expect(targetUser.is_active).toBe(true); // Global profile untouched
 
-        // 4. Global deactivation via Platform Superadmin: mutates ONLY global profile, zero effect from active_context
+        // 4. Admin NORTE changes role on an inactive membership -> allows update, stays inactive
+        norteMembership.template = 'ACCOUNTANT';
+        expect(targetUser.memberships.find(m => m.org_id === NORTE).template).toBe('ACCOUNTANT');
+        expect(targetUser.memberships.find(m => m.org_id === NORTE).is_active).toBe(false);
+
+        // Reactivate NORTE membership
+        norteMembership.is_active = true;
+
+        // 5. Global deactivation via Platform Superadmin: mutates ONLY global profile, emits platform audit event
         const executeGlobalDeactivation = (caller, target, activeState) => {
-            if (!caller.platformCapabilities || !caller.platformCapabilities.includes('GLOBAL_USER_MANAGE')) {
+            if (!caller.platformCapabilities || (!caller.platformCapabilities.includes('GLOBAL_USER_MANAGE') && !caller.platformCapabilities.includes('PLATFORM_MANAGE'))) {
                 throw new Error('FORBIDDEN');
             }
+            const prev = target.is_active;
             target.is_active = activeState; // Mutates global profile only
+            platformAuditLog.push({
+                actor: caller.id,
+                event_type: 'GLOBAL_USER_ACTIVE_CHANGED',
+                target: target.id,
+                metadata: { new_active: activeState, previous_active: prev }
+            });
         };
 
         executeGlobalDeactivation(platformSuperadmin, targetUser, false);
         expect(targetUser.is_active).toBe(false);
         expect(targetUser.memberships.find(m => m.org_id === SUR).is_active).toBe(true); // Membership row untouched
+        expect(platformAuditLog.length).toBe(1);
+        expect(platformAuditLog[0].event_type).toBe('GLOBAL_USER_ACTIVE_CHANGED');
+        expect(platformAuditLog[0].actor).toBe(platformSuperadmin.id);
+        expect(platformAuditLog[0].target).toBe(targetUser.id);
+        expect(platformAuditLog[0].metadata.new_active).toBe(false);
 
-        // 5. Tenant admin attempting global deactivation fails with FORBIDDEN
+        // 6. Tenant admin attempting global deactivation fails with FORBIDDEN and emits NO platform audit
         expect(() => {
             executeGlobalDeactivation(adminNorte, targetUser, true);
         }).toThrow('FORBIDDEN');
+        expect(platformAuditLog.length).toBe(1); // No new audit row
 
-        // 6. Superadmin in BOTH orgs without active context or explicit org fails closed on ambiguity
+        // 7. Superadmin in BOTH orgs without active context or explicit org fails closed on ambiguity
         expect(() => {
             resolveTargetOrg(superAdminBoth, targetUser, 'ORG_MEMBER_PERMISSION_MANAGE');
         }).toThrow('AMBIGUOUS_ORGANIZATION_CONTEXT');
 
-        // 7. Superadmin with explicit p_org_id resolves cleanly
+        // 8. Superadmin with explicit p_org_id resolves cleanly
         const explicitOrg = resolveTargetOrg(superAdminBoth, targetUser, 'ORG_MEMBER_PERMISSION_MANAGE', NORTE);
         expect(explicitOrg).toBe(NORTE);
     });
