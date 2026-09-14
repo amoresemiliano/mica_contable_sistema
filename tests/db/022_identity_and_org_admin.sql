@@ -158,27 +158,85 @@ BEGIN
     (v_synth_multi_auth_id,  'synth_multi@test.com')
   ON CONFLICT (id) DO NOTHING;
 
-  -- Setup profiles (using canonical real columns only: auth_user_id, organization_id, role, is_active)
-  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
-  VALUES
-    (v_synth_user_a_auth_id, v_norte_org_id, 'USER', TRUE)
-  RETURNING id INTO v_synth_user_a_profile_id;
+  -- ============================================================
+  -- LIVE DEV PROFILE RECONCILIATION
+  -- ============================================================
+  -- Supports both environments where auth.users triggers auto-create profiles
+  -- and environments where profiles must be explicitly inserted.
 
-  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
-  VALUES
-    (v_synth_user_b_auth_id, v_sur_org_id, 'USER', TRUE)
-  RETURNING id INTO v_synth_user_b_profile_id;
+  -- 1. Synth User A (Target Org: DEMO NORTE)
+  SELECT id INTO v_synth_user_a_profile_id
+  FROM public.eco_user_profiles
+  WHERE auth_user_id = v_synth_user_a_auth_id;
 
-  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
-  VALUES
-    (v_synth_user_c_auth_id, v_oeste_org_id, 'USER', TRUE)
-  RETURNING id INTO v_synth_user_c_profile_id;
+  IF v_synth_user_a_profile_id IS NOT NULL THEN
+    UPDATE public.eco_user_profiles
+    SET organization_id = v_norte_org_id, role = 'USER', is_active = TRUE
+    WHERE id = v_synth_user_a_profile_id;
+  ELSE
+    INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
+    VALUES (v_synth_user_a_auth_id, v_norte_org_id, 'USER', TRUE)
+    RETURNING id INTO v_synth_user_a_profile_id;
+  END IF;
 
-  -- Multi-org user: profile.organization_id is SUR, but belongs to BOTH NORTE and SUR in eco_organization_members
-  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
-  VALUES
-    (v_synth_multi_auth_id, v_sur_org_id, 'USER', TRUE)
-  RETURNING id INTO v_synth_multi_profile_id;
+  -- 2. Synth User B (Target Org: DEMO SUR)
+  SELECT id INTO v_synth_user_b_profile_id
+  FROM public.eco_user_profiles
+  WHERE auth_user_id = v_synth_user_b_auth_id;
+
+  IF v_synth_user_b_profile_id IS NOT NULL THEN
+    UPDATE public.eco_user_profiles
+    SET organization_id = v_sur_org_id, role = 'USER', is_active = TRUE
+    WHERE id = v_synth_user_b_profile_id;
+  ELSE
+    INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
+    VALUES (v_synth_user_b_auth_id, v_sur_org_id, 'USER', TRUE)
+    RETURNING id INTO v_synth_user_b_profile_id;
+  END IF;
+
+  -- 3. Synth User C (Target Org: DEMO OESTE)
+  SELECT id INTO v_synth_user_c_profile_id
+  FROM public.eco_user_profiles
+  WHERE auth_user_id = v_synth_user_c_auth_id;
+
+  IF v_synth_user_c_profile_id IS NOT NULL THEN
+    UPDATE public.eco_user_profiles
+    SET organization_id = v_oeste_org_id, role = 'USER', is_active = TRUE
+    WHERE id = v_synth_user_c_profile_id;
+  ELSE
+    INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
+    VALUES (v_synth_user_c_auth_id, v_oeste_org_id, 'USER', TRUE)
+    RETURNING id INTO v_synth_user_c_profile_id;
+  END IF;
+
+  -- 4. Synth Multi-Org User (Target Org: DEMO SUR in profile, memberships in NORTE & SUR)
+  SELECT id INTO v_synth_multi_profile_id
+  FROM public.eco_user_profiles
+  WHERE auth_user_id = v_synth_multi_auth_id;
+
+  IF v_synth_multi_profile_id IS NOT NULL THEN
+    UPDATE public.eco_user_profiles
+    SET organization_id = v_sur_org_id, role = 'USER', is_active = TRUE
+    WHERE id = v_synth_multi_profile_id;
+  ELSE
+    INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
+    VALUES (v_synth_multi_auth_id, v_sur_org_id, 'USER', TRUE)
+    RETURNING id INTO v_synth_multi_profile_id;
+  END IF;
+
+  -- Assert exact profile cardinality (exactly one profile row per synthetic user)
+  SELECT COUNT(*) INTO v_count
+  FROM public.eco_user_profiles
+  WHERE auth_user_id IN (
+    v_synth_user_a_auth_id,
+    v_synth_user_b_auth_id,
+    v_synth_user_c_auth_id,
+    v_synth_multi_auth_id
+  );
+
+  IF v_count <> 4 THEN
+    RAISE EXCEPTION 'SYNTHETIC_PROFILE_CARDINALITY_ERROR: Expected 4 profiles, found %', v_count;
+  END IF;
 
   -- Setup memberships
   INSERT INTO public.eco_organization_members (organization_id, user_profile_id, role_template_id, is_active)
