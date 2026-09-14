@@ -55,7 +55,9 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(dbTestContent).toContain('BEGIN;');
         expect(dbTestContent).toContain('ROLLBACK;');
         expect(dbTestContent).toContain('M022_NOT_APPLIED_RUN_FORWARD_AND_POSTCHECK_FIRST');
+        expect(dbTestContent).toContain('M022_SCHEMA_DRIFT');
         expect(dbTestContent).not.toContain('\\i ');
+        expect(dbTestContent).not.toContain('Synthetic User A'); // Stale full_name column assumption removed
         expect(dbTestContent).toContain('SELF_ROLE_CHANGE_NOT_ALLOWED');
         expect(dbTestContent).toContain('SELF_DEACTIVATION_NOT_ALLOWED');
         expect(dbTestContent).toContain('set_global_user_active');

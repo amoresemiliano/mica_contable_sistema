@@ -80,7 +80,7 @@ DECLARE
   v_audit_row RECORD;
 BEGIN
   -- ============================================================
-  -- 0. FAIL-FAST BASELINE CHECK (M022 PREREQUISITES)
+  -- 0. FAIL-FAST BASELINE CHECK (M022 PREREQUISITES & SCHEMA)
   -- ============================================================
   IF NOT EXISTS (
     SELECT 1 FROM pg_proc p
@@ -104,6 +104,23 @@ BEGIN
     WHERE tgname = 'enforce_append_only_platform_audit'
   ) THEN
     RAISE EXCEPTION 'M022_NOT_APPLIED_RUN_FORWARD_AND_POSTCHECK_FIRST';
+  END IF;
+
+  -- Verify eco_user_profiles schema dependencies
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'eco_user_profiles' AND column_name = 'auth_user_id'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'eco_user_profiles' AND column_name = 'organization_id'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'eco_user_profiles' AND column_name = 'role'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'eco_user_profiles' AND column_name = 'is_active'
+  ) THEN
+    RAISE EXCEPTION 'M022_SCHEMA_DRIFT: eco_user_profiles missing required fixture columns';
   END IF;
 
   RAISE NOTICE 'Executing WP-A3.2.1 DB Behavioral Test Matrix...';
@@ -141,26 +158,26 @@ BEGIN
     (v_synth_multi_auth_id,  'synth_multi@test.com')
   ON CONFLICT (id) DO NOTHING;
 
-  -- Setup profiles
-  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, email, full_name, role, is_active)
+  -- Setup profiles (using canonical real columns only: auth_user_id, organization_id, role, is_active)
+  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
   VALUES
-    (v_synth_user_a_auth_id, v_norte_org_id, 'synth_user_a@test.com', 'Synthetic User A', 'USER', TRUE)
+    (v_synth_user_a_auth_id, v_norte_org_id, 'USER', TRUE)
   RETURNING id INTO v_synth_user_a_profile_id;
 
-  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, email, full_name, role, is_active)
+  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
   VALUES
-    (v_synth_user_b_auth_id, v_sur_org_id, 'synth_user_b@test.com', 'Synthetic User B', 'USER', TRUE)
+    (v_synth_user_b_auth_id, v_sur_org_id, 'USER', TRUE)
   RETURNING id INTO v_synth_user_b_profile_id;
 
-  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, email, full_name, role, is_active)
+  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
   VALUES
-    (v_synth_user_c_auth_id, v_oeste_org_id, 'synth_user_c@test.com', 'Synthetic User C', 'USER', TRUE)
+    (v_synth_user_c_auth_id, v_oeste_org_id, 'USER', TRUE)
   RETURNING id INTO v_synth_user_c_profile_id;
 
   -- Multi-org user: profile.organization_id is SUR, but belongs to BOTH NORTE and SUR in eco_organization_members
-  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, email, full_name, role, is_active)
+  INSERT INTO public.eco_user_profiles (auth_user_id, organization_id, role, is_active)
   VALUES
-    (v_synth_multi_auth_id, v_sur_org_id, 'synth_multi@test.com', 'Synthetic Multi-Org User', 'USER', TRUE)
+    (v_synth_multi_auth_id, v_sur_org_id, 'USER', TRUE)
   RETURNING id INTO v_synth_multi_profile_id;
 
   -- Setup memberships
