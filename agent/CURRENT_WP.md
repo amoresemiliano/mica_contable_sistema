@@ -2,9 +2,9 @@
 
 **PROJECT**: MICA  
 **WORK PACKAGE**: WP-A3.2.1 — IDENTITY, PROFILES & ORGANIZATION ADMINISTRATION  
-**MODE**: IMPLEMENTATION COMPLETE & PLATFORM AUDIT BLOCKER RESOLVED  
+**MODE**: IMPLEMENTATION COMPLETE & SUPABASE SQL EDITOR COMPATIBILITY FIX RESOLVED  
 **STATUS**: `WP_A3_2_1_IMPLEMENTED`  
-**BASELINE SHA**: `6208d9db21359a2eb54e84021a176f163b53faf9`  
+**BASELINE SHA**: `645a4636be303851e4aebe6a46da5594abd80bea`  
 **READY_FOR**: `READY_FOR_JULES_RECHECK`  
 
 ---
@@ -21,7 +21,10 @@
 2. `sql/022_identity_and_org_admin_preflight.sql` — Pre-migration baseline verification.
 3. `sql/022_identity_and_org_admin_postcheck.sql` — Post-migration verification script (including `eco_platform_audit_events` and RLS).
 4. `sql/022_identity_and_org_admin_down.sql` — Rollback script cleanly dropping `eco_platform_audit_events` and restoring pre-M022 definitions.
-5. `tests/db/022_identity_and_org_admin.sql` — Comprehensive DB behavioral test suite (platform audit verification, immutability, tenant/global state isolation, inactive membership role configuration, ambiguity fail-closed tests).
+5. `tests/db/022_identity_and_org_admin.sql` — Comprehensive DB behavioral test suite:
+   - Directly executable in Supabase SQL Editor against applied M022 schema (no `\i` meta-command).
+   - Fail-fast baseline check asserting all M022 RPCs, platform audit table, and triggers exist before fixture creation.
+   - Full transaction safety with `BEGIN ... ROLLBACK`.
 6. `docs/MICA_A3_2_1_DESIGN.md` — Detailed technical design specification.
 7. `docs/MICA_A3_2_1_COMPATIBILITY_CONTRACT.md` — Backward & bidirectional compatibility contract.
 8. `docs/MICA_A3_2_1_SECURITY_ACCEPTANCE_MATRIX.md` — Comprehensive security truth table and test matrix.
@@ -40,4 +43,4 @@
 
 ## 3. Next Step Gate
 
-WP-A3.2.1 is fully implemented, verified, and ready for Jules re-check.
+WP-A3.2.1 is fully implemented, verified, and ready for behavioral test re-run in Supabase SQL Editor.

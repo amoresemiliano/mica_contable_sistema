@@ -23,9 +23,6 @@
 
 BEGIN;
 
--- Temporarily apply M022 inside transaction for behavioral validation
-\i sql/022_identity_and_org_admin.sql
-
 DO $$
 DECLARE
   v_norte_org_id CONSTANT UUID := '38419581-8163-482c-9813-616fa6214d71'::UUID;
@@ -82,6 +79,33 @@ DECLARE
   v_exception_raised BOOLEAN;
   v_audit_row RECORD;
 BEGIN
+  -- ============================================================
+  -- 0. FAIL-FAST BASELINE CHECK (M022 PREREQUISITES)
+  -- ============================================================
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'set_global_user_active'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'change_user_role'
+      AND pronargs = 3
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON p.pronamespace = n.oid
+    WHERE n.nspname = 'public' AND p.proname = 'set_user_active'
+      AND pronargs = 3
+  ) OR NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'eco_platform_audit_events'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'enforce_append_only_platform_audit'
+  ) THEN
+    RAISE EXCEPTION 'M022_NOT_APPLIED_RUN_FORWARD_AND_POSTCHECK_FIRST';
+  END IF;
+
   RAISE NOTICE 'Executing WP-A3.2.1 DB Behavioral Test Matrix...';
 
   -- Resolve real user IDs

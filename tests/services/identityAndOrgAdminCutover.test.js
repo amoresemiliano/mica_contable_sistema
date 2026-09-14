@@ -54,7 +54,8 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         const dbTestContent = fs.readFileSync(dbTestPath, 'utf8');
         expect(dbTestContent).toContain('BEGIN;');
         expect(dbTestContent).toContain('ROLLBACK;');
-        expect(dbTestContent).toContain('sql/022_identity_and_org_admin.sql');
+        expect(dbTestContent).toContain('M022_NOT_APPLIED_RUN_FORWARD_AND_POSTCHECK_FIRST');
+        expect(dbTestContent).not.toContain('\\i ');
         expect(dbTestContent).toContain('SELF_ROLE_CHANGE_NOT_ALLOWED');
         expect(dbTestContent).toContain('SELF_DEACTIVATION_NOT_ALLOWED');
         expect(dbTestContent).toContain('set_global_user_active');
