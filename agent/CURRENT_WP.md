@@ -1,41 +1,41 @@
-# Current Work Package: WP-A3.2.1
+# Current Work Package: WP-A3.2.1-VH1
 
 **PROJECT**: MICA  
-**WORK PACKAGE**: WP-A3.2.1 — IDENTITY, PROFILES & ORGANIZATION ADMINISTRATION  
-**MODE**: IMPLEMENTATION COMPLETE & LIVE DEV FIXTURE PROFILE RECONCILIATION RESOLVED  
-**STATUS**: `WP_A3_2_1_IMPLEMENTED`  
-**BASELINE SHA**: `6ebb2c7aa11753d6a386b76bb2ad6094b6d7b9c9`  
-**READY_FOR**: `READY_FOR_JULES_RECHECK`  
+**WORK PACKAGE**: WP-A3.2.1-VH1 — BEHAVIORAL SECURITY HARNESS AUTHENTICATED ROLE SIMULATION  
+**PARENT WP**: WP-A3.2.1 — Identity, Profiles & Organization Administration  
+**MODE**: BEHAVIORAL TEST HARNESS AUTHENTICATED ROLE SIMULATION IMPLEMENTED  
+**STATUS**: `WP_A3_2_1_VH1_IMPLEMENTED`  
+**BASE COMMIT**: `467e57e49b510f1a556e667364e5c1a7ceaec654`  
+**READY_FOR**: `READY_TO_RERUN_DB_022`  
 
 ---
 
-## 1. Deliverables & Live DEV Profile Reconciliation Summary
+## 1. Summary of Changes
 
-1. `tests/db/022_identity_and_org_admin.sql` — DB behavioral test suite:
-   - Implemented dual-mode synthetic profile reconciliation supporting both auto-created profile environments (live Supabase DEV auth triggers) and explicit profile insertion environments.
-   - For every synthetic user, attempts resolving profile by `auth_user_id`; updates `organization_id`, `role`, and `is_active` if present, or inserts directly using canonical columns if absent.
-   - Added `SYNTHETIC_PROFILE_CARDINALITY_ERROR` assertion ensuring exactly 1 profile row exists per synthetic user.
-   - Maintained strict transaction isolation with `BEGIN ... ROLLBACK`.
-2. `sql/022_identity_and_org_admin.sql` — Forward migration (untouched).
-3. `sql/022_identity_and_org_admin_preflight.sql` — Pre-migration baseline verification (untouched).
-4. `sql/022_identity_and_org_admin_postcheck.sql` — Post-migration verification script (untouched).
-5. `sql/022_identity_and_org_admin_down.sql` — Rollback script (untouched).
-6. `docs/MICA_A3_2_1_DESIGN.md` — Detailed technical design specification.
-7. `docs/MICA_A3_2_1_COMPATIBILITY_CONTRACT.md` — Backward & bidirectional compatibility contract.
-8. `docs/MICA_A3_2_1_SECURITY_ACCEPTANCE_MATRIX.md` — Comprehensive security truth table and test matrix.
-9. `docs/MICA_A3_2_1_MANUAL_DEV_VALIDATION.md` — Manual DEV browser/persona validation runbook.
-10. `tests/services/identityAndOrgAdminCutover.test.js` — Automated Jest test suite passing 100%.
+1. `tests/db/022_identity_and_org_admin.sql`:
+   - Updated DB behavioral security test suite to simulate Supabase `authenticated` role (`SET LOCAL ROLE authenticated`) for all RLS visibility and RPC assertions.
+   - Preserves privileged fixture setup (baseline check, synthetic user & profile reconciliation, membership creation) and privileged teardown (`BEGIN ... ROLLBACK`).
+   - Created persona switching helper `harness_set_persona(p_auth_id)` setting both JWT claim (`request.jwt.claim.sub`) and PostgreSQL role (`SET LOCAL ROLE authenticated`).
+   - Added role fail-fast assertion checking `current_user = 'authenticated'`, raising `BEHAVIORAL_TEST_NOT_RUNNING_AS_AUTHENTICATED` if not running under `authenticated`.
+   - Created privileged role reset helper `harness_reset_role()` (`EXECUTE 'RESET ROLE'`) for temporary privileged assertions or setup modifications.
+   - Maintained strict expected test counts: Emiliano sees 1 org (DEMO NORTE), Marianela sees 3 orgs (NORTE, SUR, OESTE).
+2. `tests/services/identityAndOrgAdminCutover.test.js`:
+   - Added automated Jest checks confirming `BEHAVIORAL_TEST_NOT_RUNNING_AS_AUTHENTICATED`, `SET LOCAL ROLE authenticated`, `harness_set_persona`, and `harness_reset_role` exist in the DB harness.
+3. Untouched files:
+   - `sql/022_identity_and_org_admin.sql` (Forward migration)
+   - `sql/022_identity_and_org_admin_preflight.sql`
+   - `sql/022_identity_and_org_admin_postcheck.sql`
+   - `sql/022_identity_and_org_admin_down.sql`
+   - RLS policies, RPCs, DB schema, frontend.
 
 ---
 
-## 2. Fundamental Architectural Rules Reaffirmed
+## 2. Test Verification
 
-> **1. Active Context != Authorization**: `active_org_id()` is a selector, never an authority grant/denial for platform operations.  
-> **2. Partitioned Audit Architecture**: Tenant audit (`eco_audit_events`, org NOT NULL) vs Platform audit (`eco_platform_audit_events`, global/platform scope).  
-> **3. `eco_user_profiles.organization_id` & `role` are non-authoritative**: Authorization and tenant target boundaries are derived exclusively from `public.eco_organization_members`.
+- `npm test`: 22 test suites passed, 269 tests passed.
 
 ---
 
 ## 3. Next Step Gate
 
-WP-A3.2.1 is fully implemented, verified, and ready for behavioral test re-run in Supabase SQL Editor.
+`tests/db/022_identity_and_org_admin.sql` is ready to re-run in Supabase SQL Editor against DEV.

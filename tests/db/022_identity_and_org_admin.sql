@@ -1,6 +1,8 @@
 -- ============================================================
 -- DB BEHAVIORAL SECURITY TEST SUITE FOR WP-A3.2.1 (MIGRATION 022)
 -- ============================================================
+-- WP-A3.2.1-VH1 — BEHAVIORAL SECURITY HARNESS AUTHENTICATED ROLE SIMULATION
+--
 -- Validates capability-driven authorization for:
 -- 1. Identity & Self Profile Access
 -- 2. Organization Visibility (ORG_VIEW)
@@ -19,9 +21,28 @@
 -- 10. Audit Visibility & Append-Only Invariants (Tenant & Platform)
 --
 -- Entire script executes under BEGIN ... ROLLBACK.
+-- Role simulation switches to `authenticated` for RLS and RPC assertions
+-- while preserving privileged setup & teardown via transaction rollback.
 -- ============================================================
 
 BEGIN;
+
+-- Helper functions for harness persona switching and role management
+CREATE OR REPLACE FUNCTION public.harness_set_persona(p_auth_id UUID) RETURNS void AS $$
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', p_auth_id::text, true);
+  EXECUTE 'SET LOCAL ROLE authenticated';
+  IF current_user <> 'authenticated' THEN
+    RAISE EXCEPTION 'BEHAVIORAL_TEST_NOT_RUNNING_AS_AUTHENTICATED (session_user=%, current_user=%)', session_user, current_user;
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION public.harness_reset_role() RETURNS void AS $$
+BEGIN
+  EXECUTE 'RESET ROLE';
+END;
+$$ LANGUAGE plpgsql;
 
 DO $$
 DECLARE
@@ -79,6 +100,9 @@ DECLARE
   v_exception_raised BOOLEAN;
   v_audit_row RECORD;
 BEGIN
+  -- Ensure starting in privileged role for fixture setup
+  PERFORM public.harness_reset_role();
+
   -- ============================================================
   -- 0. FAIL-FAST BASELINE CHECK (M022 PREREQUISITES & SCHEMA)
   -- ============================================================
@@ -123,7 +147,7 @@ BEGIN
     RAISE EXCEPTION 'M022_SCHEMA_DRIFT: eco_user_profiles missing required fixture columns';
   END IF;
 
-  RAISE NOTICE 'Executing WP-A3.2.1 DB Behavioral Test Matrix...';
+  RAISE NOTICE 'Executing WP-A3.2.1 DB Behavioral Test Matrix... (session_user=%, current_user=%)', session_user, current_user;
 
   -- Resolve real user IDs
   SELECT id INTO v_vegen_auth_id     FROM auth.users WHERE email = 'vegendigital@gmail.com';
@@ -159,11 +183,8 @@ BEGIN
   ON CONFLICT (id) DO NOTHING;
 
   -- ============================================================
-  -- LIVE DEV PROFILE RECONCILIATION
+  -- LIVE DEV PROFILE RECONCILIATION (PRIVILEGED FIXTURE SETUP)
   -- ============================================================
-  -- Supports both environments where auth.users triggers auto-create profiles
-  -- and environments where profiles must be explicitly inserted.
-
   -- 1. Synth User A (Target Org: DEMO NORTE)
   SELECT id INTO v_synth_user_a_profile_id
   FROM public.eco_user_profiles
@@ -257,9 +278,10 @@ BEGIN
 
 
   -- ============================================================
-  -- 1. IDENTITY & SELF PROFILE ACCESS
+  -- 1. IDENTITY & SELF PROFILE ACCESS (AUTHENTICATED ROLE)
   -- ============================================================
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
+
   SELECT COUNT(*) INTO v_count FROM public.eco_user_profiles WHERE auth_user_id = v_emiliano_auth_id;
   IF v_count <> 1 THEN
     RAISE EXCEPTION 'Test FAILED: Emiliano could not view own profile';
@@ -267,11 +289,12 @@ BEGIN
 
 
   -- ============================================================
-  -- 2. ORGANIZATION VISIBILITY (ORG_VIEW)
+  -- 2. ORGANIZATION VISIBILITY (ORG_VIEW) (AUTHENTICATED ROLE)
   -- ============================================================
 
   -- 2.1 Emiliano (Admin NORTE) sees only DEMO NORTE
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
+
   SELECT COUNT(*) INTO v_count FROM public.eco_organizations;
   IF v_count <> 1 THEN
     RAISE EXCEPTION 'Test FAILED: Emiliano saw % organizations, expected 1 (DEMO NORTE)', v_count;
@@ -283,7 +306,8 @@ BEGIN
   END IF;
 
   -- 2.2 Marianela (Accounting Superadmin) sees scoped organizations (NORTE, SUR, OESTE)
-  PERFORM set_config('request.jwt.claim.sub', v_marianela_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_marianela_auth_id);
+
   SELECT COUNT(*) INTO v_count FROM public.eco_organizations;
   IF v_count <> 3 THEN
     RAISE EXCEPTION 'Test FAILED: Marianela saw % organizations, expected 3', v_count;
@@ -291,17 +315,18 @@ BEGIN
 
 
   -- ============================================================
-  -- 3. MEMBER PROFILE VISIBILITY (ORG_MEMBER_VIEW)
+  -- 3. MEMBER PROFILE VISIBILITY (ORG_MEMBER_VIEW) (AUTHENTICATED ROLE)
   -- ============================================================
 
   -- 3.1 Emiliano sees members in DEMO NORTE (Self, Synth A, Synth Multi)
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
+
   SELECT COUNT(*) INTO v_count FROM public.eco_user_profiles;
   IF v_count < 3 THEN
     RAISE EXCEPTION 'Test FAILED: Emiliano did not see members of DEMO NORTE';
   END IF;
 
-  -- 3.2 Emiliano CANNOT see members of DEMO SUR (Synth B)
+  -- 3.2 Emiliano CANNOT see members of DEMO SUR (Synth B) under RLS
   SELECT COUNT(*) INTO v_count FROM public.eco_user_profiles WHERE id = v_synth_user_b_profile_id;
   IF v_count <> 0 THEN
     RAISE EXCEPTION 'Negative Test FAILED: Emiliano cross-tenant viewed member in DEMO SUR';
@@ -315,16 +340,17 @@ BEGIN
   -- 4.1 Emiliano (Admin NORTE) changes role of Synth Multi in DEMO NORTE to ADMIN:
   -- Target's profile.organization_id is SUR, but Emiliano is Admin of NORTE.
   -- Canonical resolution targets DEMO NORTE and updates NORTE membership ONLY.
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   PERFORM public.change_user_role(v_synth_multi_profile_id, 'ADMIN');
 
-  -- Verify NORTE membership role template updated to TENANT_ADMIN
+  -- Verify NORTE membership role template updated to TENANT_ADMIN (visible to Emiliano under RLS)
   SELECT role_template_id INTO v_tpl_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_norte_id;
   IF v_tpl_check <> v_tpl_tenant_admin_id THEN
     RAISE EXCEPTION 'Test FAILED: change_user_role did not update canonical NORTE membership template to TENANT_ADMIN';
   END IF;
 
-  -- Verify SUR membership role template remains untouched (REVIEWER)
+  -- Verify SUR membership role template remains untouched (REVIEWER) via privileged inspection
+  PERFORM public.harness_reset_role();
   SELECT role_template_id INTO v_tpl_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_sur_id;
   IF v_tpl_check <> v_tpl_reviewer_id THEN
     RAISE EXCEPTION 'Negative Test FAILED: change_user_role leaked into and altered unrelated SUR membership template';
@@ -332,7 +358,7 @@ BEGIN
 
   -- 4.2 Verify profile.role is compatibility only and does NOT confer authority in SUR
   -- Synth Multi's profile.role was synchronized to 'ADMIN', but in SUR their membership is still REVIEWER.
-  PERFORM set_config('request.jwt.claim.sub', v_synth_multi_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_synth_multi_auth_id);
   IF private.can_org(v_sur_org_id, 'ORG_MEMBER_PERMISSION_MANAGE') THEN
     RAISE EXCEPTION 'Negative Test FAILED: profile.role leaked admin authority into SUR where membership is REVIEWER';
   END IF;
@@ -340,9 +366,10 @@ BEGIN
   -- 4.3 Inactive Membership Role Configuration Policy:
   -- Authorized admin CAN configure role_template_id on an inactive membership,
   -- and the membership remains inactive after the role change.
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_reset_role();
   UPDATE public.eco_organization_members SET is_active = FALSE WHERE id = v_synth_mem_a_id;
 
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   PERFORM public.change_user_role(v_synth_user_a_profile_id, 'ACCOUNTANT', v_norte_org_id);
 
   SELECT role_template_id, is_active INTO v_tpl_check, v_active_check
@@ -356,6 +383,7 @@ BEGIN
   END IF;
 
   -- Restore Synth A membership active status
+  PERFORM public.harness_reset_role();
   UPDATE public.eco_organization_members SET is_active = TRUE WHERE id = v_synth_mem_a_id;
 
 
@@ -365,7 +393,7 @@ BEGIN
 
   -- 5.1 Emiliano deactivates Synth Multi in DEMO NORTE:
   -- Only NORTE membership becomes inactive; SUR membership & global profile remain active!
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   PERFORM public.set_user_active(v_synth_multi_profile_id, FALSE);
 
   SELECT is_active INTO v_active_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_norte_id;
@@ -373,6 +401,7 @@ BEGIN
     RAISE EXCEPTION 'Test FAILED: set_user_active did not deactivate NORTE membership';
   END IF;
 
+  PERFORM public.harness_reset_role();
   SELECT is_active INTO v_active_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_sur_id;
   IF v_active_check <> TRUE THEN
     RAISE EXCEPTION 'Negative Test FAILED: set_user_active deactivated unrelated SUR membership';
@@ -384,6 +413,7 @@ BEGIN
   END IF;
 
   -- Reactivate Synth Multi in NORTE
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   PERFORM public.set_user_active(v_synth_multi_profile_id, TRUE);
 
 
@@ -398,10 +428,11 @@ BEGIN
   -- - Exactly one event emitted to public.eco_platform_audit_events
   -- - Actor = VEGEN, Target = Synth User A, metadata contains new_active = false
   -- - NO fake tenant audit rows created in eco_audit_events
+  PERFORM public.harness_reset_role();
   SELECT COUNT(*) INTO v_audit_count_before FROM public.eco_platform_audit_events;
   SELECT COUNT(*) INTO v_count FROM public.eco_audit_events WHERE organization_id IS NULL; -- Should always be 0
 
-  PERFORM set_config('request.jwt.claim.sub', v_vegen_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_vegen_auth_id);
   INSERT INTO public.eco_user_active_context (user_profile_id, organization_id, updated_at)
   VALUES (v_vegen_profile_id, v_norte_org_id, now())
   ON CONFLICT (user_profile_id) DO UPDATE SET organization_id = v_norte_org_id;
@@ -414,13 +445,15 @@ BEGIN
     RAISE EXCEPTION 'Test FAILED: set_global_user_active failed to deactivate profile';
   END IF;
 
-  -- Verify membership rows were NOT modified
+  -- Verify membership rows were NOT modified (privileged check)
+  PERFORM public.harness_reset_role();
   SELECT is_active INTO v_active_check FROM public.eco_organization_members WHERE id = v_synth_mem_a_id;
   IF v_active_check <> TRUE THEN
     RAISE EXCEPTION 'Negative Test FAILED: set_global_user_active mutated eco_organization_members row';
   END IF;
 
-  -- Verify platform audit event created
+  -- Verify platform audit event created (VEGEN persona can read platform audit)
+  PERFORM public.harness_set_persona(v_vegen_auth_id);
   SELECT COUNT(*) INTO v_audit_count_after FROM public.eco_platform_audit_events;
   IF v_audit_count_after <> v_audit_count_before + 1 THEN
     RAISE EXCEPTION 'Test FAILED: set_global_user_active did not create platform audit event';
@@ -455,7 +488,7 @@ BEGIN
   END IF;
 
   -- 6.3 Tenant Admin CANNOT invoke set_global_user_active (and creates NO audit event)
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   v_exception_raised := FALSE;
   BEGIN
     PERFORM public.set_global_user_active(v_synth_user_a_profile_id, FALSE);
@@ -468,6 +501,7 @@ BEGIN
     RAISE EXCEPTION 'Negative Test FAILED: Tenant Admin was allowed to invoke set_global_user_active';
   END IF;
 
+  PERFORM public.harness_set_persona(v_vegen_auth_id);
   SELECT COUNT(*) INTO v_count FROM public.eco_platform_audit_events;
   IF v_count <> v_audit_count_after THEN
     RAISE EXCEPTION 'Negative Test FAILED: Rejected call created platform audit event';
@@ -504,14 +538,14 @@ BEGIN
   END IF;
 
   -- 7.3 Tenant user CANNOT read platform audit table (RLS returns 0 rows)
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   SELECT COUNT(*) INTO v_count FROM public.eco_platform_audit_events;
   IF v_count <> 0 THEN
     RAISE EXCEPTION 'Negative Test FAILED: Tenant admin was able to SELECT from public.eco_platform_audit_events';
   END IF;
 
   -- 7.4 Platform Superadmin CAN read platform audit table (RLS returns all platform rows)
-  PERFORM set_config('request.jwt.claim.sub', v_vegen_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_vegen_auth_id);
   SELECT COUNT(*) INTO v_count FROM public.eco_platform_audit_events;
   IF v_count < 2 THEN
     RAISE EXCEPTION 'Test FAILED: Platform Superadmin could not read platform audit events';
@@ -522,13 +556,14 @@ BEGIN
   -- 8. MULTI-ORG AMBIGUITY FAIL-CLOSED BEHAVIOR
   -- ============================================================
 
-  -- Create a synthetic super-admin user with admin capabilities in BOTH NORTE and SUR
+  -- Create a synthetic super-admin user with admin capabilities in BOTH NORTE and SUR (privileged setup)
+  PERFORM public.harness_reset_role();
   INSERT INTO public.eco_organization_members (organization_id, user_profile_id, role_template_id, is_active)
   VALUES (v_sur_org_id, v_emiliano_profile_id, v_tpl_tenant_admin_id, TRUE);
 
   -- Emiliano now holds ORG_MEMBER_PERMISSION_MANAGE in both NORTE and SUR.
   -- Without active context, targeting Synth Multi (who belongs to both) must fail closed on ambiguity:
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   DELETE FROM public.eco_user_active_context WHERE user_profile_id = v_emiliano_profile_id;
 
   v_exception_raised := FALSE;
@@ -550,7 +585,8 @@ BEGIN
     RAISE EXCEPTION 'Test FAILED: change_user_role with explicit p_org_id failed';
   END IF;
 
-  -- Clean up extra membership on Emiliano
+  -- Clean up extra membership on Emiliano (privileged)
+  PERFORM public.harness_reset_role();
   DELETE FROM public.eco_organization_members WHERE organization_id = v_sur_org_id AND user_profile_id = v_emiliano_profile_id;
 
 
@@ -559,7 +595,7 @@ BEGIN
   -- ============================================================
 
   -- 9.1 Emiliano attempts role change on Synth B (in DEMO SUR only) -> FAILS (TARGET_NOT_FOUND)
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   v_exception_raised := FALSE;
   BEGIN
     PERFORM public.change_user_role(v_synth_user_b_profile_id, 'ADMIN');
@@ -604,8 +640,10 @@ BEGIN
   -- ============================================================
 
   -- 10.1 VEGEN (Platform Superadmin) switches context -> SUCCESS & emits PLATFORM AUDIT event
+  PERFORM public.harness_reset_role();
   SELECT COUNT(*) INTO v_audit_count_before FROM public.eco_platform_audit_events;
-  PERFORM set_config('request.jwt.claim.sub', v_vegen_auth_id::text, true);
+
+  PERFORM public.harness_set_persona(v_vegen_auth_id);
   PERFORM public.switch_superadmin_org_context(v_norte_org_id);
 
   SELECT organization_id INTO v_role_check FROM public.eco_user_profiles WHERE auth_user_id = v_vegen_auth_id;
@@ -625,7 +663,7 @@ BEGIN
   END IF;
 
   -- 10.2 Emiliano (Tenant Admin) cannot switch platform context
-  PERFORM set_config('request.jwt.claim.sub', v_emiliano_auth_id::text, true);
+  PERFORM public.harness_set_persona(v_emiliano_auth_id);
   v_exception_raised := FALSE;
   BEGIN
     PERFORM public.switch_superadmin_org_context(v_sur_org_id);
@@ -649,7 +687,10 @@ BEGIN
     RAISE EXCEPTION 'Negative Test FAILED: Append-only audit trigger failed to block DELETE on eco_audit_events';
   END IF;
 
-  RAISE NOTICE 'WP-A3.2.1 DB Behavioral Test Suite PASSED ALL PLATFORM AUDIT, MULTI-ORG, AND CANONICAL AUTHORITY TESTS.';
+  -- Reset role before exit
+  PERFORM public.harness_reset_role();
+
+  RAISE NOTICE 'WP-A3.2.1 DB Behavioral Test Suite PASSED ALL PLATFORM AUDIT, MULTI-ORG, AND CANONICAL AUTHORITY TESTS UNDER AUTHENTICATED ROLE SIMULATION.';
 END $$;
 
 ROLLBACK;

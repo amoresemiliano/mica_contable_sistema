@@ -64,6 +64,10 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(dbTestContent).toContain('set_global_user_active');
         expect(dbTestContent).toContain('eco_platform_audit_events');
         expect(dbTestContent).toContain('AMBIGUOUS_ORGANIZATION_CONTEXT');
+        expect(dbTestContent).toContain('BEHAVIORAL_TEST_NOT_RUNNING_AS_AUTHENTICATED');
+        expect(dbTestContent).toContain('SET LOCAL ROLE authenticated');
+        expect(dbTestContent).toContain('harness_set_persona');
+        expect(dbTestContent).toContain('harness_reset_role');
     });
 
     test('Multi-Org Target Resolution & Stale profile.organization_id Immunity Simulation', () => {
