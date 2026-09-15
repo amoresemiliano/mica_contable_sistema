@@ -23,6 +23,7 @@
 -- Entire script executes under BEGIN ... ROLLBACK.
 -- Role simulation switches to `authenticated` for RLS and RPC assertions
 -- while preserving privileged setup & teardown via transaction rollback.
+-- No direct private schema calls are made from authenticated personas.
 -- ============================================================
 
 BEGIN;
@@ -104,7 +105,7 @@ BEGIN
   PERFORM public.harness_reset_role();
 
   -- ============================================================
-  -- 0. FAIL-FAST BASELINE CHECK (M022 PREREQUISITES & SCHEMA)
+  -- 0. FAIL-FAST BASELINE CHECK (M022 PREREQUISITES, SCHEMA & DRIFT)
   -- ============================================================
   IF NOT EXISTS (
     SELECT 1 FROM pg_proc p
@@ -145,6 +146,18 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'eco_user_profiles' AND column_name = 'is_active'
   ) THEN
     RAISE EXCEPTION 'M022_SCHEMA_DRIFT: eco_user_profiles missing required fixture columns';
+  END IF;
+
+  -- Verify absence of conflicting legacy organization RLS policy
+  IF EXISTS (
+    SELECT 1 FROM pg_policy pol
+    JOIN pg_class c ON pol.polrelid = c.oid
+    JOIN pg_namespace n ON c.relnamespace = n.oid
+    WHERE n.nspname = 'public'
+      AND c.relname = 'eco_organizations'
+      AND pol.polname = 'Organizations member view'
+  ) THEN
+    RAISE EXCEPTION 'LEGACY_ORGANIZATION_RLS_POLICY_PRESENT: Conflicting legacy policy "Organizations member view" detected on public.eco_organizations. Remove manually in DEV before running.';
   END IF;
 
   RAISE NOTICE 'Executing WP-A3.2.1 DB Behavioral Test Matrix... (session_user=%, current_user=%)', session_user, current_user;
@@ -343,7 +356,7 @@ BEGIN
   PERFORM public.harness_set_persona(v_emiliano_auth_id);
   PERFORM public.change_user_role(v_synth_multi_profile_id, 'ADMIN');
 
-  -- Verify NORTE membership role template updated to TENANT_ADMIN (visible to Emiliano under RLS)
+  -- Verify NORTE membership role template updated to TENANT_ADMIN
   SELECT role_template_id INTO v_tpl_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_norte_id;
   IF v_tpl_check <> v_tpl_tenant_admin_id THEN
     RAISE EXCEPTION 'Test FAILED: change_user_role did not update canonical NORTE membership template to TENANT_ADMIN';
@@ -358,17 +371,30 @@ BEGIN
 
   -- 4.2 Verify profile.role is compatibility only and does NOT confer authority in SUR
   -- Synth Multi's profile.role was synchronized to 'ADMIN', but in SUR their membership is still REVIEWER.
+  -- Invoking public.change_user_role in SUR against a valid SUR target (Synth User B) must fail closed with FORBIDDEN.
   PERFORM public.harness_set_persona(v_synth_multi_auth_id);
-  IF private.can_org(v_sur_org_id, 'ORG_MEMBER_PERMISSION_MANAGE') THEN
+  v_exception_raised := FALSE;
+  BEGIN
+    PERFORM public.change_user_role(v_synth_user_b_profile_id, 'ADMIN', v_sur_org_id);
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM LIKE '%FORBIDDEN%' THEN
+      v_exception_raised := TRUE;
+    ELSE
+      RAISE EXCEPTION 'Negative Test FAILED: Expected FORBIDDEN, but received unexpected exception: %', SQLERRM;
+    END IF;
+  END;
+  IF NOT v_exception_raised THEN
     RAISE EXCEPTION 'Negative Test FAILED: profile.role leaked admin authority into SUR where membership is REVIEWER';
   END IF;
 
   -- 4.3 Inactive Membership Role Configuration Policy:
   -- Authorized admin CAN configure role_template_id on an inactive membership,
   -- and the membership remains inactive after the role change.
+  -- Privileged fixture setup: deactivate Synth A membership
   PERFORM public.harness_reset_role();
   UPDATE public.eco_organization_members SET is_active = FALSE WHERE id = v_synth_mem_a_id;
 
+  -- Authenticated admin executes role change on inactive membership
   PERFORM public.harness_set_persona(v_emiliano_auth_id);
   PERFORM public.change_user_role(v_synth_user_a_profile_id, 'ACCOUNTANT', v_norte_org_id);
 
@@ -382,7 +408,7 @@ BEGIN
     RAISE EXCEPTION 'Negative Test FAILED: change_user_role inadvertently activated an inactive membership';
   END IF;
 
-  -- Restore Synth A membership active status
+  -- Privileged fixture cleanup: restore Synth A membership active status
   PERFORM public.harness_reset_role();
   UPDATE public.eco_organization_members SET is_active = TRUE WHERE id = v_synth_mem_a_id;
 
@@ -401,6 +427,7 @@ BEGIN
     RAISE EXCEPTION 'Test FAILED: set_user_active did not deactivate NORTE membership';
   END IF;
 
+  -- Privileged postcondition inspection: verify unrelated SUR membership and global profile remain untouched
   PERFORM public.harness_reset_role();
   SELECT is_active INTO v_active_check FROM public.eco_organization_members WHERE id = v_synth_multi_mem_sur_id;
   IF v_active_check <> TRUE THEN
@@ -428,15 +455,17 @@ BEGIN
   -- - Exactly one event emitted to public.eco_platform_audit_events
   -- - Actor = VEGEN, Target = Synth User A, metadata contains new_active = false
   -- - NO fake tenant audit rows created in eco_audit_events
+  -- Privileged fixture setup: baseline count and active context setup
   PERFORM public.harness_reset_role();
   SELECT COUNT(*) INTO v_audit_count_before FROM public.eco_platform_audit_events;
   SELECT COUNT(*) INTO v_count FROM public.eco_audit_events WHERE organization_id IS NULL; -- Should always be 0
 
-  PERFORM public.harness_set_persona(v_vegen_auth_id);
   INSERT INTO public.eco_user_active_context (user_profile_id, organization_id, updated_at)
   VALUES (v_vegen_profile_id, v_norte_org_id, now())
   ON CONFLICT (user_profile_id) DO UPDATE SET organization_id = v_norte_org_id;
 
+  -- Authenticated execution: VEGEN invokes public.set_global_user_active
+  PERFORM public.harness_set_persona(v_vegen_auth_id);
   PERFORM public.set_global_user_active(v_synth_user_a_profile_id, FALSE);
 
   -- Verify global profile is deactivated
@@ -445,14 +474,14 @@ BEGIN
     RAISE EXCEPTION 'Test FAILED: set_global_user_active failed to deactivate profile';
   END IF;
 
-  -- Verify membership rows were NOT modified (privileged check)
+  -- Privileged postcondition inspection: verify membership rows were NOT modified
   PERFORM public.harness_reset_role();
   SELECT is_active INTO v_active_check FROM public.eco_organization_members WHERE id = v_synth_mem_a_id;
   IF v_active_check <> TRUE THEN
     RAISE EXCEPTION 'Negative Test FAILED: set_global_user_active mutated eco_organization_members row';
   END IF;
 
-  -- Verify platform audit event created (VEGEN persona can read platform audit)
+  -- Verify platform audit event created (VEGEN persona can read platform audit under RLS)
   PERFORM public.harness_set_persona(v_vegen_auth_id);
   SELECT COUNT(*) INTO v_audit_count_after FROM public.eco_platform_audit_events;
   IF v_audit_count_after <> v_audit_count_before + 1 THEN
@@ -474,7 +503,12 @@ BEGIN
   -- Verifies:
   -- - Profile state changes to TRUE
   -- - Second platform audit event created
+  -- Privileged fixture setup: clear active context
+  PERFORM public.harness_reset_role();
   DELETE FROM public.eco_user_active_context WHERE user_profile_id = v_vegen_profile_id;
+
+  -- Authenticated execution: VEGEN invokes public.set_global_user_active
+  PERFORM public.harness_set_persona(v_vegen_auth_id);
   PERFORM public.set_global_user_active(v_synth_user_a_profile_id, TRUE);
 
   SELECT is_active INTO v_active_check FROM public.eco_user_profiles WHERE id = v_synth_user_a_profile_id;
@@ -513,6 +547,8 @@ BEGIN
   -- ============================================================
 
   -- 7.1 Platform audit UPDATE rejected (append-only trigger)
+  -- Privileged execution: proves append-only trigger blocks even privileged mutation
+  PERFORM public.harness_reset_role();
   v_exception_raised := FALSE;
   BEGIN
     UPDATE public.eco_platform_audit_events
@@ -560,11 +596,11 @@ BEGIN
   PERFORM public.harness_reset_role();
   INSERT INTO public.eco_organization_members (organization_id, user_profile_id, role_template_id, is_active)
   VALUES (v_sur_org_id, v_emiliano_profile_id, v_tpl_tenant_admin_id, TRUE);
+  DELETE FROM public.eco_user_active_context WHERE user_profile_id = v_emiliano_profile_id;
 
   -- Emiliano now holds ORG_MEMBER_PERMISSION_MANAGE in both NORTE and SUR.
   -- Without active context, targeting Synth Multi (who belongs to both) must fail closed on ambiguity:
   PERFORM public.harness_set_persona(v_emiliano_auth_id);
-  DELETE FROM public.eco_user_active_context WHERE user_profile_id = v_emiliano_profile_id;
 
   v_exception_raised := FALSE;
   BEGIN
@@ -677,6 +713,8 @@ BEGIN
   END IF;
 
   -- 10.3 Tenant Audit Log Append-Only Invariant (DELETE blocked)
+  -- Privileged execution: proves append-only trigger blocks even privileged mutation
+  PERFORM public.harness_reset_role();
   v_exception_raised := FALSE;
   BEGIN
     DELETE FROM public.eco_audit_events WHERE organization_id = v_norte_org_id;
