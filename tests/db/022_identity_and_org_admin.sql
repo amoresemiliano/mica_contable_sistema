@@ -99,6 +99,11 @@ DECLARE
   v_active_check BOOLEAN;
   v_tpl_check UUID;
   v_exception_raised BOOLEAN;
+  v_err_state TEXT;
+  v_err_msg TEXT;
+  v_diag_emiliano_memberships INT;
+  v_diag_synth_memberships INT;
+  v_diag_active_ctx_count INT;
   v_audit_row RECORD;
 BEGIN
   -- Ensure starting in privileged role for fixture setup
@@ -598,20 +603,45 @@ BEGIN
   VALUES (v_sur_org_id, v_emiliano_profile_id, v_tpl_tenant_admin_id, TRUE);
   DELETE FROM public.eco_user_active_context WHERE user_profile_id = v_emiliano_profile_id;
 
+  -- Gather privileged diagnostic context before switching to authenticated persona
+  SELECT COUNT(*) INTO v_diag_emiliano_memberships
+  FROM public.eco_organization_members
+  WHERE user_profile_id = v_emiliano_profile_id AND is_active = TRUE;
+
+  SELECT COUNT(*) INTO v_diag_synth_memberships
+  FROM public.eco_organization_members
+  WHERE user_profile_id = v_synth_multi_profile_id AND is_active = TRUE;
+
+  SELECT COUNT(*) INTO v_diag_active_ctx_count
+  FROM public.eco_user_active_context
+  WHERE user_profile_id = v_emiliano_profile_id;
+
   -- Emiliano now holds ORG_MEMBER_PERMISSION_MANAGE in both NORTE and SUR.
   -- Without active context, targeting Synth Multi (who belongs to both) must fail closed on ambiguity:
   PERFORM public.harness_set_persona(v_emiliano_auth_id);
 
+  RAISE NOTICE 'SECTION_8_DIAGNOSTICS: current_user=%, auth_uid=%, emiliano_profile_id=%, emiliano_active_memberships=%, synth_multi_active_memberships=%, active_ctx_rows=%',
+    current_user, auth.uid(), v_emiliano_profile_id, v_diag_emiliano_memberships, v_diag_synth_memberships, v_diag_active_ctx_count;
+
   v_exception_raised := FALSE;
+  v_err_state := NULL;
+  v_err_msg := NULL;
   BEGIN
     PERFORM public.change_user_role(v_synth_multi_profile_id, 'ACCOUNTANT');
   EXCEPTION WHEN OTHERS THEN
-    IF SQLERRM LIKE '%AMBIGUOUS_ORGANIZATION_CONTEXT%' THEN
+    v_err_state := SQLSTATE;
+    v_err_msg := SQLERRM;
+    IF v_err_msg LIKE '%AMBIGUOUS_ORGANIZATION_CONTEXT%' THEN
       v_exception_raised := TRUE;
+    ELSE
+      RAISE EXCEPTION 'SECTION_8_UNEXPECTED_EXCEPTION:
+SQLSTATE=%
+SQLERRM=%', v_err_state, v_err_msg;
     END IF;
   END;
   IF NOT v_exception_raised THEN
-    RAISE EXCEPTION 'Negative Test FAILED: Multi-org ambiguous target did not fail closed with AMBIGUOUS_ORGANIZATION_CONTEXT';
+    RAISE EXCEPTION 'SECTION_8_NO_EXCEPTION:
+Expected AMBIGUOUS_ORGANIZATION_CONTEXT but call completed successfully';
   END IF;
 
   -- Providing explicit p_org_id resolves ambiguity cleanly:

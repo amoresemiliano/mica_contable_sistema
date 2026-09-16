@@ -69,6 +69,9 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(dbTestContent).toContain('harness_set_persona');
         expect(dbTestContent).toContain('harness_reset_role');
         expect(dbTestContent).toContain('LEGACY_ORGANIZATION_RLS_POLICY_PRESENT');
+        expect(dbTestContent).toContain('SECTION_8_UNEXPECTED_EXCEPTION');
+        expect(dbTestContent).toContain('SECTION_8_NO_EXCEPTION');
+        expect(dbTestContent).toContain('SECTION_8_DIAGNOSTICS');
         expect(dbTestContent).not.toContain('private.');
     });
 
