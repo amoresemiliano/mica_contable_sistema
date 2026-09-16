@@ -201,4 +201,44 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         const explicitOrg = resolveTargetOrg(superAdminBoth, targetUser, 'ORG_MEMBER_PERMISSION_MANAGE', NORTE);
         expect(explicitOrg).toBe(NORTE);
     });
+
+    test('WP-AUTH-RESET-1 Verification: Migration 023 SQL files and DB matrix test exist and are well-formed', () => {
+        const preflight023Path = path.join(process.cwd(), 'sql', '023_clean_authorization_preflight.sql');
+        const up023Path = path.join(process.cwd(), 'sql', '023_clean_authorization_cutover.sql');
+        const postcheck023Path = path.join(process.cwd(), 'sql', '023_clean_authorization_postcheck.sql');
+        const matrixTestPath = path.join(process.cwd(), 'tests', 'db', '023_authorization_matrix.sql');
+
+        expect(fs.existsSync(preflight023Path)).toBe(true);
+        expect(fs.existsSync(up023Path)).toBe(true);
+        expect(fs.existsSync(postcheck023Path)).toBe(true);
+        expect(fs.existsSync(matrixTestPath)).toBe(true);
+
+        const upContent = fs.readFileSync(up023Path, 'utf8');
+        expect(upContent).toContain('DROP POLICY IF EXISTS "Organizations member view"');
+        expect(upContent).toContain('CREATE POLICY "Organizations viewable by own users"');
+        expect(upContent).toContain('authorized_orgs_for_capability(\'ORG_VIEW\')');
+        expect(upContent).toContain('private.org_id()');
+        expect(upContent).toContain('private.active_org_id()');
+        expect(upContent).toContain('vegendigital@gmail.com');
+        expect(upContent).toContain('drcmarianela@gmail.com');
+        expect(upContent).toContain('emilianodirosa1@gmail.com');
+        expect(upContent).toContain('edravi77@gmail.com');
+        expect(upContent).toContain('calleelcalvario16@gmail.com');
+        expect(upContent).toContain('59436df3-9f15-4f5e-b17e-37c55482521c'); // MICA org neutralized
+
+        const postcheckContent = fs.readFileSync(postcheck023Path, 'utf8');
+        expect(postcheckContent).toContain('Postcheck 023 FAILED');
+        expect(postcheckContent).toContain('eco_organizations');
+        expect(postcheckContent).toContain('authorized_orgs_for_capability%ORG_VIEW');
+        expect(postcheckContent).toContain('TENANT_ADMIN');
+        expect(postcheckContent).toContain('ACCOUNTING_SUPERADMIN');
+        expect(postcheckContent).toContain('PLATFORM_SUPERADMIN');
+
+        const matrixContent = fs.readFileSync(matrixTestPath, 'utf8');
+        expect(matrixContent).toContain('BEGIN;');
+        expect(matrixContent).toContain('ROLLBACK;');
+        expect(matrixContent).toContain('SET LOCAL ROLE authenticated');
+        expect(matrixContent).toContain('Matrix Test FAILED');
+        expect(matrixContent).not.toContain('private.');
+    });
 });

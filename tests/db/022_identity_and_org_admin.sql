@@ -1,5 +1,8 @@
 -- ============================================================
 -- DB BEHAVIORAL SECURITY TEST SUITE FOR WP-A3.2.1 (MIGRATION 022)
+-- [LEGACY / NON-BLOCKING DIAGNOSTIC HARNESS]
+-- Note: Replaced by tests/db/023_authorization_matrix.sql as the
+-- primary gate for clean canonical multitenant authorization.
 -- ============================================================
 -- WP-A3.2.1-VH1 — BEHAVIORAL SECURITY HARNESS AUTHENTICATED ROLE SIMULATION
 --

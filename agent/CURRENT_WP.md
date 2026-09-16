@@ -1,47 +1,68 @@
-# Current Work Package: WP-A3.2.1-VH1
+# Current Work Package: WP-AUTH-RESET-1
 
 **PROJECT**: MICA  
-**WORK PACKAGE**: WP-A3.2.1-VH1 — FINAL SECTION 8 DIAGNOSTIC ASSERTION FIX  
-**PARENT WP**: WP-A3.2.1 — Identity, Profiles & Organization Administration  
-**MODE**: SECTION 8 UNMASKED DIAGNOSTIC ASSERTION  
-**STATUS**: `WP_A3_2_1_VH1_SECTION_8_UNMASKED`  
-**BASE COMMIT**: `5d00e281bb7a329e30a11cd945f8edd19ea272f0`  
-**READY_FOR**: `READY_TO_RERUN_DB_022`  
+**WORK PACKAGE**: WP-AUTH-RESET-1 — CLEAN DEV AUTHORIZATION CUTOVER  
+**MODE**: CLEAN CANONICAL AUTHORIZATION CUTOVER & DEV RESET  
+**STATUS**: `READY_FOR_MANUAL_023_PREFLIGHT`  
+**BASE COMMIT**: `80a9afed0132fb9823de227aa7d363624125e93e`  
 
 ---
 
-## 1. Summary of Changes
+## 1. Summary of Deliverables
 
-1. `tests/db/022_identity_and_org_admin.sql`:
-   - **Removed Blanket Exception Masking in Section 8**: Refactored the `EXCEPTION WHEN OTHERS` block to explicitly capture `v_err_state := SQLSTATE` and `v_err_msg := SQLERRM`.
-   - **Distinct Case Handling**:
-     - *Case A (Expected)*: If `v_err_msg LIKE '%AMBIGUOUS_ORGANIZATION_CONTEXT%'`, passes cleanly (`v_exception_raised := TRUE`).
-     - *Case B (Unexpected Exception)*: Immediately raises `SECTION_8_UNEXPECTED_EXCEPTION:\nSQLSTATE=...\nSQLERRM=...`.
-     - *Case C (No Exception)*: If call finishes without exception, raises `SECTION_8_NO_EXCEPTION:\nExpected AMBIGUOUS_ORGANIZATION_CONTEXT but call completed successfully`.
-   - **Optional Privileged Context Diagnostics**:
-     - Prior to persona switch, queried counts: `v_diag_emiliano_memberships`, `v_diag_synth_memberships`, and `v_diag_active_ctx_count`.
-     - Added `RAISE NOTICE 'SECTION_8_DIAGNOSTICS: ...'` showing persona context (`current_user`, `auth.uid()`, `emiliano_profile_id`, active membership counts, active context count) without calling `private.*` from authenticated persona.
-   - **Transaction Rollback Preserved**: The entire script remains wrapped in `BEGIN; ... ROLLBACK;`.
+1. `sql/023_clean_authorization_preflight.sql`:
+   - Non-mutating preflight validation checking presence of required authorization tables, canonical private helper functions, role templates, active `ORG_VIEW` capability, real DEV users in `auth.users`, and DEV organizations.
 
-2. `tests/services/identityAndOrgAdminCutover.test.js`:
-   - Added automated Jest assertions verifying presence of `SECTION_8_UNEXPECTED_EXCEPTION`, `SECTION_8_NO_EXCEPTION`, and `SECTION_8_DIAGNOSTICS` in `tests/db/022_identity_and_org_admin.sql`.
+2. `sql/023_clean_authorization_cutover.sql`:
+   - Drops all legacy/competing SELECT policies on `public.eco_organizations` (`"Organizations member view"`, `"Organizations viewable by own users"`, etc.).
+   - Establishes the single canonical SELECT policy on `public.eco_organizations` using `private.authorized_orgs_for_capability('ORG_VIEW')`.
+   - Forces RLS on `public.eco_organizations`.
+   - Updates `private.org_id()` to strictly return `private.active_org_id()`, eliminating reliance on deprecated `eco_user_profiles.organization_id`.
+   - Deterministically purges MICA legacy organization (`59436df3-9f15-4f5e-b17e-37c55482521c`) memberships and overrides for the five real DEV users.
+   - Resets platform roles:
+     - `vegendigital@gmail.com` -> `PLATFORM_SUPERADMIN`
+     - `drcmarianela@gmail.com` -> `ACCOUNTING_SUPERADMIN`
+     - Emiliano, Edravi, Calle -> No platform role
+   - Resets tenant memberships:
+     - VEGEN: 0 memberships
+     - MARIANELA: DEMO NORTE, DEMO SUR, DEMO OESTE (`role_template_id = NULL`)
+     - EMILIANO: DEMO NORTE only (`TENANT_ADMIN`)
+     - EDRAVI: DEMO SUR only (`TENANT_ADMIN`)
+     - CALLE: DEMO OESTE only (`TENANT_ADMIN`)
+   - Resets canonical active context (`eco_user_active_context`) and normalizes compatibility display columns.
 
-3. Untouched Files & Architecture:
-   - `sql/022_identity_and_org_admin.sql` (Forward migration untouched)
-   - `sql/022_identity_and_org_admin_preflight.sql` (Untouched)
-   - `sql/022_identity_and_org_admin_postcheck.sql` (Untouched)
-   - `sql/022_identity_and_org_admin_down.sql` (Untouched)
-   - No production logic, schema, RLS policies, or permissions touched.
+3. `sql/023_clean_authorization_postcheck.sql`:
+   - Validates that exactly 1 SELECT policy exists on `public.eco_organizations` governed by `ORG_VIEW`.
+   - Validates that MICA legacy org has 0 active memberships for all 5 real users.
+   - Validates exact membership and platform role assignments for all 5 users.
+   - Validates that `private.org_id()` delegates strictly to `active_org_id()`.
+
+4. `tests/db/023_authorization_matrix.sql`:
+   - Small, clean, readable (< 200 lines) acceptance test exercising real DEV personas under authenticated role simulation (`SET LOCAL ROLE authenticated`).
+   - Asserts exact visible organizations for Emiliano ({NORTE}), Edravi ({SUR}), Calle ({OESTE}), Marianela ({NORTE, SUR, OESTE}), and VEGEN ({0}).
+   - Proves active context changes do not expand unauthorized organization visibility.
+   - Proves cross-tenant mutation RPCs fail closed.
+   - Runs safely under `BEGIN ... ROLLBACK`.
+
+5. `tests/db/022_identity_and_org_admin.sql`:
+   - Marked as `LEGACY / NON-BLOCKING DIAGNOSTIC HARNESS`.
+
+6. `tests/services/identityAndOrgAdminCutover.test.js`:
+   - Added automated tests verifying existence and well-formedness of all 023 migration scripts and acceptance matrix test.
 
 ---
 
-## 2. Test Verification
+## 2. Verification
 
-- `npm test`: 22 test suites passed, 269 tests passed.
+- `npm test`: 22 test suites passed, 270 tests passed.
+- Accounting processing logic & importers: 100% untouched.
+- Supabase live database: 100% untouched (Awaiting human execution).
 
 ---
 
-## 3. Next Step Gate
+## 3. Human Execution Gate (Sequential Steps in Supabase SQL Editor)
 
-`tests/db/022_identity_and_org_admin.sql` is ready for final rerun in Supabase SQL Editor against DEV to observe unmasked Section 8 diagnostics.
-
+1. `sql/023_clean_authorization_preflight.sql`
+2. `sql/023_clean_authorization_cutover.sql`
+3. `sql/023_clean_authorization_postcheck.sql`
+4. `tests/db/023_authorization_matrix.sql`
