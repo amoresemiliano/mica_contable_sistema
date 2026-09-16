@@ -230,6 +230,7 @@ DROP POLICY IF EXISTS "eco_organizations_select_policy" ON public.eco_organizati
 DROP POLICY IF EXISTS "Allow authenticated users to read organizations" ON public.eco_organizations;
 DROP POLICY IF EXISTS "Allow select for authenticated" ON public.eco_organizations;
 DROP POLICY IF EXISTS "Organizations viewable by members" ON public.eco_organizations;
+DROP POLICY IF EXISTS org_members_read_orgs ON public.eco_organizations;
 
 -- Ensure RLS is enabled and forced
 ALTER TABLE public.eco_organizations ENABLE ROW LEVEL SECURITY;

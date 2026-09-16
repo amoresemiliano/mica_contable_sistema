@@ -181,7 +181,7 @@ WHERE schemaname = 'public' AND tablename = 'eco_organizations';
 | :--- | :--- | :--- |
 | Organizations viewable by own users | SELECT | (id IN ( SELECT private.authorized_orgs_for_capability('ORG_VIEW'::text) AS organization_id)) |
 
-*(Exactly 1 SELECT policy. No competing permissive policies like "Organizations member view").*
+*(Exactly 1 SELECT policy. No competing permissive policies like "Organizations member view" or "org_members_read_orgs").*
 
 ---
 

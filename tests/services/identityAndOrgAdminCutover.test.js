@@ -215,6 +215,7 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
 
         const upContent = fs.readFileSync(up023Path, 'utf8');
         expect(upContent).toContain('DROP POLICY IF EXISTS "Organizations member view"');
+        expect(upContent).toContain('DROP POLICY IF EXISTS org_members_read_orgs');
         expect(upContent).toContain('CREATE POLICY "Organizations viewable by own users"');
         expect(upContent).toContain('authorized_orgs_for_capability(\'ORG_VIEW\')');
         expect(upContent).toContain('private.org_id()');
@@ -230,6 +231,7 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(postcheckContent).toContain('Postcheck 023 FAILED');
         expect(postcheckContent).toContain('eco_organizations');
         expect(postcheckContent).toContain('authorized_orgs_for_capability%ORG_VIEW');
+        expect(postcheckContent).toContain('org_members_read_orgs');
         expect(postcheckContent).toContain('TENANT_ADMIN');
         expect(postcheckContent).toContain('ACCOUNTING_SUPERADMIN');
         expect(postcheckContent).toContain('PLATFORM_SUPERADMIN');
@@ -246,5 +248,34 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         const manualPackContent = fs.readFileSync(manualPackPath, 'utf8');
         expect(manualPackContent).toContain('CHECK 1 — CANONICAL ROLE TEMPLATES');
         expect(manualPackContent).toContain('CHECK 12 — APPLICATION CHECK');
+
+        // Local skill & context assertions
+        const skillPathAgents = path.join(process.cwd(), '.agents', 'skills', 'efficient-delivery', 'SKILL.md');
+        const skillPathAgent = path.join(process.cwd(), '.agent', 'skills', 'efficient-delivery', 'SKILL.md');
+        const contextPath = path.join(process.cwd(), 'agent', 'CONTEXT.md');
+
+        expect(fs.existsSync(skillPathAgents) || fs.existsSync(skillPathAgent)).toBe(true);
+        const skillContent = fs.readFileSync(fs.existsSync(skillPathAgents) ? skillPathAgents : skillPathAgent, 'utf8');
+        expect(skillContent).toContain('Efficient Delivery — MICA');
+        expect(skillContent).toContain('BUILD MEANINGFUL BLOCKS');
+        expect(skillContent).toContain('REAL ENVIRONMENT IS SOURCE OF TRUTH');
+        expect(skillContent).toContain('CHEAPEST EVIDENCE FIRST');
+        expect(skillContent).toContain('TWO-FAILURE STRATEGY RULE');
+        expect(skillContent).toContain('HUMAN CHECKS ARE ACCEPTANCE GATES');
+        expect(skillContent).toContain('PASS MEANS MOVE FORWARD');
+        expect(skillContent).toContain('DISTINGUISH TWO EXECUTION MODES');
+        expect(skillContent).toContain('DOCUMENTATION DOES NOT EQUAL PROGRESS');
+        expect(skillContent).toContain('TESTS GREEN != DONE');
+        expect(skillContent).toContain('HUMAN OWNER TIME IS EXPENSIVE');
+        expect(skillContent).toContain('DATABASE WORK');
+        expect(skillContent).toContain('DRIFT HANDLING');
+        expect(skillContent).toContain('LEGACY SYSTEM RULE');
+        expect(skillContent).toContain('AUTONOMOUS IMPROVEMENT OBLIGATION');
+
+        expect(fs.existsSync(contextPath)).toBe(true);
+        const contextContent = fs.readFileSync(contextPath, 'utf8');
+        expect(contextContent).toContain('autonomous-engineering-execution');
+        expect(contextContent).toContain('evidence-first-engineering');
+        expect(contextContent).toContain('efficient-delivery');
     });
 });

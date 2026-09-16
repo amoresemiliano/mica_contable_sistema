@@ -100,7 +100,8 @@ BEGIN
         'eco_organizations_select_policy',
         'Allow authenticated users to read organizations',
         'Allow select for authenticated',
-        'Organizations viewable by members'
+        'Organizations viewable by members',
+        'org_members_read_orgs'
       )
   ) THEN
     RAISE EXCEPTION 'Postcheck 023 FAILED: Legacy policy names still detected on eco_organizations';
