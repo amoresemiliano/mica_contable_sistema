@@ -1,19 +1,23 @@
 # Current Work Package: WP-AUTH-RESET-1
 
 **PROJECT**: MICA  
-**WORK PACKAGE**: WP-AUTH-RESET-1 — CLEAN DEV AUTHORIZATION CUTOVER  
-**MODE**: CLEAN CANONICAL AUTHORIZATION CUTOVER & DEV RESET  
-**STATUS**: `READY_FOR_MANUAL_023_PREFLIGHT`  
-**BASE COMMIT**: `80a9afed0132fb9823de227aa7d363624125e93e`  
+**WORK PACKAGE**: WP-AUTH-RESET-1 — CANONICAL AUTHORIZATION FOUNDATION + CLEAN DEV CUTOVER  
+**MODE**: CANONICAL AUTHORIZATION FOUNDATION RECONCILIATION & DEV RESET  
+**STATUS**: `READY_FOR_MANUAL_CHECK_1`  
+**BASE COMMIT**: `239ef3f3deeef3a906b362351b6e87070ccfbb9f`  
 
 ---
 
 ## 1. Summary of Deliverables
 
 1. `sql/023_clean_authorization_preflight.sql`:
-   - Non-mutating preflight validation checking presence of required authorization tables, canonical private helper functions, role templates, active `ORG_VIEW` capability, real DEV users in `auth.users`, and DEV organizations.
+   - Non-mutating structural preflight validation checking presence of required authorization tables, foreign keys, real DEV users in `auth.users`, and DEV organizations.
+   - Does NOT fail on missing role templates, as 023 forward migration reconciles them idempotently.
 
 2. `sql/023_clean_authorization_cutover.sql`:
+   - Reconciles all canonical capabilities (17 Platform, 25 Organization).
+   - Reconciles all 8 canonical role templates (`PLATFORM_SUPERADMIN`, `ACCOUNTING_SUPERADMIN`, `TENANT_ADMIN`, `ACCOUNTANT`, `UPLOADER`, `REVIEWER`, `READ_ONLY`, `EXTERNAL_AUDITOR`), preserving existing UUIDs and normalizing scopes and descriptions.
+   - Recreates canonical role template capability mappings and the `ACCOUNTING_SUPERADMIN` platform-to-org capability bridge (`ORG_VIEW`, etc.).
    - Drops all legacy/competing SELECT policies on `public.eco_organizations` (`"Organizations member view"`, `"Organizations viewable by own users"`, etc.).
    - Establishes the single canonical SELECT policy on `public.eco_organizations` using `private.authorized_orgs_for_capability('ORG_VIEW')`.
    - Forces RLS on `public.eco_organizations`.
@@ -32,6 +36,8 @@
    - Resets canonical active context (`eco_user_active_context`) and normalizes compatibility display columns.
 
 3. `sql/023_clean_authorization_postcheck.sql`:
+   - Validates that all 8 canonical role templates exist with exact scopes and `is_active = TRUE`.
+   - Validates that `ACCOUNTING_SUPERADMIN` possesses the canonical `ORG_VIEW` capability bridge.
    - Validates that exactly 1 SELECT policy exists on `public.eco_organizations` governed by `ORG_VIEW`.
    - Validates that MICA legacy org has 0 active memberships for all 5 real users.
    - Validates exact membership and platform role assignments for all 5 users.
@@ -44,11 +50,14 @@
    - Proves cross-tenant mutation RPCs fail closed.
    - Runs safely under `BEGIN ... ROLLBACK`.
 
-5. `tests/db/022_identity_and_org_admin.sql`:
+5. `docs/WP_AUTH_RESET_1_MANUAL_VERIFICATION.md`:
+   - Comprehensive, copy-paste ready manual verification pack for the human owner covering Checks 1 through 12.
+
+6. `tests/db/022_identity_and_org_admin.sql`:
    - Marked as `LEGACY / NON-BLOCKING DIAGNOSTIC HARNESS`.
 
-6. `tests/services/identityAndOrgAdminCutover.test.js`:
-   - Added automated tests verifying existence and well-formedness of all 023 migration scripts and acceptance matrix test.
+7. `tests/services/identityAndOrgAdminCutover.test.js`:
+   - Added automated tests verifying existence and well-formedness of all 023 migration scripts, acceptance matrix test, and manual verification documentation.
 
 ---
 
@@ -66,3 +75,4 @@
 2. `sql/023_clean_authorization_cutover.sql`
 3. `sql/023_clean_authorization_postcheck.sql`
 4. `tests/db/023_authorization_matrix.sql`
+5. Execute manual checks in `docs/WP_AUTH_RESET_1_MANUAL_VERIFICATION.md`

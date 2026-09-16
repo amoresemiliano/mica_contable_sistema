@@ -240,5 +240,11 @@ describe('WP-A3.2.1 Identity, Profiles & Organization Administration Cutover', (
         expect(matrixContent).toContain('SET LOCAL ROLE authenticated');
         expect(matrixContent).toContain('Matrix Test FAILED');
         expect(matrixContent).not.toContain('private.');
+
+        const manualPackPath = path.join(process.cwd(), 'docs', 'WP_AUTH_RESET_1_MANUAL_VERIFICATION.md');
+        expect(fs.existsSync(manualPackPath)).toBe(true);
+        const manualPackContent = fs.readFileSync(manualPackPath, 'utf8');
+        expect(manualPackContent).toContain('CHECK 1 — CANONICAL ROLE TEMPLATES');
+        expect(manualPackContent).toContain('CHECK 12 — APPLICATION CHECK');
     });
 });

@@ -1,50 +1,229 @@
 -- ============================================================
--- MIGRATION 023: WP-AUTH-RESET-1 CLEAN DEV AUTHORIZATION CUTOVER
+-- MIGRATION 023: WP-AUTH-RESET-1 CANONICAL AUTHORIZATION FOUNDATION
+--                & CLEAN DEV AUTHORIZATION CUTOVER
 -- ============================================================
--- Eliminates legacy authorization paths, neutralizes legacy MICA
--- organization authorization, replaces eco_organizations RLS with
--- the single canonical policy, and resets DEV real-user memberships
--- into the exact canonical matrix.
---
--- Target Matrix:
--- 1. VEGEN DIGITAL (vegendigital@gmail.com):
---    - Platform Role: PLATFORM_SUPERADMIN
---    - Tenant Memberships: 0
---    - Active Context: NULL
---
--- 2. MARIANELA (drcmarianela@gmail.com):
---    - Platform Role: ACCOUNTING_SUPERADMIN
---    - Tenant Memberships: DEMO NORTE, DEMO SUR, DEMO OESTE (role_template_id = NULL)
---    - Active Context: DEMO NORTE
---
--- 3. EMILIANO (emilianodirosa1@gmail.com):
---    - Platform Role: NONE
---    - Tenant Memberships: DEMO NORTE only (TENANT_ADMIN)
---    - Active Context: DEMO NORTE
---
--- 4. EDRAVI (edravi77@gmail.com):
---    - Platform Role: NONE
---    - Tenant Memberships: DEMO SUR only (TENANT_ADMIN)
---    - Active Context: DEMO SUR
---
--- 5. CALLE (calleelcalvario16@gmail.com):
---    - Platform Role: NONE
---    - Tenant Memberships: DEMO OESTE only (TENANT_ADMIN)
---    - Active Context: DEMO OESTE
---
--- Legacy MICA Org (59436df3-9f15-4f5e-b17e-37c55482521c):
--- - Zero active tenant memberships for all normal users.
+-- 1. Reconciles all canonical capabilities (Platform & Org).
+-- 2. Reconciles canonical role templates (Platform & Org) idempotently,
+--    preserving existing UUIDs, normalizing scopes and descriptions.
+-- 3. Recreates all canonical role template capability mappings & bridges.
+-- 4. Eliminates legacy effective authorization paths and policies.
+-- 5. Neutralizes legacy MICA organization (59436df3-9f15-4f5e-b17e-37c55482521c).
+-- 6. Resets the five real DEV users to the exact canonical matrix.
+-- 7. Resets active contexts and normalizes compatibility display fields.
 -- ============================================================
 
 BEGIN;
 
 -- ============================================================
--- 1. DROP ALL OBSOLETE & COMPETING POLICIES ON eco_organizations
+-- 1. RECONCILE CANONICAL CAPABILITIES (PLATFORM & ORGANIZATION)
 -- ============================================================
--- In PostgreSQL, multiple PERMISSIVE SELECT policies on the same table
--- are combined with OR. To guarantee fail-closed multitenant isolation,
--- every legacy policy name ever introduced must be dropped.
 
+-- A. Platform Capabilities (17)
+INSERT INTO public.eco_capabilities (code, scope, description, is_active) VALUES
+  ('PLATFORM_MANAGE', 'PLATFORM', 'Manage system-wide configuration and platform settings', TRUE),
+  ('ORGANIZATION_CREATE', 'PLATFORM', 'Create new tenant organizations', TRUE),
+  ('ORGANIZATION_UPDATE', 'PLATFORM', 'Update tenant organization settings and details', TRUE),
+  ('ORGANIZATION_ARCHIVE', 'PLATFORM', 'Archive or deactivate tenant organizations', TRUE),
+  ('GLOBAL_USER_MANAGE', 'PLATFORM', 'Manage platform users globally across all tenants', TRUE),
+  ('PLAN_MANAGE', 'PLATFORM', 'Manage subscription plans and billing tiers', TRUE),
+  ('GLOBAL_CATALOG_VIEW', 'PLATFORM', 'View global tax and economic activity catalogs', TRUE),
+  ('GLOBAL_CATALOG_MANAGE', 'PLATFORM', 'Manage global tax and economic activity catalogs', TRUE),
+  ('CATALOG_ASSIGN_ANY_ORG', 'PLATFORM', 'Assign global catalog categories/activities to any tenant organization', TRUE),
+  ('RATE_MANAGE_ANY_ORG', 'PLATFORM', 'Manage IIBB rates for any tenant organization', TRUE),
+  ('ACCESS_ANY_ORG', 'PLATFORM', 'Future entitlement for elevated platform-wide tenant access', TRUE),
+  ('REPORT_COMPARE_SCOPED_ORGS', 'PLATFORM', 'Access cross-organizational comparative reports', TRUE),
+  ('REPORT_CONSOLIDATED_SCOPED_ORGS', 'PLATFORM', 'Access consolidated financial reports across scoped organizations', TRUE),
+  ('SAAS_ANALYTICS_VIEW', 'PLATFORM', 'View SaaS platform usage analytics and operational metrics', TRUE),
+  ('SUPPORT_IMPERSONATE', 'PLATFORM', 'Support access to impersonate user sessions for troubleshooting', TRUE),
+  ('HARD_DELETE_EXCEPTIONAL', 'PLATFORM', 'Perform exceptional hard deletion of system data', TRUE),
+  ('AUDIT_PLATFORM_VIEW', 'PLATFORM', 'View global platform audit logs', TRUE)
+ON CONFLICT (code) DO UPDATE SET
+  scope = EXCLUDED.scope,
+  description = EXCLUDED.description,
+  is_active = TRUE;
+
+-- B. Organization Capabilities (25)
+INSERT INTO public.eco_capabilities (code, scope, description, is_active) VALUES
+  ('ORG_VIEW', 'ORGANIZATION', 'View organization details and dashboard', TRUE),
+  ('ORG_SETTINGS_VIEW', 'ORGANIZATION', 'View organization configuration settings', TRUE),
+  ('ORG_SETTINGS_MANAGE', 'ORGANIZATION', 'Modify organization configuration settings', TRUE),
+  ('ORG_MEMBER_VIEW', 'ORGANIZATION', 'View organization members list', TRUE),
+  ('ORG_MEMBER_INVITE', 'ORGANIZATION', 'Invite new members to organization', TRUE),
+  ('ORG_MEMBER_MANAGE', 'ORGANIZATION', 'Manage existing organization members', TRUE),
+  ('ORG_MEMBER_PERMISSION_MANAGE', 'ORGANIZATION', 'Manage member role templates and capability overrides', TRUE),
+  ('IMPORT_VIEW', 'ORGANIZATION', 'View import history and details', TRUE),
+  ('IMPORT_CREATE', 'ORGANIZATION', 'Create new import batch', TRUE),
+  ('IMPORT_RETRY', 'ORGANIZATION', 'Request retry for failed import', TRUE),
+  ('IMPORT_REVIEW', 'ORGANIZATION', 'Review import issues and status', TRUE),
+  ('RECORD_VIEW', 'ORGANIZATION', 'View normalized accounting records', TRUE),
+  ('RECORD_CLASSIFY', 'ORGANIZATION', 'Classify normalized accounting records', TRUE),
+  ('RECORD_SOFT_DELETE', 'ORGANIZATION', 'Soft delete normalized accounting records', TRUE),
+  ('RECORD_RESTORE', 'ORGANIZATION', 'Restore soft-deleted normalized accounting records', TRUE),
+  ('PERCEPTION_IMPORT', 'ORGANIZATION', 'Execute tax perceptions file import', TRUE),
+  ('BANK_IMPORT', 'ORGANIZATION', 'Execute bank statement file import', TRUE),
+  ('PAYROLL_IMPORT', 'ORGANIZATION', 'Execute payroll file import', TRUE),
+  ('ISSUE_RESOLVE', 'ORGANIZATION', 'Resolve import validation issues', TRUE),
+  ('CATALOG_ORG_VIEW', 'ORGANIZATION', 'View organization assigned catalog categories', TRUE),
+  ('REPORT_VIEW', 'ORGANIZATION', 'View organization financial reports', TRUE),
+  ('REPORT_EXPORT', 'ORGANIZATION', 'Export organization financial reports', TRUE),
+  ('TICKET_CREATE', 'ORGANIZATION', 'Create support tickets for organization', TRUE),
+  ('TICKET_VIEW_ORG', 'ORGANIZATION', 'View support tickets for organization', TRUE),
+  ('AUDIT_VIEW_ORG', 'ORGANIZATION', 'View organization audit log events', TRUE)
+ON CONFLICT (code) DO UPDATE SET
+  scope = EXCLUDED.scope,
+  description = EXCLUDED.description,
+  is_active = TRUE;
+
+
+-- ============================================================
+-- 2. RECONCILE CANONICAL ROLE TEMPLATES (PLATFORM & ORG)
+-- ============================================================
+-- Preserves existing UUIDs if code exists, normalizes scope, is_active, name, description.
+
+INSERT INTO public.eco_role_templates (code, scope, name, description, is_active) VALUES
+  ('PLATFORM_SUPERADMIN', 'PLATFORM', 'Platform Super Admin', 'Full administrative authority across the entire platform', TRUE),
+  ('ACCOUNTING_SUPERADMIN', 'PLATFORM', 'Accounting Super Admin', 'Platform-level accounting authority with multi-org capabilities', TRUE),
+  ('TENANT_ADMIN', 'ORGANIZATION', 'Tenant Admin', 'Full administrative authority within a single organization', TRUE),
+  ('ACCOUNTANT', 'ORGANIZATION', 'Accountant', 'Full operational accounting and reporting authority', TRUE),
+  ('UPLOADER', 'ORGANIZATION', 'Data Uploader', 'Authority to upload and import files into organization', TRUE),
+  ('REVIEWER', 'ORGANIZATION', 'Data Reviewer', 'Authority to review and classify imported records', TRUE),
+  ('READ_ONLY', 'ORGANIZATION', 'Read Only Access', 'Read-only viewing access to organization data', TRUE),
+  ('EXTERNAL_AUDITOR', 'ORGANIZATION', 'External Auditor', 'Read-only access with audit log visibility', TRUE)
+ON CONFLICT (code) DO UPDATE SET
+  scope = EXCLUDED.scope,
+  name = EXCLUDED.name,
+  description = EXCLUDED.description,
+  is_active = TRUE;
+
+
+-- ============================================================
+-- 3. RECREATE CANONICAL ROLE TEMPLATE CAPABILITY MAPPINGS
+-- ============================================================
+
+DO $$
+DECLARE
+    v_template_id UUID;
+    v_cap_code TEXT;
+    v_cap_id UUID;
+    v_caps TEXT[];
+BEGIN
+    -- 1. PLATFORM_SUPERADMIN -> ALL 17 Platform Capabilities
+    SELECT id INTO v_template_id FROM public.eco_role_templates WHERE code = 'PLATFORM_SUPERADMIN';
+    FOR v_cap_id IN SELECT id FROM public.eco_capabilities WHERE scope = 'PLATFORM' LOOP
+        INSERT INTO public.eco_role_template_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 2. ACCOUNTING_SUPERADMIN -> Platform Capabilities
+    SELECT id INTO v_template_id FROM public.eco_role_templates WHERE code = 'ACCOUNTING_SUPERADMIN';
+    v_caps := ARRAY[
+        'GLOBAL_CATALOG_VIEW', 'CATALOG_ASSIGN_ANY_ORG', 'RATE_MANAGE_ANY_ORG',
+        'REPORT_COMPARE_SCOPED_ORGS', 'REPORT_CONSOLIDATED_SCOPED_ORGS'
+    ];
+    FOREACH v_cap_code IN ARRAY v_caps LOOP
+        SELECT id INTO v_cap_id FROM public.eco_capabilities WHERE code = v_cap_code;
+        INSERT INTO public.eco_role_template_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 3. ACCOUNTING_SUPERADMIN -> Organization Capability Bridge (eco_platform_role_org_capabilities)
+    v_caps := ARRAY[
+        'ORG_VIEW', 'ORG_SETTINGS_VIEW', 'IMPORT_VIEW', 'IMPORT_CREATE', 'IMPORT_RETRY',
+        'IMPORT_REVIEW', 'RECORD_VIEW', 'RECORD_CLASSIFY', 'RECORD_SOFT_DELETE', 'RECORD_RESTORE',
+        'PERCEPTION_IMPORT', 'BANK_IMPORT', 'PAYROLL_IMPORT', 'ISSUE_RESOLVE', 'CATALOG_ORG_VIEW',
+        'REPORT_VIEW', 'REPORT_EXPORT', 'TICKET_CREATE', 'TICKET_VIEW_ORG', 'AUDIT_VIEW_ORG'
+    ];
+    FOREACH v_cap_code IN ARRAY v_caps LOOP
+        SELECT id INTO v_cap_id FROM public.eco_capabilities WHERE code = v_cap_code;
+        INSERT INTO public.eco_platform_role_org_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 4. TENANT_ADMIN -> Org Capabilities
+    SELECT id INTO v_template_id FROM public.eco_role_templates WHERE code = 'TENANT_ADMIN';
+    v_caps := ARRAY[
+        'ORG_VIEW', 'ORG_SETTINGS_VIEW', 'ORG_SETTINGS_MANAGE', 'ORG_MEMBER_VIEW', 'ORG_MEMBER_INVITE',
+        'ORG_MEMBER_MANAGE', 'ORG_MEMBER_PERMISSION_MANAGE', 'IMPORT_VIEW', 'IMPORT_CREATE', 'IMPORT_RETRY',
+        'IMPORT_REVIEW', 'RECORD_VIEW', 'RECORD_CLASSIFY', 'RECORD_SOFT_DELETE', 'PERCEPTION_IMPORT',
+        'BANK_IMPORT', 'PAYROLL_IMPORT', 'ISSUE_RESOLVE', 'CATALOG_ORG_VIEW', 'REPORT_VIEW',
+        'REPORT_EXPORT', 'TICKET_CREATE', 'TICKET_VIEW_ORG', 'AUDIT_VIEW_ORG'
+    ];
+    FOREACH v_cap_code IN ARRAY v_caps LOOP
+        SELECT id INTO v_cap_id FROM public.eco_capabilities WHERE code = v_cap_code;
+        INSERT INTO public.eco_role_template_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 5. ACCOUNTANT -> Org Capabilities
+    SELECT id INTO v_template_id FROM public.eco_role_templates WHERE code = 'ACCOUNTANT';
+    v_caps := ARRAY[
+        'ORG_VIEW', 'ORG_SETTINGS_VIEW', 'IMPORT_VIEW', 'IMPORT_CREATE', 'IMPORT_RETRY',
+        'IMPORT_REVIEW', 'RECORD_VIEW', 'RECORD_CLASSIFY', 'RECORD_SOFT_DELETE', 'PERCEPTION_IMPORT',
+        'BANK_IMPORT', 'PAYROLL_IMPORT', 'ISSUE_RESOLVE', 'CATALOG_ORG_VIEW', 'REPORT_VIEW',
+        'REPORT_EXPORT', 'TICKET_CREATE', 'TICKET_VIEW_ORG', 'AUDIT_VIEW_ORG'
+    ];
+    FOREACH v_cap_code IN ARRAY v_caps LOOP
+        SELECT id INTO v_cap_id FROM public.eco_capabilities WHERE code = v_cap_code;
+        INSERT INTO public.eco_role_template_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 6. UPLOADER -> Org Capabilities
+    SELECT id INTO v_template_id FROM public.eco_role_templates WHERE code = 'UPLOADER';
+    v_caps := ARRAY[
+        'ORG_VIEW', 'IMPORT_VIEW', 'IMPORT_CREATE', 'IMPORT_RETRY', 'RECORD_VIEW',
+        'PERCEPTION_IMPORT', 'BANK_IMPORT', 'PAYROLL_IMPORT', 'CATALOG_ORG_VIEW',
+        'REPORT_VIEW', 'REPORT_EXPORT', 'TICKET_CREATE'
+    ];
+    FOREACH v_cap_code IN ARRAY v_caps LOOP
+        SELECT id INTO v_cap_id FROM public.eco_capabilities WHERE code = v_cap_code;
+        INSERT INTO public.eco_role_template_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 7. REVIEWER -> Org Capabilities
+    SELECT id INTO v_template_id FROM public.eco_role_templates WHERE code = 'REVIEWER';
+    v_caps := ARRAY[
+        'ORG_VIEW', 'IMPORT_VIEW', 'IMPORT_REVIEW', 'RECORD_VIEW', 'RECORD_CLASSIFY',
+        'ISSUE_RESOLVE', 'CATALOG_ORG_VIEW', 'REPORT_VIEW', 'REPORT_EXPORT', 'TICKET_CREATE'
+    ];
+    FOREACH v_cap_code IN ARRAY v_caps LOOP
+        SELECT id INTO v_cap_id FROM public.eco_capabilities WHERE code = v_cap_code;
+        INSERT INTO public.eco_role_template_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 8. READ_ONLY -> Org Capabilities
+    SELECT id INTO v_template_id FROM public.eco_role_templates WHERE code = 'READ_ONLY';
+    v_caps := ARRAY[
+        'ORG_VIEW', 'ORG_SETTINGS_VIEW', 'IMPORT_VIEW', 'IMPORT_REVIEW', 'RECORD_VIEW',
+        'CATALOG_ORG_VIEW', 'REPORT_VIEW', 'REPORT_EXPORT', 'TICKET_CREATE'
+    ];
+    FOREACH v_cap_code IN ARRAY v_caps LOOP
+        SELECT id INTO v_cap_id FROM public.eco_capabilities WHERE code = v_cap_code;
+        INSERT INTO public.eco_role_template_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+
+    -- 9. EXTERNAL_AUDITOR -> Org Capabilities
+    SELECT id INTO v_template_id FROM public.eco_role_templates WHERE code = 'EXTERNAL_AUDITOR';
+    v_caps := ARRAY[
+        'ORG_VIEW', 'ORG_SETTINGS_VIEW', 'IMPORT_VIEW', 'IMPORT_REVIEW', 'RECORD_VIEW',
+        'CATALOG_ORG_VIEW', 'REPORT_VIEW', 'REPORT_EXPORT', 'TICKET_CREATE', 'AUDIT_VIEW_ORG'
+    ];
+    FOREACH v_cap_code IN ARRAY v_caps LOOP
+        SELECT id INTO v_cap_id FROM public.eco_capabilities WHERE code = v_cap_code;
+        INSERT INTO public.eco_role_template_capabilities (role_template_id, capability_id)
+        VALUES (v_template_id, v_cap_id) ON CONFLICT DO NOTHING;
+    END LOOP;
+END $$;
+
+
+-- ============================================================
+-- 4. ELIMINATE LEGACY AUTHORIZATION POLICIES & OBSOLETE PATHS
+-- ============================================================
+
+-- Drop all competing permissive SELECT policies on public.eco_organizations
 DROP POLICY IF EXISTS "Organizations member view" ON public.eco_organizations;
 DROP POLICY IF EXISTS "Organizations viewable by own users" ON public.eco_organizations;
 DROP POLICY IF EXISTS "eco_organizations_select_policy" ON public.eco_organizations;
@@ -56,7 +235,6 @@ DROP POLICY IF EXISTS "Organizations viewable by members" ON public.eco_organiza
 ALTER TABLE public.eco_organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.eco_organizations FORCE ROW LEVEL SECURITY;
 
--- Revoke mutation rights from authenticated, grant SELECT only
 REVOKE INSERT, UPDATE, DELETE ON public.eco_organizations FROM authenticated;
 GRANT SELECT ON public.eco_organizations TO authenticated;
 
@@ -71,17 +249,7 @@ USING (
   )
 );
 
-
--- ============================================================
--- 2. NEUTRALIZE LEGACY FUNCTIONS THAT RELIED ON PROFILE FIELDS
--- ============================================================
--- Historically, private.org_id() and private.func_role() read
--- eco_user_profiles.organization_id and eco_user_profiles.role.
--- Under the canonical model, active organization context is
--- managed via private.active_org_id() and capabilities via private.can_org().
--- To prevent accidental legacy authorization derivation, align private.org_id()
--- to read strictly through canonical private.active_org_id().
-
+-- Neutralize private.org_id() so it never falls back to eco_user_profiles.organization_id
 CREATE OR REPLACE FUNCTION private.org_id()
 RETURNS UUID
 LANGUAGE sql
@@ -97,7 +265,7 @@ GRANT EXECUTE ON FUNCTION private.org_id() TO authenticated;
 
 
 -- ============================================================
--- 3. DETERMINISTIC REAL DEV USER MEMBERSHIP & ROLE RESET
+-- 5. DETERMINISTIC REAL DEV USER MEMBERSHIP & ROLE RESET
 -- ============================================================
 
 DO $$
@@ -175,7 +343,7 @@ BEGIN
     v_calle_profile_id
   ];
 
-  -- 4. Purge ANY memberships in legacy MICA organization for real DEV users
+  -- 4. Neutralize ANY memberships in legacy MICA organization for real DEV users
   DELETE FROM public.eco_organization_members
   WHERE organization_id = v_mica_org_id
     AND user_profile_id = ANY(v_real_profile_ids);
@@ -191,7 +359,6 @@ BEGIN
   -- ============================================================
   -- 5. RESET PLATFORM ROLES
   -- ============================================================
-  -- Reset all platform roles for real DEV profiles
   DELETE FROM public.eco_user_platform_role
   WHERE user_profile_id = ANY(v_real_profile_ids);
 
@@ -209,7 +376,6 @@ BEGIN
   -- ============================================================
   -- 6. RESET TENANT MEMBERSHIPS
   -- ============================================================
-  -- Delete all existing tenant memberships for real DEV profiles to eliminate drift
   DELETE FROM public.eco_organization_members
   WHERE user_profile_id = ANY(v_real_profile_ids);
 
@@ -271,7 +437,7 @@ BEGIN
   UPDATE public.eco_user_profiles SET organization_id = v_sur_org_id, role = 'ADMIN' WHERE id = v_edravi_profile_id;
   UPDATE public.eco_user_profiles SET organization_id = v_oeste_org_id, role = 'ADMIN' WHERE id = v_calle_profile_id;
 
-  RAISE NOTICE 'Migration 023 (Clean DEV Authorization Cutover) Applied Successfully.';
+  RAISE NOTICE 'Migration 023 (Canonical Authorization Foundation & DEV Cutover) Applied Successfully.';
 END $$;
 
 COMMIT;
