@@ -2895,14 +2895,14 @@ window.submitArcaCatalogForm = async () => {
         }
         if (feedback) feedback.style.display = "none";
 
-        await persistenceService.upsertArcaCatalog(parsedArcaCatalogState.validActivities);
+        const count = await persistenceService.upsertArcaCatalog(parsedArcaCatalogState.validActivities);
 
         if (appStore.loadEconomicActivities) {
             await appStore.loadEconomicActivities();
         }
         UIManager.render();
 
-        alert(`Se importaron ${parsedArcaCatalogState.validActivities.length} actividades económicas ARCA exitosamente.`);
+        alert(`Se importaron ${count} actividades económicas al Catálogo Global ARCA exitosamente en base de datos. (Nota: Las actividades importadas forman parte del Catálogo Global y pueden ser asignadas a la organización desde la vista de Administración Global).`);
         UIManager.closeModal('modal-arca-catalog');
         parsedArcaCatalogState = null;
         const fileIn = document.getElementById('arca-catalog-file');

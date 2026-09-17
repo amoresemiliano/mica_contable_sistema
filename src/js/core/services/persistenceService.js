@@ -503,7 +503,7 @@ export class PersistenceService {
     /**
      * Crear categoría tributaria global y asignarla a la organización activa
      */
-    async createTaxCategory({ name, description = '', category_type = 'EXPENSE' }) {
+    async createTaxCategory({ name, description = '', category_type = 'EXPENSE' }, targetOrgId = null) {
         if (!name || !name.trim()) {
             throw new Error('El nombre de la categoría es obligatorio.');
         }
@@ -517,7 +517,8 @@ export class PersistenceService {
 
         const { error: assignError } = await supabase.rpc('assign_tax_category_to_org', {
             p_category_id: categoryId,
-            p_custom_name: null
+            p_custom_name: null,
+            p_target_org_id: targetOrgId
         });
         if (assignError) throw new Error(`Error al asignar categoría a la organización: ${assignError.message}`);
 
@@ -625,13 +626,16 @@ export class PersistenceService {
             throw new Error('No hay actividades válidas para importar.');
         }
         const BATCH_SIZE = 200;
+        let totalUpserted = 0;
         for (let i = 0; i < activitiesJson.length; i += BATCH_SIZE) {
             const batch = activitiesJson.slice(i, i + BATCH_SIZE);
-            const { error } = await supabase.rpc('upsert_arca_activity_catalog', {
+            const { data, error } = await supabase.rpc('upsert_arca_activity_catalog', {
                 p_activities: batch
             });
             if (error) throw new Error(`Error upsert_arca_activity_catalog: ${error.message}`);
+            totalUpserted += (typeof data === 'number' ? data : batch.length);
         }
+        return totalUpserted;
     }
 
     /**
