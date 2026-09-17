@@ -122,7 +122,7 @@ BEGIN
         RAISE EXCEPTION 'Import record not found or access denied';
     END IF;
 
-    IF v_import_record.status NOT IN ('PENDING', 'PROCESSING', 'COMPLETED_WITH_ISSUES', 'FAILED') THEN
+    IF v_import_record.status NOT IN ('PENDING', 'PROCESSING', 'COMPLETED_WITH_ISSUES') THEN
         RAISE EXCEPTION 'Import no está en estado válido para procesamiento';
     END IF;
 

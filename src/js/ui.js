@@ -2974,7 +2974,7 @@ window.submitTaxCategoryForm = async () => {
         }
         if (feedback) feedback.style.display = "none";
 
-        await appStore.createTaxCategory({ name, description, category_type }, activeOrgId);
+        await appStore.createTaxCategory({ name, description, category_type });
         UIManager.render();
 
         alert(`Categoría tributaria "${name}" creada y asignada correctamente.`);

@@ -904,7 +904,8 @@ export class AppStore {
             throw new Error('No hay una organización activa seleccionada.');
         }
 
-        const res = await persistenceService.createTaxCategory(payload, activeOrgId);
+        // For normal tenant Org Mode (targetOrgId is null), pass targetOrgId as null so assign_tax_category_to_org resolves via private.org_id()
+        const res = await persistenceService.createTaxCategory(payload, targetOrgId);
         await this.loadTaxCategories();
 
         if (activeOrgId && res && res.id) {

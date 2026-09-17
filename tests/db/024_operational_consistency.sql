@@ -109,8 +109,8 @@ BEGIN
     RAISE EXCEPTION 'TEST 3A FAILED: create_global_tax_category returned NULL';
   END IF;
 
-  -- 2. Assign category to org
-  PERFORM public.assign_tax_category_to_org(v_test_cat_id, NULL, v_norte_org_id);
+  -- 2. Assign category to org using normal tenant active-context path (p_target_org_id = NULL)
+  PERFORM public.assign_tax_category_to_org(v_test_cat_id, NULL, NULL);
 
   -- 3. Verify category is returned in Org Mode read query
   SELECT COUNT(*) INTO v_test_cat_count
