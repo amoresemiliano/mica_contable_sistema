@@ -33,7 +33,8 @@ describe('Tax Categories Service Tests', () => {
         });
         expect(mockRpc).toHaveBeenCalledWith('assign_tax_category_to_org', {
             p_category_id: 'cat-uuid-123',
-            p_custom_name: null
+            p_custom_name: null,
+            p_target_org_id: null
         });
         expect(res).toEqual({
             id: 'cat-uuid-123',

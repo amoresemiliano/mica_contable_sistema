@@ -415,33 +415,27 @@ async function checkUserProfile(session) {
     return;
   }
 
-  // Cargar nombre de la organización con fallback seguro
-  let orgName = 'Organización';
-  if (profile.organization_id) {
-    try {
-      const { data: org, error: orgError } = await supabase
-        .from('eco_organizations')
-        .select('name')
-        .eq('id', profile.organization_id)
-        .single();
-      
-      if (!orgError && org?.name) {
-        orgName = org.name;
-      }
-    } catch (e) {
-      orgName = 'Organización';
-    }
+  // Cargar catálogo de organizaciones en appStore
+  try {
+    await appStore.loadOrganizations();
+  } catch (e) {
+    console.warn("Error al cargar organizaciones:", e.message);
+  }
+
+  const role = profile.role || 'USER';
+  appStore.setUserRole(role);
+
+  // Si no es SuperAdmin, su organización activa es la de su perfil
+  if (!appStore.isSuperAdmin() && profile.organization_id) {
+    appStore.activeOrganizationId = profile.organization_id;
   }
 
   // Identidad del usuario (preferir full_name de Google metadata, fallback a email)
   const userIdentity = session.user?.user_metadata?.full_name || session.user?.email || 'Usuario';
-  const role = profile.role || 'USER';
+  window.currentSessionUserIdentity = userIdentity;
+  window.currentUserRole = role;
 
-  appStore.setUserRole(role);
-
-  if (userInfoEl) {
-    userInfoEl.innerText = `${userIdentity} · ${role} · ${orgName}`;
-  }
+  window.updateUserHeaderDisplay();
 
   loginContainer.style.display = 'none';
   appContainer.classList.remove('hidden');
@@ -1782,7 +1776,7 @@ export class UIManager {
         if (list.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
                         ${rawList.length > 0 ? 'No hay percepciones para los filtros seleccionados.' : 'No se han cargado percepciones para este período.'}
                     </td>
                 </tr>`;
@@ -1794,6 +1788,7 @@ export class UIManager {
             const montoVal = (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)).toLocaleString('es-AR', {minimumFractionDigits: 2});
             return `
                 <tr>
+                    <td><input type="checkbox" class="percepcion-checkbox" value="${p.id || ''}" onchange="appStore.updatePercepcionesBulkSelectionBar()"></td>
                     <td data-label="Fuente" class="${percepcionesGrid.isColumnVisible('fuente') ? '' : 'hidden'}"><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; font-weight: 700;">${fuenteText}</span></td>
                     <td data-label="Fecha" class="${percepcionesGrid.isColumnVisible('fecha') ? '' : 'hidden'}">${p.fecha}</td>
                     <td data-label="Período" class="${percepcionesGrid.isColumnVisible('periodo') ? '' : 'hidden'}">${p.period || p.periodo || 'N/D'}</td>
@@ -2358,11 +2353,22 @@ window.handleBancosCustomDateChange = function() {
 
 // --- CONTEXTO ORGANIZACIONAL Y CATEGORIZACIÓN ---
 
+window.updateUserHeaderDisplay = function() {
+    const userInfoEl = document.getElementById('user-header-info');
+    if (userInfoEl) {
+        const userIdentity = window.currentSessionUserIdentity || 'Usuario';
+        const role = window.currentUserRole || appStore.currentUserRole || 'USER';
+        const orgName = appStore.getActiveOrganizationName();
+        userInfoEl.innerText = `${userIdentity} · ${role} · ${orgName}`;
+    }
+};
+
 window.handleOrgContextChange = async function(orgId) {
     taxCategoriesGrid.clearSelection();
     economicActivitiesGrid.clearSelection();
     iibbRatesGrid.clearSelection();
     await appStore.switchOrganizationContext(orgId);
+    window.updateUserHeaderDisplay();
     UIManager.renderSettings();
 };
 

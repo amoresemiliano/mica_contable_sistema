@@ -82,12 +82,6 @@ export class AppStore {
         if (typeof sessionStorage !== 'undefined') {
             sessionStorage.setItem('mica_user_role', role);
         }
-        if (!this.isSuperAdmin()) {
-            this.activeOrganizationId = null;
-            if (typeof sessionStorage !== 'undefined') {
-                sessionStorage.removeItem('mica_active_org_id');
-            }
-        }
         this.notify();
     }
 
@@ -581,6 +575,49 @@ export class AppStore {
         this.updateBankBulkSelectionBar();
     }
 
+    updatePercepcionesBulkSelectionBar() {
+        const checkboxes = document.querySelectorAll('.percepcion-checkbox:checked');
+        const count = checkboxes.length;
+        const bar = document.getElementById('percepciones-bulk-actions-bar');
+        const countText = document.getElementById('percepciones-bulk-selection-count');
+        
+        if (bar) {
+            if (count > 0) {
+                bar.classList.remove('hidden');
+                if (countText) {
+                    countText.innerText = `${count} seleccionada${count > 1 ? 's' : ''}`;
+                }
+            } else {
+                bar.classList.add('hidden');
+            }
+        }
+    }
+
+    toggleSelectAllPercepciones(checkbox) {
+        const checkboxes = document.querySelectorAll('.percepcion-checkbox');
+        checkboxes.forEach(cb => {
+            if (!cb.disabled) cb.checked = checkbox.checked;
+        });
+        this.updatePercepcionesBulkSelectionBar();
+    }
+
+    async bulkSoftDeleteSelectedPercepciones() {
+        const checkboxes = document.querySelectorAll('.percepcion-checkbox:checked');
+        const ids = Array.from(checkboxes).map(cb => cb.value);
+        if (ids.length === 0) return;
+
+        if (confirm(`¿Estás seguro de enviar ${ids.length} percepción(es) a la papelera?`)) {
+            try {
+                await persistenceService.bulkSoftDeleteRecords(ids);
+                this.perceptions = (this.perceptions || []).filter(i => !ids.includes(i.id));
+                this.updatePercepcionesBulkSelectionBar();
+                this.notify();
+            } catch (e) {
+                alert("Error al eliminar percepciones: " + e.message);
+            }
+        }
+    }
+
     async bulkSoftDeleteBankMovements() {
         const checkboxes = document.querySelectorAll('.banco-checkbox:checked');
         const ids = Array.from(checkboxes).map(cb => cb.value);
@@ -588,16 +625,7 @@ export class AppStore {
 
         if (confirm(`¿Enviar ${ids.length} extractos bancarios a la papelera?`)) {
             try {
-                // Same RPC works for any table if implemented generically, or we need a specific one for financial movements.
-                // Migration 014 doesn't explicitly add a bulk_soft_delete_financial_movements RPC. Let's do it via Supabase client directly or assume the same RPC handles both if it uses polymorphic IDs.
-                // Wait, in Migration 014 the requirements say: "bulk_soft_delete_records" and "bulk_soft_delete_financial_movements". Wait, I didn't add bulk_soft_delete_financial_movements. 
-                // Let's use direct update for now.
-                const { error } = await persistenceService.supabase
-                    .from('eco_financial_movements')
-                    .update({ deleted_at: new Date().toISOString() })
-                    .in('id', ids);
-                
-                if (error) throw error;
+                await persistenceService.bulkSoftDeleteFinancialMovements(ids);
                 this.bankTransactions = this.bankTransactions.filter(i => !ids.includes(i.id));
                 this.updateBankBulkSelectionBar();
                 this.notify();

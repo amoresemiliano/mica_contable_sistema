@@ -324,10 +324,21 @@
                     0 percepciones · Total $ 0,00
                 </div>
 
+                <!-- Acciones por lote (Percepciones) -->
+                <div id="percepciones-bulk-actions-bar" class="card hidden" style="margin-bottom: 12px; padding: 12px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-hover);">
+                    <div>
+                        <span id="percepciones-bulk-selection-count" style="font-weight: 600; color: var(--primary);">0 seleccionadas</span>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-secondary" onclick="appStore.bulkSoftDeleteSelectedPercepciones()">🗑️ Eliminar</button>
+                    </div>
+                </div>
+
                 <div class="data-table-container" style="max-height: 350px; overflow-y: auto;">
                     <table class="simple-table" id="table-percepciones">
                         <thead>
                             <tr>
+                                <th><input type="checkbox" id="check-all-percepciones" onclick="appStore.toggleSelectAllPercepciones(this)"></th>
                                 <th data-col-key="fuente" onclick="handlePercepcionesSort('fuente', 'text')" style="cursor: pointer;">Fuente <span id="sort-icon-percep-fuente">↕</span></th>
                                 <th data-col-key="fecha" onclick="handlePercepcionesSort('fecha', 'date')" style="cursor: pointer;">Fecha <span id="sort-icon-percep-fecha">↕</span></th>
                                 <th data-col-key="periodo" onclick="handlePercepcionesSort('periodo', 'text')" style="cursor: pointer;">Período <span id="sort-icon-percep-periodo">↕</span></th>
@@ -339,7 +350,7 @@
                         </thead>
                         <tbody id="table-percepciones-body">
                             <tr>
-                                <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
                                     No se han cargado percepciones para este período.
                                 </td>
                             </tr>

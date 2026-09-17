@@ -386,14 +386,27 @@ export class PersistenceService {
     }
 
     /**
-     * Soft delete masivo de registros normalizados
+     * Soft delete masivo de registros normalizados (Comprobantes y Percepciones)
      */
     async bulkSoftDeleteRecords(recordIds) {
         if (!recordIds || recordIds.length === 0) return;
-        const { error } = await supabase.rpc('bulk_soft_delete_records', {
-            p_record_ids: recordIds
-        });
-        if (error) throw new Error(`Error bulk_soft_delete_records: ${error.message}`);
+        const results = await Promise.all(
+            recordIds.map(id => supabase.rpc('soft_delete_normalized_record', { p_record_id: id }))
+        );
+        const err = results.find(r => r.error);
+        if (err) throw new Error(`Error soft_delete_normalized_record: ${err.error.message}`);
+    }
+
+    /**
+     * Soft delete masivo de movimientos financieros (Extractos Bancarios y Sueldos)
+     */
+    async bulkSoftDeleteFinancialMovements(movementIds) {
+        if (!movementIds || movementIds.length === 0) return;
+        const results = await Promise.all(
+            movementIds.map(id => supabase.rpc('soft_delete_financial_movement', { p_movement_id: id }))
+        );
+        const err = results.find(r => r.error);
+        if (err) throw new Error(`Error soft_delete_financial_movement: ${err.error.message}`);
     }
 
     /**
@@ -401,10 +414,11 @@ export class PersistenceService {
      */
     async bulkRestoreRecords(recordIds) {
         if (!recordIds || recordIds.length === 0) return;
-        const { error } = await supabase.rpc('bulk_restore_records', {
-            p_record_ids: recordIds
-        });
-        if (error) throw new Error(`Error bulk_restore_records: ${error.message}`);
+        const results = await Promise.all(
+            recordIds.map(id => supabase.rpc('restore_normalized_record', { p_record_id: id }))
+        );
+        const err = results.find(r => r.error);
+        if (err) throw new Error(`Error restore_normalized_record: ${err.error.message}`);
     }
 
     /**
