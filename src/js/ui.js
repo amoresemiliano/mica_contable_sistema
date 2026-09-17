@@ -2902,7 +2902,7 @@ window.submitArcaCatalogForm = async () => {
         }
         UIManager.render();
 
-        alert(`Se importaron ${count} actividades económicas al Catálogo Global ARCA exitosamente en base de datos. (Nota: Las actividades importadas forman parte del Catálogo Global y pueden ser asignadas a la organización desde la vista de Administración Global).`);
+        alert(`Se importaron ${count} actividades económicas al Catálogo Global ARCA exitosamente en base de datos. (Nota: Las actividades importadas forman parte del Catálogo Global ARCA. La lista de la organización únicamente muestra las actividades explícitamente asignadas).`);
         UIManager.closeModal('modal-arca-catalog');
         parsedArcaCatalogState = null;
         const fileIn = document.getElementById('arca-catalog-file');
@@ -2957,6 +2957,16 @@ window.submitTaxCategoryForm = async () => {
         return;
     }
 
+    const activeOrgId = appStore.activeOrganizationId;
+    if (!activeOrgId && !appStore.isGlobalMicaMode()) {
+        if (feedback) {
+            feedback.innerText = "No hay una organización activa seleccionada.";
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+        return;
+    }
+
     try {
         if (btn) {
             btn.disabled = true;
@@ -2964,11 +2974,7 @@ window.submitTaxCategoryForm = async () => {
         }
         if (feedback) feedback.style.display = "none";
 
-        await persistenceService.createTaxCategory({ name, description, category_type });
-
-        if (appStore.loadTaxCategories) {
-            await appStore.loadTaxCategories();
-        }
+        await appStore.createTaxCategory({ name, description, category_type }, activeOrgId);
         UIManager.render();
 
         alert(`Categoría tributaria "${name}" creada y asignada correctamente.`);

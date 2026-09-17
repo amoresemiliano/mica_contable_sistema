@@ -898,9 +898,21 @@ export class AppStore {
         await this.loadIibbRates();
     }
 
-    async createTaxCategory(payload) {
-        const res = await persistenceService.createTaxCategory(payload);
+    async createTaxCategory(payload, targetOrgId = null) {
+        const activeOrgId = targetOrgId || this.activeOrganizationId;
+        if (!activeOrgId && !this.isGlobalMicaMode()) {
+            throw new Error('No hay una organización activa seleccionada.');
+        }
+
+        const res = await persistenceService.createTaxCategory(payload, activeOrgId);
         await this.loadTaxCategories();
+
+        if (activeOrgId && res && res.id) {
+            const found = (this.taxCategories || []).some(c => c.id === res.id || c.org_assignment_id === res.id);
+            if (!found) {
+                throw new Error(`La categoría "${payload.name}" fue creada pero no se pudo confirmar su asignación en la organización activa.`);
+            }
+        }
         return res;
     }
 

@@ -83,13 +83,13 @@ BEGIN
     RAISE EXCEPTION 'TEST 2B FAILED: Failed/0-accepted import hash blocked re-import (got %).', v_check_res;
   END IF;
 
-  -- D. Update import record to set accepted_rows = 5 (successful import)
-  UPDATE public.eco_source_imports SET accepted_rows = 5, status = 'COMPLETED' WHERE id = v_import_id;
+  -- D. Update import record to set status = COMPLETED with 0 accepted rows (e.g. duplicate-only import)
+  UPDATE public.eco_source_imports SET accepted_rows = 0, status = 'COMPLETED' WHERE id = v_import_id;
 
-  -- E. Check file importable -> MUST NOW BE BLOCKED
+  -- E. Check file importable -> MUST BE BLOCKED because import completed successfully
   v_check_res := public.check_file_importable(v_file_hash);
   IF (v_check_res->>'importable')::BOOLEAN IS TRUE THEN
-    RAISE EXCEPTION 'TEST 2C FAILED: Successfully imported file hash (accepted_rows > 0) was NOT blocked.';
+    RAISE EXCEPTION 'TEST 2C FAILED: Completed duplicate-only import file hash (status = COMPLETED) was NOT blocked.';
   END IF;
 
   RAISE NOTICE 'TEST 2 PASSED: File deduplication and retry invariant verified.';

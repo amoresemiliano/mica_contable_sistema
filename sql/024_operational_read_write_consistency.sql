@@ -37,7 +37,7 @@ BEGIN
   JOIN public.eco_source_imports si ON si.id = sf.import_id
   WHERE sf.organization_id = v_org_id 
     AND sf.sha256_hash = p_sha256_hash
-    AND COALESCE(si.accepted_rows, 0) > 0;
+    AND (si.status IN ('COMPLETED', 'COMPLETED_WITH_ISSUES') OR COALESCE(si.accepted_rows, 0) > 0);
 
   IF v_existing_file_id IS NOT NULL THEN
     RETURN jsonb_build_object(
