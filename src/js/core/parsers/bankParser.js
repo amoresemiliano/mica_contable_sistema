@@ -12,6 +12,7 @@ export function parseBankRows(rows, context = {}) {
     let headerRowIdx = -1;
     let headers = [];
     let mapping = {};
+    let isHeaderless = false;
     
     // Buscar fila con al menos 'fecha' y 'concepto/descripcion' y (debito/credito o importe)
     for (let i = 0; i < Math.min(rows.length, 20); i++) {
@@ -36,42 +37,60 @@ export function parseBankRows(rows, context = {}) {
         }
     }
 
-    if (headerRowIdx === -1) {
-        headerRowIdx = 0;
-        headers = (rows[0] || []).map(h => String(h || '').trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""));
+    if (headerRowIdx !== -1) {
+        headers.forEach((clean, idx) => {
+            if (clean === 'fec. valor' || clean === 'fecha valor') mapping.fechaValor = idx;
+            else if (clean.includes('fec.') || clean === 'fecha') {
+                if (mapping.fecha === undefined) mapping.fecha = idx;
+            }
+            else if (clean.includes('concepto') || clean.includes('descripcion')) {
+                if (mapping.concepto === undefined) mapping.concepto = idx;
+            }
+            else if (clean.includes('detalle')) mapping.detalle = idx;
+            else if (clean === 'referencia' || clean === 'ref.' || clean.includes('referencia')) mapping.referencia = idx;
+            else if (clean === 'comprobante' || clean.includes('comprobante')) mapping.comprobante = idx;
+            else if (clean === 'cod. mov.' || clean.includes('cod. mov') || clean.includes('cod mov') || clean.includes('codigo')) mapping.codMov = idx;
+            else if (clean.includes('leyenda')) mapping.codLeyenda = idx;
+            else if (clean.includes('suc. origen') || clean.includes('sucursal') || clean.includes('cuenta')) mapping.sucOrigen = idx;
+            else if (clean.includes('observaciones') || clean.includes('obs')) mapping.observaciones = idx;
+            else if (clean.includes('importe') || clean.includes('monto')) mapping.importe = idx;
+            else if (clean.includes('debito') || clean.includes('egreso') || clean.includes('salida')) mapping.debito = idx;
+            else if (clean.includes('credito') || clean.includes('ingreso') || clean.includes('entrada')) mapping.credito = idx;
+            else if (clean === 'saldo' || clean.includes('saldo')) mapping.saldo = idx;
+        });
+    } else {
+        isHeaderless = true;
+        headerRowIdx = -1; // Comienza a procesar desde la primera fila (0)
+        // Positional fallback for BBVA raw format: [date, date_val, concept, ref, col4, sucursal/account, col6, amount, col8, balance]
+        mapping = {
+            fecha: 0,
+            fechaValor: 1,
+            concepto: 2,
+            referencia: 3,
+            sucOrigen: 5,
+            importe: 7,
+            saldo: 9
+        };
     }
-
-    headers.forEach((clean, idx) => {
-        if (clean === 'fec. valor' || clean === 'fecha valor') mapping.fechaValor = idx;
-        else if (clean.includes('fec.')) mapping.fecha = idx;
-        else if (clean === 'fecha') mapping.fecha = idx;
-        else if (clean.includes('concepto') || clean.includes('descripcion')) {
-            if (mapping.concepto === undefined) mapping.concepto = idx;
-        }
-        else if (clean.includes('detalle')) mapping.detalle = idx;
-        else if (clean === 'referencia' || clean === 'ref.' || clean.includes('referencia')) mapping.referencia = idx;
-        else if (clean === 'comprobante' || clean.includes('comprobante')) mapping.comprobante = idx;
-        else if (clean === 'cod. mov.' || clean.includes('cod. mov') || clean.includes('cod mov')) mapping.codMov = idx;
-        else if (clean.includes('leyenda')) mapping.codLeyenda = idx;
-        else if (clean.includes('suc. origen') || clean.includes('sucursal')) mapping.sucOrigen = idx;
-        else if (clean.includes('observaciones') || clean.includes('obs')) mapping.observaciones = idx;
-        else if (clean.includes('importe') || clean.includes('monto')) mapping.importe = idx;
-        else if (clean.includes('debito') || clean.includes('egreso') || clean.includes('salida')) mapping.debito = idx;
-        else if (clean.includes('credito') || clean.includes('ingreso') || clean.includes('entrada')) mapping.credito = idx;
-        else if (clean === 'saldo' || clean.includes('saldo')) mapping.saldo = idx;
-    });
 
     const checkStrictNumber = (val) => {
         if (val === null || val === undefined || val === '') return null;
         if (typeof val === 'number') return val;
         let str = String(val).trim();
+        // Parse numbers embedded in strings like "Saldo Disponible: -10.860.159,05"
+        const matchSaldo = str.match(/(?:[-+]?\d{1,3}(?:\.\d{3})+,\d{2})|(?:[-+]?\d+[\.,]\d+)|(?:[-+]?\d+)/);
+        if (matchSaldo) {
+            str = matchSaldo[0];
+        }
         if (str.includes('.') && str.includes(',')) str = str.replace(/\./g, '').replace(',', '.');
         else if (str.includes(',')) str = str.replace(',', '.');
         const num = parseFloat(str);
         return isNaN(num) ? null : num;
     };
 
-    for (let i = headerRowIdx + 1; i < rows.length; i++) {
+    const startIdx = isHeaderless ? 0 : headerRowIdx + 1;
+
+    for (let i = startIdx; i < rows.length; i++) {
         const row = rows[i];
         if (!row || !Array.isArray(row) || row.length === 0) continue;
 
@@ -86,6 +105,9 @@ export function parseBankRows(rows, context = {}) {
             const sucOrigenVal = mapping.sucOrigen !== undefined ? String(row[mapping.sucOrigen] || '').trim() : '';
             referenciaVal = [compVal, codMovVal, codLeyendaVal, sucOrigenVal].filter(Boolean).join(' ').trim();
         }
+
+        let accountIdVal = mapping.sucOrigen !== undefined ? String(row[mapping.sucOrigen] || '').trim() : (context.banco || 'BBVA');
+        if (!accountIdVal) accountIdVal = context.banco || 'BBVA';
 
         let saldoVal = mapping.saldo !== undefined ? checkStrictNumber(row[mapping.saldo]) : null;
         if (saldoVal === null && mapping.observaciones !== undefined) {
@@ -169,6 +191,7 @@ export function parseBankRows(rows, context = {}) {
                 saldo: saldoVal,
                 monto: amount,
                 tipo: isDebit ? 'debit' : (isCredit ? 'credit' : 'unknown'),
+                accountIdentifier: accountIdVal,
                 signals
             },
             batchId

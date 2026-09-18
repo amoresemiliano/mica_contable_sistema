@@ -86,6 +86,21 @@ export class BankParser {
                 }
             }
 
+            let referenciaStr = mapping.referencia !== undefined ? String(row[mapping.referencia] || '').trim() : '';
+            let saldoVal = null;
+            if (mapping.saldo !== undefined && row[mapping.saldo] !== undefined) {
+                const str = String(row[mapping.saldo] || '').trim();
+                const matchSaldo = str.match(/(?:[-+]?\d{1,3}(?:\.\d{3})+,\d{2})|(?:[-+]?\d+[\.,]\d+)|(?:[-+]?\d+)/);
+                if (matchSaldo) {
+                    const cleanStr = matchSaldo[0].replace(/\./g, '').replace(',', '.');
+                    const num = parseFloat(cleanStr);
+                    if (!isNaN(num)) saldoVal = num;
+                }
+            }
+
+            let accountIdStr = mapping.cuenta !== undefined ? String(row[mapping.cuenta] || '').trim() : (bankName || 'BBVA');
+            if (!accountIdStr) accountIdStr = bankName || 'BBVA';
+
             // Clasificación automática basada en reglas de texto
             const cleanDesc = String(descVal).toUpperCase();
             const rules = appStore.bankRules[type] || [];
@@ -96,7 +111,11 @@ export class BankParser {
             transactions.push({
                 id: `bank-${Date.now()}-${i}-${amount}`,
                 fecha: fechaStr,
+                fechaValor: mapping.fechaValor !== undefined ? String(row[mapping.fechaValor] || '').trim() : fechaStr,
                 descripcion: String(descVal).trim(),
+                referencia: referenciaStr,
+                saldo: saldoVal,
+                accountIdentifier: accountIdStr,
                 monto: amount,
                 tipo: type,
                 cuentaSugerida: suggestion,
@@ -111,12 +130,20 @@ export class BankParser {
     static detectColumns(headers) {
         const mapping = {};
         headers.forEach((h, idx) => {
-            const clean = h.toLowerCase();
-            if (clean.includes('fecha') || clean.includes('fec.')) mapping.fecha = idx;
-            else if (clean.includes('concepto') || clean.includes('descripcion') || clean.includes('descripción') || clean.includes('detalle')) mapping.descripcion = idx;
+            const clean = h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            if (clean === 'fec. valor' || clean === 'fecha valor' || clean === 'f.valor') mapping.fechaValor = idx;
+            else if (clean.includes('fecha') || clean.includes('fec.')) {
+                if (mapping.fecha === undefined) mapping.fecha = idx;
+            }
+            else if (clean.includes('concepto') || clean.includes('descripcion') || clean.includes('detalle')) {
+                if (mapping.descripcion === undefined) mapping.descripcion = idx;
+            }
+            else if (clean.includes('referencia') || clean.includes('ref.') || clean.includes('comprobante') || clean.includes('cod')) mapping.referencia = idx;
+            else if (clean.includes('sucursal') || clean.includes('cuenta') || clean.includes('suc.')) mapping.cuenta = idx;
             else if (clean.includes('importe') || clean.includes('monto') || clean.includes('saldo_movimiento') || (clean.includes('total') && !clean.includes('sub'))) mapping.importe = idx;
-            else if (clean.includes('debito') || clean.includes('débito') || clean.includes('egreso') || clean.includes('salida')) mapping.debito = idx;
-            else if (clean.includes('credito') || clean.includes('crédito') || clean.includes('ingreso') || clean.includes('entrada')) mapping.credito = idx;
+            else if (clean.includes('debito') || clean.includes('egreso') || clean.includes('salida')) mapping.debito = idx;
+            else if (clean.includes('credito') || clean.includes('ingreso') || clean.includes('entrada')) mapping.credito = idx;
+            else if (clean === 'saldo' || clean.includes('saldo')) mapping.saldo = idx;
         });
         return mapping;
     }

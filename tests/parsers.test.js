@@ -120,9 +120,9 @@ describe('BBVA Parser', () => {
         expect(res[0].normalizedData.tipo).toBe("credit");
         expect(res[0].normalizedData.monto).toBe(1000);
     });
-    test('Sin encabezado (fallback 0) falla al no mapear cols correctas', () => {
+    test('Sin encabezado (fallback 0) procesa con mapeo posicional BBVA', () => {
         const res = parseBankRows(BBVA_SIN_ENCABEZADO);
-        expect(res.length).toBe(0);
+        expect(res.length).toBe(1);
     });
     test('BBVA con dos candidatos', () => {
         const res = parseBankRows(BBVA_DOS_CANDIDATOS);
