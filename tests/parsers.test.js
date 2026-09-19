@@ -171,6 +171,45 @@ describe('BBVA Parser', () => {
         const res = parseBankRows(bbvaInvalidRow);
         expect(res[0].errors).toContain("Importe vacío o no numérico.");
     });
+
+    test('BBVA parser - Normaliza número serial de Excel a fecha YYYY-MM-DD', () => {
+        const bbvaSerialRow = [
+            ['Fec.', 'Fec. Valor', 'Concepto', 'Cod. Leyenda', 'Suc. Origen', 'Desc. Sucursal', 'Cod. Mov.', 'Importe', 'Comprobante', 'Observaciones'],
+            [46241, 46241, 'TRANSFERENCIA RECIBIDA', '030', '', '133 - PILAR', '', '50000.00', '12345', 'Saldo: 100000']
+        ];
+        const res = parseBankRows(bbvaSerialRow);
+        expect(res[0].errors).toEqual([]);
+        expect(res[0].normalizedData.fecha).toBe('2026-08-07');
+        expect(res[0].normalizedData.fechaValor).toBe('2026-08-07');
+        expect(res[0].normalizedData.tipo).toBe('credit');
+        expect(res[0].normalizedData.monto).toBe(50000);
+    });
+
+    test('BBVA parser - Normaliza instancia de Date a fecha YYYY-MM-DD', () => {
+        const jsDate = new Date('2026-05-29T00:00:00.000Z');
+        const bbvaDateRow = [
+            ['Fec.', 'Fec. Valor', 'Concepto', 'Cod. Leyenda', 'Suc. Origen', 'Desc. Sucursal', 'Cod. Mov.', 'Importe', 'Comprobante', 'Observaciones'],
+            [jsDate, jsDate, 'GASTO BANCARIO', '030', '', '133 - PILAR', '', '-2500.00', '999', 'Saldo: 50000']
+        ];
+        const res = parseBankRows(bbvaDateRow);
+        expect(res[0].errors).toEqual([]);
+        expect(res[0].normalizedData.fecha).toBe('2026-05-29');
+        expect(res[0].normalizedData.fechaValor).toBe('2026-05-29');
+        expect(res[0].normalizedData.tipo).toBe('debit');
+        expect(res[0].normalizedData.monto).toBe(2500);
+    });
+
+    test('BBVA parser - Formato posicional sin headers con serial de Excel', () => {
+        const headerlessSerialRow = [
+            [46241, 46241, 'SELLADO', '030', '', '133 - PARQUE INDUSTRIAL PILAR', '', -1073.43, '', 'Saldo Disponible: -10.860.159,05']
+        ];
+        const res = parseBankRows(headerlessSerialRow);
+        expect(res[0].errors).toEqual([]);
+        expect(res[0].normalizedData.fecha).toBe('2026-08-07');
+        expect(res[0].normalizedData.monto).toBe(1073.43);
+        expect(res[0].normalizedData.tipo).toBe('debit');
+        expect(res[0].normalizedData.saldo).toBe(-10860159.05);
+    });
 });
 
 describe('Salary Parser (Acompy)', () => {

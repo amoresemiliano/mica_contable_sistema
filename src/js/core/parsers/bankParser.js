@@ -61,13 +61,14 @@ export function parseBankRows(rows, context = {}) {
     } else {
         isHeaderless = true;
         headerRowIdx = -1; // Comienza a procesar desde la primera fila (0)
-        // Positional fallback for BBVA raw format: [date, date_val, concept, ref, col4, sucursal/account, col6, amount, col8, balance]
+        // Positional fallback for BBVA raw format: [date, date_val, concept, ref, col4, sucursal/account, col6 (credit), amount, col8, balance]
         mapping = {
             fecha: 0,
             fechaValor: 1,
             concepto: 2,
             referencia: 3,
             sucOrigen: 5,
+            credito: 6,
             importe: 7,
             saldo: 9
         };
@@ -88,14 +89,41 @@ export function parseBankRows(rows, context = {}) {
         return isNaN(num) ? null : num;
     };
 
+    const normalizeDate = (val) => {
+        if (val === null || val === undefined || val === '') return null;
+        if (val instanceof Date) {
+            if (isNaN(val.getTime())) return null;
+            const yyyy = val.getUTCFullYear();
+            const mm = String(val.getUTCMonth() + 1).padStart(2, '0');
+            const dd = String(val.getUTCDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
+        if (typeof val === 'number') {
+            if (val > 0 && val < 200000) {
+                const utcDays = Math.floor(val - 25569);
+                const utcMs = utcDays * 86400 * 1000;
+                const dateObj = new Date(utcMs);
+                if (!isNaN(dateObj.getTime())) {
+                    const yyyy = dateObj.getUTCFullYear();
+                    const mm = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+                    const dd = String(dateObj.getUTCDate()).padStart(2, '0');
+                    return `${yyyy}-${mm}-${dd}`;
+                }
+            }
+            return String(val);
+        }
+        const str = String(val).trim();
+        return str || null;
+    };
+
     const startIdx = isHeaderless ? 0 : headerRowIdx + 1;
 
     for (let i = startIdx; i < rows.length; i++) {
         const row = rows[i];
         if (!row || !Array.isArray(row) || row.length === 0) continue;
 
-        const dateVal = mapping.fecha !== undefined ? row[mapping.fecha] : null;
-        const fechaValorVal = mapping.fechaValor !== undefined ? row[mapping.fechaValor] : null;
+        const dateVal = mapping.fecha !== undefined ? normalizeDate(row[mapping.fecha]) : null;
+        const fechaValorVal = mapping.fechaValor !== undefined ? normalizeDate(row[mapping.fechaValor]) : null;
         
         let referenciaVal = mapping.referencia !== undefined ? String(row[mapping.referencia] || '').trim() : '';
         if (!referenciaVal) {

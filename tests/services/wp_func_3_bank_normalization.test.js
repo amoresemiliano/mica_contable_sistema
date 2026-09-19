@@ -51,18 +51,73 @@ describe('WP-FUNC-3: Bank Statement Normalization & Retry Consistency', () => {
         expect(parsed[0].normalizedData.saldo).toBe(1250000.50);
     });
 
-    test('4. Retry rule semantic logic validation', () => {
-        const simulateCheckFileImportable = (acceptedRows) => {
-            const hasSuccessfulBusinessResult = (acceptedRows ?? 0) > 0;
-            return {
-                importable: !hasSuccessfulBusinessResult,
-                reason: hasSuccessfulBusinessResult ? 'FILE_ALREADY_EXISTS' : null
-            };
+    test('5. Débito BBVA headerless: row[7] negativo, parse sin error, tipo debit', () => {
+        const headerlessDebit = [
+            ["29-05-2026", "29-05-2026", "SELLADO", "030", "", "133 - PARQUE INDUSTRIAL PILAR", "", -1825.74, "", ""]
+        ];
+        const res = parseBankRows(headerlessDebit);
+        expect(res[0].errors).toEqual([]);
+        expect(res[0].normalizedData.tipo).toBe('debit');
+        expect(res[0].normalizedData.monto).toBe(1825.74);
+        expect(res[0].normalizedData.referencia).toBe('030');
+    });
+
+    test('6. Crédito BBVA headerless: row[7] vacío, row[6] positivo, parse sin error, tipo credit', () => {
+        const headerlessCredit = [
+            ["21-05-2026", "21-05-2026", "TRANSF.BANEL 30715507419", "136", "", "733 - N/A", 347000, "", "CTE 30715507419", ""]
+        ];
+        const res = parseBankRows(headerlessCredit);
+        expect(res[0].errors).toEqual([]);
+        expect(res[0].normalizedData.tipo).toBe('credit');
+        expect(res[0].normalizedData.monto).toBe(347000);
+        expect(res[0].normalizedData.referencia).toBe('136');
+    });
+
+    test('7. Fila SELLADO real: fecha "29-05-2026", referencia "030", monto válido, no INVALID', () => {
+        const realSelladoRow = [
+            ["29-05-2026", "29-05-2026", "SELLADO", "030", "", "133 - PARQUE INDUSTRIAL PILAR", "", -1073.43, "", "Saldo Disponible: -10.860.159,05"]
+        ];
+        const res = parseBankRows(realSelladoRow);
+        expect(res[0].errors).toEqual([]);
+        expect(res[0].normalizedData.fecha).toBe('29-05-2026');
+        expect(res[0].normalizedData.referencia).toBe('030');
+        expect(res[0].normalizedData.monto).toBe(1073.43);
+        expect(res[0].normalizedData.saldo).toBe(-10860159.05);
+        expect(res[0].normalizedData.tipo).toBe('debit');
+    });
+
+    test('8. Persistencia SQL: persist_financial_movements_batch usa row_id, movement_type, financial_fingerprint sin columnas legacy', async () => {
+        const fs = await import('fs');
+        const sql027 = fs.readFileSync('sql/027_fix_bbva_import_and_retry.sql', 'utf8');
+        expect(sql027).toContain('row_id,');
+        expect(sql027).toContain('movement_type,');
+        expect(sql027).toContain('financial_fingerprint,');
+        expect(sql027).not.toMatch(/INSERT INTO public\.eco_financial_movements\s*\([^)]*\btipo\b/i);
+        expect(sql027).not.toMatch(/INSERT INTO public\.eco_financial_movements\s*\([^)]*\bfingerprint\b/i);
+    });
+
+    test('9. Reintento, Import exitoso y Aislamiento Multitenant de hash', () => {
+        const checkImportableMultiTenant = (filesDb, orgId, hash) => {
+            const match = filesDb.find(f => f.organizationId === orgId && f.hash === hash && f.acceptedRows > 0);
+            if (match) {
+                return { importable: false, reason: 'FILE_ALREADY_EXISTS' };
+            }
+            return { importable: true };
         };
 
-        expect(simulateCheckFileImportable(0).importable).toBe(true);
-        expect(simulateCheckFileImportable(null).importable).toBe(true);
-        expect(simulateCheckFileImportable(15).importable).toBe(false);
-        expect(simulateCheckFileImportable(15).reason).toBe('FILE_ALREADY_EXISTS');
+        const filesDb = [
+            { organizationId: 'org-A', hash: 'hash123', acceptedRows: 0 },
+            { organizationId: 'org-B', hash: 'hash456', acceptedRows: 10 }
+        ];
+
+        // accepted_rows = 0 en org-A -> importable/retry permitido
+        expect(checkImportableMultiTenant(filesDb, 'org-A', 'hash123').importable).toBe(true);
+
+        // accepted_rows > 0 en org-B -> bloqueado en org-B
+        expect(checkImportableMultiTenant(filesDb, 'org-B', 'hash456').importable).toBe(false);
+        expect(checkImportableMultiTenant(filesDb, 'org-B', 'hash456').reason).toBe('FILE_ALREADY_EXISTS');
+
+        // Mismo hash 'hash456' en org-A (otra organizacion) -> permitido
+        expect(checkImportableMultiTenant(filesDb, 'org-A', 'hash456').importable).toBe(true);
     });
 });
