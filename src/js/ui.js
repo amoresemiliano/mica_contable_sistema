@@ -1153,10 +1153,15 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                         return;
                     }
 
-                    // 3. Crear importación en DB (ARCA_RECIBIDOS / COMPRA o ARCA_EMITIDOS / VENTA)
+                    // 3. Crear importación en DB o reintentar importación fallida
                     const sourceType = isCompra ? 'ARCA_RECIBIDOS' : 'ARCA_EMITIDOS';
                     const operationType = isCompra ? 'COMPRA' : 'VENTA';
-                    const importInfo = await persistenceService.createImport(sourceType, operationType);
+                    let importInfo;
+                    if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                        importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                    } else {
+                        importInfo = await persistenceService.createImport(sourceType, operationType);
+                    }
 
                     // 4. Safe filename y MIME fallback
                     const safeFilename = persistenceService.getSafeFilename(rawFile.name);
@@ -1485,7 +1490,12 @@ export class UIManager {
                                 return;
                             }
                             
-                            const importInfo = await persistenceService.createImport(sourceType, 'PERCEPCION');
+                            let importInfo;
+                            if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                                importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                            } else {
+                                importInfo = await persistenceService.createImport(sourceType, 'PERCEPCION');
+                            }
                             const safeFilename = persistenceService.getSafeFilename(file.name);
                             
                             const uploadResult = await persistenceService.uploadSourceFile({
@@ -1551,7 +1561,12 @@ export class UIManager {
                                 return;
                             }
                             
-                            const importInfo = await persistenceService.createImport('BANK_STATEMENT_BBVA', 'BANCO');
+                            let importInfo;
+                            if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                                importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                            } else {
+                                importInfo = await persistenceService.createImport('BANK_STATEMENT_BBVA', 'BANCO');
+                            }
                             const safeFilename = persistenceService.getSafeFilename(file.name);
                             
                             const uploadResult = await persistenceService.uploadSourceFile({
@@ -1607,7 +1622,12 @@ export class UIManager {
                             return;
                         }
                         
-                        const importInfo = await persistenceService.createImport('PAYROLL_ACONPY', 'SUELDO');
+                        let importInfo;
+                        if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                            importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                        } else {
+                            importInfo = await persistenceService.createImport('PAYROLL_ACONPY', 'SUELDO');
+                        }
                         const safeFilename = persistenceService.getSafeFilename(file.name);
                         
                         const uploadResult = await persistenceService.uploadSourceFile({
@@ -2355,11 +2375,17 @@ window.handleBancosCustomDateChange = function() {
 
 window.updateUserHeaderDisplay = function() {
     const userInfoEl = document.getElementById('user-header-info');
+    const entityLabelEl = document.getElementById('current-entity-label');
+    const orgName = appStore.getActiveOrganizationName();
+    
+    if (entityLabelEl) {
+        entityLabelEl.innerText = `Organización: ${orgName}`;
+    }
+
     if (userInfoEl) {
         const userIdentity = window.currentSessionUserIdentity || 'Usuario';
         const role = window.currentUserRole || appStore.currentUserRole || 'USER';
-        const orgName = appStore.getActiveOrganizationName();
-        userInfoEl.innerText = `${userIdentity} · ${role} · ${orgName}`;
+        userInfoEl.innerText = `${orgName} · ${userIdentity} · ${role}`;
     }
 };
 

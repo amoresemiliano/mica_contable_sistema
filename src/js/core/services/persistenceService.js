@@ -102,6 +102,26 @@ export class PersistenceService {
     }
 
     /**
+     * Solicita reintento de una importación fallida reutilizando trazabilidad e import_id.
+     */
+    async requestFailedImportRetry(importId) {
+        const { data, error } = await supabase.rpc('request_failed_import_retry', {
+            p_import_id: importId
+        });
+
+        if (error) {
+            throw new Error(`Error en RPC request_failed_import_retry: ${error.message}`);
+        }
+
+        return {
+            import_id: data.new_import_id || data.import_id,
+            organization_id: data.organization_id,
+            storage_prefix: data.storage_prefix,
+            ...data
+        };
+    }
+
+    /**
      * Subida de archivo al bucket privado eco-imports-private-staging.
      */
     async uploadSourceFile({ file, storagePrefix, safeFilename, mimeType }) {

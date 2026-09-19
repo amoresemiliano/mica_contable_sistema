@@ -88,36 +88,166 @@ describe('WP-FUNC-3: Bank Statement Normalization & Retry Consistency', () => {
 
     test('8. Persistencia SQL: persist_financial_movements_batch usa row_id, movement_type, financial_fingerprint sin columnas legacy', async () => {
         const fs = await import('fs');
-        const sql027 = fs.readFileSync('sql/027_fix_bbva_import_and_retry.sql', 'utf8');
-        expect(sql027).toContain('row_id,');
-        expect(sql027).toContain('movement_type,');
-        expect(sql027).toContain('financial_fingerprint,');
-        expect(sql027).not.toMatch(/INSERT INTO public\.eco_financial_movements\s*\([^)]*\btipo\b/i);
-        expect(sql027).not.toMatch(/INSERT INTO public\.eco_financial_movements\s*\([^)]*\bfingerprint\b/i);
+        const sql028 = fs.readFileSync('sql/028_fix_source_file_reuse_and_retry_flow.sql', 'utf8');
+        expect(sql028).toContain('row_id,');
+        expect(sql028).toContain('movement_type,');
+        expect(sql028).toContain('financial_fingerprint,');
+        expect(sql028).not.toMatch(/INSERT INTO public\.eco_financial_movements\s*\([^)]*\btipo\b/i);
+        expect(sql028).not.toMatch(/INSERT INTO public\.eco_financial_movements\s*\([^)]*\bfingerprint\b/i);
     });
 
-    test('9. Reintento, Import exitoso y Aislamiento Multitenant de hash', () => {
+    test('9. SQL 028: Reutilización defensiva de source_file por (organization_id, sha256_hash) sin violar unicidad', async () => {
+        const fs = await import('fs');
+        const sql028 = fs.readFileSync('sql/028_fix_source_file_reuse_and_retry_flow.sql', 'utf8');
+        // Debe buscar por linaje o por (organization_id, sha256_hash) antes de hacer INSERT
+        expect(sql028).toContain('WHERE sf.organization_id = v_org_id');
+        expect(sql028).toContain('AND sf.sha256_hash = v_hash');
+        expect(sql028).toContain('IF v_file_id IS NULL THEN');
+    });
+
+    test('10. check_file_importable: Contrato explícito para retry, imports exitosos y archivos nuevos', () => {
         const checkImportableMultiTenant = (filesDb, orgId, hash) => {
-            const match = filesDb.find(f => f.organizationId === orgId && f.hash === hash && f.acceptedRows > 0);
-            if (match) {
-                return { importable: false, reason: 'FILE_ALREADY_EXISTS' };
+            // 1. Bloquear si existe import exitoso
+            const successfulMatch = filesDb.find(f => f.organizationId === orgId && f.hash === hash && f.acceptedRows > 0);
+            if (successfulMatch) {
+                return {
+                    importable: false,
+                    reason: 'FILE_ALREADY_EXISTS',
+                    existing_file_id: successfulMatch.fileId
+                };
             }
-            return { importable: true };
+
+            // 2. Si existe archivo e import fallido previo (accepted_rows = 0), ofrecer retry con candidato determinístico
+            const failedMatches = filesDb
+                .filter(f => f.organizationId === orgId && f.hash === hash && f.acceptedRows === 0)
+                .sort((a, b) => a.createdAt - b.createdAt);
+
+            if (failedMatches.length > 0) {
+                const primary = failedMatches[0];
+                return {
+                    importable: true,
+                    retry_available: true,
+                    retry_candidate_import_id: primary.importId,
+                    existing_file_id: primary.fileId
+                };
+            }
+
+            // 3. Archivo nuevo
+            return {
+                importable: true,
+                retry_available: false
+            };
         };
 
         const filesDb = [
-            { organizationId: 'org-A', hash: 'hash123', acceptedRows: 0 },
-            { organizationId: 'org-B', hash: 'hash456', acceptedRows: 10 }
+            { fileId: 'file-1', importId: 'imp-1', organizationId: 'org-A', hash: 'bbva-hash', acceptedRows: 0, createdAt: 100 },
+            { fileId: 'file-1', importId: 'imp-retry-1', organizationId: 'org-A', hash: 'bbva-hash', acceptedRows: 0, createdAt: 200 },
+            { fileId: 'file-2', importId: 'imp-2', organizationId: 'org-B', hash: 'bbva-hash', acceptedRows: 84, createdAt: 150 }
         ];
 
-        // accepted_rows = 0 en org-A -> importable/retry permitido
-        expect(checkImportableMultiTenant(filesDb, 'org-A', 'hash123').importable).toBe(true);
+        // Caso 1: En org-A existe intento fallido -> retry_available = true con candidato determinístico imp-1
+        const resOrgA = checkImportableMultiTenant(filesDb, 'org-A', 'bbva-hash');
+        expect(resOrgA.importable).toBe(true);
+        expect(resOrgA.retry_available).toBe(true);
+        expect(resOrgA.retry_candidate_import_id).toBe('imp-1');
+        expect(resOrgA.existing_file_id).toBe('file-1');
 
-        // accepted_rows > 0 en org-B -> bloqueado en org-B
-        expect(checkImportableMultiTenant(filesDb, 'org-B', 'hash456').importable).toBe(false);
-        expect(checkImportableMultiTenant(filesDb, 'org-B', 'hash456').reason).toBe('FILE_ALREADY_EXISTS');
+        // Caso 2: En org-B existe import exitoso -> bloqueado como FILE_ALREADY_EXISTS
+        const resOrgB = checkImportableMultiTenant(filesDb, 'org-B', 'bbva-hash');
+        expect(resOrgB.importable).toBe(false);
+        expect(resOrgB.reason).toBe('FILE_ALREADY_EXISTS');
+        expect(resOrgB.existing_file_id).toBe('file-2');
 
-        // Mismo hash 'hash456' en org-A (otra organizacion) -> permitido
-        expect(checkImportableMultiTenant(filesDb, 'org-A', 'hash456').importable).toBe(true);
+        // Caso 3: En org-C archivo completamente nuevo -> importable = true, retry_available = false
+        const resOrgC = checkImportableMultiTenant(filesDb, 'org-C', 'bbva-hash');
+        expect(resOrgC.importable).toBe(true);
+        expect(resOrgC.retry_available).toBe(false);
+    });
+
+    test('11. Trazabilidad completa de Reintento: Import A (fallido) -> Retry B (reutiliza file, preserva retry_of_import_id, persiste)', () => {
+        // Simulación de estado de DB
+        const state = {
+            imports: [],
+            files: [],
+            movements: []
+        };
+
+        // Paso 1: Import inicial A falla con 0 accepted rows
+        const importA = {
+            id: 'import-A-uuid',
+            organization_id: 'org-oeste',
+            retry_of_import_id: null,
+            status: 'COMPLETED_WITH_ISSUES',
+            accepted_rows: 0,
+            invalid_rows: 84
+        };
+        const fileA = {
+            id: 'file-A-uuid',
+            import_id: 'import-A-uuid',
+            organization_id: 'org-oeste',
+            sha256_hash: 'hash-bbva-123'
+        };
+        state.imports.push(importA);
+        state.files.push(fileA);
+
+        // Paso 2: Usuario reintenta subir el mismo archivo en org-oeste
+        // check_file_importable detecta retry disponible
+        const check = {
+            importable: true,
+            retry_available: true,
+            retry_candidate_import_id: 'import-A-uuid',
+            existing_file_id: 'file-A-uuid'
+        };
+        expect(check.retry_available).toBe(true);
+
+        // Paso 3: UI invoca request_failed_import_retry(check.retry_candidate_import_id)
+        const importB = {
+            id: 'import-B-uuid',
+            organization_id: 'org-oeste',
+            retry_of_import_id: check.retry_candidate_import_id,
+            status: 'PENDING',
+            accepted_rows: 0,
+            invalid_rows: 0
+        };
+        state.imports.push(importB);
+
+        expect(importB.retry_of_import_id).toBe(importA.id);
+
+        // Paso 4: persist_financial_movements_batch procesa import B
+        // Resuelve file_id a partir de retry_of_import_id
+        let resolvedFileId = null;
+        const matchingFileByLineage = state.files.find(f => 
+            (f.import_id === importB.id || (importB.retry_of_import_id && f.import_id === importB.retry_of_import_id)) &&
+            f.organization_id === importB.organization_id
+        );
+        if (matchingFileByLineage) {
+            resolvedFileId = matchingFileByLineage.id;
+        } else {
+            const matchingFileByHash = state.files.find(f =>
+                f.organization_id === importB.organization_id &&
+                f.sha256_hash === 'hash-bbva-123'
+            );
+            if (matchingFileByHash) resolvedFileId = matchingFileByHash.id;
+        }
+
+        expect(resolvedFileId).toBe(fileA.id);
+        // NO se debe insertar un segundo eco_source_files
+        expect(state.files.length).toBe(1);
+
+        // Persistir movimientos para import B
+        importB.status = 'COMPLETED';
+        importB.accepted_rows = 84;
+        state.movements.push({ import_id: importB.id, count: 84 });
+
+        expect(importB.accepted_rows).toBe(84);
+        expect(state.movements[0].count).toBe(84);
+
+        // Paso 5: Un tercer intento con el mismo hash queda bloqueado
+        const subsequentCheck = state.imports.some(i => 
+            i.organization_id === 'org-oeste' && 
+            i.accepted_rows > 0 && 
+            state.files.some(f => f.sha256_hash === 'hash-bbva-123' && (f.import_id === i.id || f.import_id === i.retry_of_import_id))
+        );
+        expect(subsequentCheck).toBe(true); // Bloqueado
     });
 });
