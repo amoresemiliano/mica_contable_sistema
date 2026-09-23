@@ -12,7 +12,7 @@ const { persistenceService } = await import('../../src/js/core/services/persiste
 
 describe('Tax Categories Service Tests', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        jest.resetAllMocks();
     });
 
     test('crea una categoría tributaria y la asigna a la organización activa exitosamente', async () => {
@@ -24,7 +24,7 @@ describe('Tax Categories Service Tests', () => {
             name: 'Servicios Digitales',
             description: 'Gastos de software',
             category_type: 'EXPENSE'
-        });
+        }, 'target-org');
 
         expect(mockRpc).toHaveBeenCalledWith('create_global_tax_category', {
             p_name: 'Servicios Digitales',
@@ -34,7 +34,7 @@ describe('Tax Categories Service Tests', () => {
         expect(mockRpc).toHaveBeenCalledWith('assign_tax_category_to_org', {
             p_category_id: 'cat-uuid-123',
             p_custom_name: null,
-            p_target_org_id: null
+            p_target_org_id: 'target-org'
         });
         expect(res).toEqual({
             id: 'cat-uuid-123',
@@ -61,7 +61,7 @@ describe('Tax Categories Service Tests', () => {
             .mockResolvedValueOnce({ data: 'cat-uuid-123', error: null })
             .mockResolvedValueOnce({ data: null, error: { message: 'Error de permisos' } });
 
-        await expect(persistenceService.createTaxCategory({ name: 'Ventas' }))
+        await expect(persistenceService.createTaxCategory({ name: 'Ventas' }, 'target-org'))
             .rejects.toThrow('Error al asignar categoría a la organización: Error de permisos');
     });
 });

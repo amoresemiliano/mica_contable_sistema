@@ -777,7 +777,7 @@
                     <h3>Categorías Tributarias</h3>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn-secondary" onclick="appStore.loadTaxCategories()">🔄 Actualizar</button>
-                        <button class="btn-primary" onclick="UIManager.openModal('modal-tax-category')">+ Nueva Categoría</button>
+                        <button id="btn-create-global-category" hidden disabled class="btn-primary" onclick="delete document.getElementById('form-tax-category').dataset.editingId; UIManager.openModal('modal-tax-category')">+ Nueva Categoría</button>
                     </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Asignación de categorías globales a la organización.</p>
@@ -829,7 +829,7 @@
                     <h3>Actividades Económicas (ARCA)</h3>
                     <div style="display: flex; gap: 8px;">
                         <button class="btn-secondary" onclick="appStore.loadEconomicActivities()">🔄 Actualizar</button>
-                        <button class="btn-primary" onclick="appStore.promptUpsertArcaCatalog()">📥 Importar Catálogo ARCA</button>
+                        <button id="btn-import-arca-catalog" hidden disabled class="btn-primary" onclick="appStore.promptUpsertArcaCatalog()">📥 Importar Catálogo ARCA</button>
                     </div>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Catálogo oficial ARCA y asignación a la organización.</p>

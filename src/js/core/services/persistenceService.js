@@ -6,6 +6,18 @@ import { supabase } from './supabaseClient.js';
  */
 export class PersistenceService {
 
+    async loadMyCatalogCapabilities() {
+        const { data, error } = await supabase.rpc('get_my_catalog_capabilities').single();
+        if (error) throw error;
+        if (!data || ['global_catalog_manage', 'catalog_assign_any_org', 'access_any_org']
+            .some(key => typeof data[key] !== 'boolean')) throw new Error('Invalid catalog capabilities response');
+        return data;
+    }
+
+    get supabase() {
+        return supabase;
+    }
+
     /**
      * Calcula el hash SHA-256 de un archivo/blob mediante Web Crypto API.
      * Retorna una cadena hexadecimal en minúsculas de 64 caracteres.
@@ -461,7 +473,8 @@ export class PersistenceService {
     async loadActiveTaxCategories() {
         const { data, error } = await supabase
             .from('eco_org_tax_categories')
-            .select('id, organization_id, is_active, created_at, category:eco_tax_categories(id, name, description, category_type, is_active)')
+            .select('id, organization_id, is_assigned, is_active, created_at, category:eco_tax_categories(id, name, description, category_type, is_active)')
+            .eq('is_assigned', true)
             .eq('is_active', true);
         if (error) throw new Error(`Error loadActiveTaxCategories: ${error.message}`);
         return (data || []).filter(item => item.category && item.category.is_active).map(item => ({
@@ -480,7 +493,8 @@ export class PersistenceService {
     async loadActiveEconomicActivities() {
         const { data, error } = await supabase
             .from('eco_org_economic_activities')
-            .select('id, organization_id, is_active, created_at, activity:eco_economic_activities(id, arca_code, name, description, is_active)')
+            .select('id, organization_id, is_assigned, is_active, created_at, activity:eco_economic_activities(id, arca_code, name, description, is_active)')
+            .eq('is_assigned', true)
             .eq('is_active', true);
         if (error) throw new Error(`Error loadActiveEconomicActivities: ${error.message}`);
         return (data || []).filter(item => item.activity && item.activity.is_active).map(item => ({
@@ -535,7 +549,7 @@ export class PersistenceService {
     }
 
     /**
-     * Crear categoría tributaria global y asignarla a la organización activa
+     * Crear categoría global; asignar solo si se indica un destino explícito.
      */
     async createTaxCategory({ name, description = '', category_type = 'EXPENSE' }, targetOrgId = null) {
         if (!name || !name.trim()) {
@@ -549,12 +563,14 @@ export class PersistenceService {
         });
         if (createError) throw new Error(`Error al crear categoría tributaria: ${createError.message}`);
 
-        const { error: assignError } = await supabase.rpc('assign_tax_category_to_org', {
-            p_category_id: categoryId,
-            p_custom_name: null,
-            p_target_org_id: targetOrgId
-        });
-        if (assignError) throw new Error(`Error al asignar categoría a la organización: ${assignError.message}`);
+        if (targetOrgId) {
+            const { error: assignError } = await supabase.rpc('assign_tax_category_to_org', {
+                p_category_id: categoryId,
+                p_custom_name: null,
+                p_target_org_id: targetOrgId
+            });
+            if (assignError) throw new Error(`Error al asignar categoría a la organización: ${assignError.message}`);
+        }
 
         return { id: categoryId, name: name.trim(), description: description ? description.trim() : '', category_type };
     }
@@ -573,7 +589,7 @@ export class PersistenceService {
     }
 
     /**
-     * Asignar/Reactivar categoría tributaria para la organización actual
+     * Asignar categoría tributaria para la organización actual
      */
     async assignTaxCategoryToOrg(categoryId) {
         const { error } = await supabase.rpc('assign_tax_category_to_org', {
@@ -586,14 +602,20 @@ export class PersistenceService {
     /**
      * Cargar lista de organizaciones registradas (para SUPERADMIN)
      */
-    async loadOrganizations() {
+    async loadOrganizations(organizationId = null) {
+        if (organizationId) {
+            const { data, error } = await supabase.from('eco_organizations')
+                .select('id, name').eq('id', organizationId).maybeSingle();
+            if (error) throw new Error(`loadOrganizations: ${error.message}`);
+            if (!data) throw new Error('La organización activa no está disponible para esta sesión.');
+            return [data];
+        }
         const { data, error } = await supabase
             .from('eco_organizations')
             .select('id, name, created_at')
             .order('name', { ascending: true });
         if (error) {
-            console.warn("loadOrganizations notice:", error.message);
-            return [];
+            throw new Error(`loadOrganizations: ${error.message}`);
         }
         return data || [];
     }
@@ -609,7 +631,7 @@ export class PersistenceService {
     }
 
     /**
-     * Asignar/Reactivar categoría tributaria para organización (propia o target)
+     * Asignar categoría tributaria para organización (propia o target)
      */
     async assignTaxCategoryToOrg(categoryId, targetOrgId = null) {
         const { error } = await supabase.rpc('assign_tax_category_to_org', {
@@ -620,7 +642,7 @@ export class PersistenceService {
     }
 
     /**
-     * Desactivar/Desasignar categoría tributaria para organización (propia o target)
+     * Desasignar categoría tributaria para organización (propia o target)
      */
     async unassignTaxCategoryFromOrg(categoryId, targetOrgId = null) {
         const { error } = await supabase.rpc('unassign_tax_category_from_org', {
@@ -655,6 +677,26 @@ export class PersistenceService {
     /**
      * Importar catálogo ARCA por lotes seguros
      */
+    async activateEconomicActivity(id) {
+        const { error } = await supabase.rpc('activate_economic_activity', { p_activity_id: id });
+        if (error) throw new Error(error.message);
+    }
+
+    async deactivateEconomicActivity(id) {
+        const { error } = await supabase.rpc('deactivate_economic_activity', { p_activity_id: id });
+        if (error) throw new Error(error.message);
+    }
+
+    async activateTaxCategory(id) {
+        const { error } = await supabase.rpc('activate_tax_category', { p_category_id: id });
+        if (error) throw new Error(error.message);
+    }
+
+    async deactivateTaxCategory(id) {
+        const { error } = await supabase.rpc('deactivate_tax_category', { p_category_id: id });
+        if (error) throw new Error(error.message);
+    }
+
     async upsertArcaCatalog(activitiesJson) {
         if (!Array.isArray(activitiesJson) || activitiesJson.length === 0) {
             throw new Error('No hay actividades válidas para importar.');

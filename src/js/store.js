@@ -23,11 +23,8 @@ export class AppStore {
         const savedOrgId = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('mica_active_org_id')) || null;
         this.activeOrganizationId = savedOrgId; // null para GLOBAL MICA MODE, o UUID de DEMO NORTE / SUR / OESTE
         
-        this.organizations = [
-            { id: 'demo-norte-id', name: 'DEMO NORTE' },
-            { id: 'demo-sur-id', name: 'DEMO SUR' },
-            { id: 'demo-oeste-id', name: 'DEMO OESTE' }
-        ];
+        this.organizations = [];
+        this.resetCatalogCapabilities();
 
         const getLocalJSON = (key) => {
             if (typeof localStorage !== 'undefined' && localStorage.getItem) {
@@ -67,6 +64,39 @@ export class AppStore {
         return this.currentUserRole === 'SUPERADMIN';
     }
 
+    resetCatalogCapabilities() {
+        this.catalogCapabilities = { globalCatalogManage: false, catalogAssignAnyOrg: false, accessAnyOrg: false, loaded: false };
+    }
+
+    async loadMyCatalogCapabilities() {
+        this.resetCatalogCapabilities();
+        const pending = this.catalogCapabilities;
+        this.notify();
+        try {
+            const data = await persistenceService.loadMyCatalogCapabilities();
+            if (this.catalogCapabilities !== pending) return;
+            this.catalogCapabilities = {
+                globalCatalogManage: data.global_catalog_manage === true,
+                catalogAssignAnyOrg: data.catalog_assign_any_org === true,
+                accessAnyOrg: data.access_any_org === true,
+                loaded: true
+            };
+        } catch (error) {
+            console.error('Could not load catalog capabilities:', error);
+        }
+        this.notify();
+    }
+
+    canManageGlobalCatalog() {
+        return this.isGlobalMicaMode() && this.catalogCapabilities.loaded === true &&
+            this.catalogCapabilities.globalCatalogManage === true;
+    }
+
+    canAssignCatalog() {
+        return this.isSuperAdmin() && this.catalogCapabilities.loaded === true &&
+            this.catalogCapabilities.catalogAssignAnyOrg === true;
+    }
+
     isGlobalMicaMode() {
         return this.isSuperAdmin() && !this.activeOrganizationId;
     }
@@ -74,10 +104,11 @@ export class AppStore {
     getActiveOrganizationName() {
         if (this.isGlobalMicaMode()) return 'MICA (Modo Global)';
         const org = this.organizations.find(o => o.id === this.activeOrganizationId);
-        return org ? org.name : (this.activeOrganizationId || 'Organización');
+        return org ? org.name : (this.activeOrganizationId ? 'Nombre de organización no disponible' : 'Organización');
     }
 
     setUserRole(role) {
+        this.resetCatalogCapabilities();
         this.currentUserRole = role;
         if (typeof sessionStorage !== 'undefined') {
             sessionStorage.setItem('mica_user_role', role);
@@ -107,14 +138,48 @@ export class AppStore {
     }
 
     async loadOrganizations() {
-        try {
-            const orgs = await persistenceService.loadOrganizations();
-            if (orgs && orgs.length > 0) {
-                this.organizations = orgs;
-            }
-        } catch (e) {
-            console.warn("Could not load remote organizations:", e);
+        this.organizations = [];
+        if (!this.isSuperAdmin() && !this.activeOrganizationId) return;
+        this.organizations = await persistenceService.loadOrganizations(
+            this.isSuperAdmin() ? null : this.activeOrganizationId
+        );
+    }
+
+    requireGlobalCatalogContext() {
+        if (!this.canManageGlobalCatalog()) throw new Error('Esta acción requiere SUPERADMIN en modo MICA.');
+    }
+
+    requireAssignmentAccess(ids, rows, targetOrgId) {
+        if (!this.canAssignCatalog()) throw new Error('SUPERADMIN requires catalog assignment capability.');
+        if (!targetOrgId || !this.organizations.some(o => o.id === targetOrgId)) {
+            throw new Error('Selecciona una organización destino válida.');
         }
+    }
+
+    requireActivationAccess(ids, rows) {
+        if (this.currentUserRole !== 'ADMIN' || !this.activeOrganizationId ||
+            ids.some(id => !rows.some(row => row.id === id && row.is_assigned === true &&
+                row.organization_id === this.activeOrganizationId))) {
+            throw new Error('Solo ADMIN puede activar/desactivar asignaciones de su organización.');
+        }
+    }
+
+    async setTaxCategoriesActive(ids, active) {
+        this.requireActivationAccess(ids, this.taxCategories);
+        for (const id of ids) {
+            if (active) await persistenceService.activateTaxCategory(id);
+            else await persistenceService.deactivateTaxCategory(id);
+        }
+        await this.loadTaxCategories();
+    }
+
+    async setEconomicActivitiesActive(ids, active) {
+        this.requireActivationAccess(ids, this.displayedEconomicActivities);
+        for (const id of ids) {
+            if (active) await persistenceService.activateEconomicActivity(id);
+            else await persistenceService.deactivateEconomicActivity(id);
+        }
+        await this.loadEconomicActivities();
     }
 
     subscribe(listener) {
@@ -284,7 +349,7 @@ export class AppStore {
 
     async loadGlobalEconomicActivities() {
         try {
-            const globalActs = await persistenceService.loadGlobalEconomicActivities();
+            const globalActs = this.isGlobalMicaMode() ? await persistenceService.loadGlobalEconomicActivities() : [];
             this.globalEconomicActivities = globalActs || [];
             this.notify();
         } catch (e) {
@@ -340,6 +405,7 @@ export class AppStore {
     }
 
     async promptUpsertArcaCatalog() {
+        this.requireGlobalCatalogContext();
         if (typeof window !== 'undefined' && window.UIManager) {
             window.UIManager.openModal('modal-arca-catalog');
         } else {
@@ -743,6 +809,7 @@ export class AppStore {
 
     // --- MÓDULO CATEGORIZACIÓN & ROLES ---
     async loadTaxCategories() {
+        this.taxCategories = [];
         try {
             if (!persistenceService.supabase?.from) return;
 
@@ -756,13 +823,13 @@ export class AppStore {
 
                 const { data: orgCats, error: oErr } = await persistenceService.supabase
                     .from('eco_org_tax_categories')
-                    .select('category_id, is_active, organization:eco_organizations(id, name)')
-                    .eq('is_active', true);
+                    .select('category_id, organization_id, is_assigned, is_active, organization:eco_organizations(id, name)')
+                    .eq('is_assigned', true);
                 if (oErr) throw oErr;
 
                 const categoryOrgMap = new Map();
                 (orgCats || []).forEach(row => {
-                    if (row && row.is_active && row.category_id) {
+                    if (row && row.is_assigned && row.category_id) {
                         const orgName = row.organization?.name;
                         if (orgName && orgName !== 'MICA') {
                             if (!categoryOrgMap.has(row.category_id)) {
@@ -780,6 +847,7 @@ export class AppStore {
                     const orgNames = categoryOrgMap.get(c.id) || [];
                     return {
                         ...c,
+                        assignedOrganizationIds: (orgCats || []).filter(r => r.category_id === c.id && r.is_assigned).map(r => r.organization_id),
                         assignedState: orgNames.join(', '),
                         isAssignedToOrg: orgNames.length > 0
                     };
@@ -789,23 +857,26 @@ export class AppStore {
                 // Muestra ÚNICAMENTE las categorías asignadas a esta organización (Activas o Inactivas)
                 const { data: orgAssigned, error: aErr } = await persistenceService.supabase
                     .from('eco_org_tax_categories')
-                    .select('id, category_id, is_active, custom_name, category:eco_tax_categories(id, name, description, category_type)')
-                    .eq('organization_id', this.activeOrganizationId);
+                    .select('id, organization_id, category_id, is_assigned, is_active, custom_name, category:eco_tax_categories(id, name, description, category_type)')
+                    .eq('organization_id', this.activeOrganizationId)
+                    .eq('is_assigned', true);
                 
                 if (aErr) throw aErr;
 
-                this.taxCategories = (orgAssigned || []).filter(row => row.category).map(row => ({
+                this.taxCategories = (orgAssigned || []).filter(row => row.category && row.is_assigned === true).map(row => ({
                     id: row.category.id,
                     org_assignment_id: row.id,
+                    organization_id: row.organization_id,
                     name: row.custom_name || row.category.name,
                     description: row.category.description,
                     category_type: row.category.category_type,
                     is_active: row.is_active, // true = Activas, false = Inactivas
-                    isAssignedToOrg: row.is_active,
+                    is_assigned: row.is_assigned,
+                    isAssignedToOrg: row.is_assigned,
                     assignedState: ''
                 }));
             } else {
-                const activeOrgCats = await persistenceService.loadActiveTaxCategories();
+                const activeOrgCats = [];
                 this.taxCategories = (activeOrgCats || []).map(c => ({
                     ...c,
                     assignedState: '',
@@ -819,23 +890,26 @@ export class AppStore {
     }
 
     async loadEconomicActivities() {
+        this.economicActivities = [];
+        this.displayedEconomicActivities = [];
+        this.globalEconomicActivities = [];
         try {
             if (!persistenceService.supabase?.from) return;
 
-            const globalActs = await persistenceService.loadGlobalEconomicActivities();
+            const globalActs = this.isGlobalMicaMode() ? await persistenceService.loadGlobalEconomicActivities() : [];
             this.globalEconomicActivities = globalActs || [];
 
             if (this.isGlobalMicaMode()) {
                 // MODO GLOBAL MICA: Muestra las 958 actividades y sus asignaciones
                 const { data: orgActs, error: oErr } = await persistenceService.supabase
                     .from('eco_org_economic_activities')
-                    .select('activity_id, is_active, organization:eco_organizations(id, name)')
-                    .eq('is_active', true);
+                    .select('activity_id, organization_id, is_assigned, is_active, organization:eco_organizations(id, name)')
+                    .eq('is_assigned', true);
                 if (oErr) throw oErr;
 
                 const activityOrgMap = new Map();
                 (orgActs || []).forEach(row => {
-                    if (row && row.is_active && row.activity_id) {
+                    if (row && row.is_assigned && row.activity_id) {
                         const orgName = row.organization?.name;
                         if (orgName && orgName !== 'MICA') {
                             if (!activityOrgMap.has(row.activity_id)) {
@@ -853,6 +927,7 @@ export class AppStore {
                     const orgNames = activityOrgMap.get(a.id) || [];
                     return {
                         ...a,
+                        assignedOrganizationIds: (orgActs || []).filter(r => r.activity_id === a.id && r.is_assigned).map(r => r.organization_id),
                         assignedState: orgNames.join(', '),
                         isAssignedToOrg: orgNames.length > 0
                     };
@@ -862,24 +937,27 @@ export class AppStore {
                 // MODO ORGANIZACIÓN: Muestra ÚNICAMENTE las actividades asignadas a esta organización
                 const { data: orgAssigned, error: aErr } = await persistenceService.supabase
                     .from('eco_org_economic_activities')
-                    .select('id, activity_id, is_active, activity:eco_economic_activities(id, name, arca_code, afip_code, description)')
-                    .eq('organization_id', this.activeOrganizationId);
+                    .select('id, organization_id, activity_id, is_assigned, is_active, activity:eco_economic_activities(id, name, arca_code, description)')
+                    .eq('organization_id', this.activeOrganizationId)
+                    .eq('is_assigned', true);
                 if (aErr) throw aErr;
 
-                const assignedList = (orgAssigned || []).filter(row => row.activity).map(row => ({
+                const assignedList = (orgAssigned || []).filter(row => row.activity && row.is_assigned === true).map(row => ({
                     id: row.activity.id,
+                    organization_id: row.organization_id,
                     name: row.activity.name,
-                    arca_code: row.activity.arca_code || row.activity.afip_code,
+                    arca_code: row.activity.arca_code,
                     description: row.activity.description,
                     is_active: row.is_active,
-                    isAssignedToOrg: row.is_active,
+                    is_assigned: row.is_assigned,
+                    isAssignedToOrg: row.is_assigned,
                     assignedState: ''
                 }));
 
                 this.economicActivities = assignedList.filter(a => a.is_active);
                 this.displayedEconomicActivities = assignedList;
             } else {
-                const activeOrgActs = await persistenceService.loadActiveEconomicActivities();
+                const activeOrgActs = [];
                 this.economicActivities = activeOrgActs || [];
                 this.displayedEconomicActivities = (activeOrgActs || []).map(a => ({
                     ...a,
@@ -927,12 +1005,14 @@ export class AppStore {
     }
 
     async createTaxCategory(payload, targetOrgId = null) {
+        this.requireGlobalCatalogContext();
+        if (targetOrgId) this.requireAssignmentAccess([], [], targetOrgId);
         const activeOrgId = targetOrgId || this.activeOrganizationId;
         if (!activeOrgId && !this.isGlobalMicaMode()) {
             throw new Error('No hay una organización activa seleccionada.');
         }
 
-        // For normal tenant Org Mode (targetOrgId is null), pass targetOrgId as null so assign_tax_category_to_org resolves via private.org_id()
+        // Crear en el catálogo global; la asignación requiere un destino explícito.
         const res = await persistenceService.createTaxCategory(payload, targetOrgId);
         await this.loadTaxCategories();
 
@@ -946,16 +1026,19 @@ export class AppStore {
     }
 
     async updateTaxCategory(categoryId, payload) {
+        this.requireGlobalCatalogContext();
         await persistenceService.updateTaxCategory(categoryId, payload);
         await this.loadTaxCategories();
     }
 
     async assignTaxCategoryToOrg(categoryId, targetOrgId = null) {
+        this.requireAssignmentAccess([categoryId], this.taxCategories, targetOrgId);
         await persistenceService.assignTaxCategoryToOrg(categoryId, targetOrgId);
         await this.loadTaxCategories();
     }
 
     async bulkAssignTaxCategories(categoryIds, targetOrgId = null) {
+        this.requireAssignmentAccess(categoryIds, this.taxCategories, targetOrgId);
         if (!Array.isArray(categoryIds) || categoryIds.length === 0) return;
         for (const id of categoryIds) {
             await persistenceService.assignTaxCategoryToOrg(id, targetOrgId);
@@ -964,11 +1047,13 @@ export class AppStore {
     }
 
     async unassignTaxCategoryFromOrg(categoryId, targetOrgId = null) {
+        this.requireAssignmentAccess([categoryId], this.taxCategories, targetOrgId);
         await persistenceService.unassignTaxCategoryFromOrg(categoryId, targetOrgId);
         await this.loadTaxCategories();
     }
 
     async bulkUnassignTaxCategories(categoryIds, targetOrgId = null) {
+        this.requireAssignmentAccess(categoryIds, this.taxCategories, targetOrgId);
         if (!Array.isArray(categoryIds) || categoryIds.length === 0) return;
         for (const id of categoryIds) {
             await persistenceService.unassignTaxCategoryFromOrg(id, targetOrgId);
@@ -977,16 +1062,19 @@ export class AppStore {
     }
 
     async assignEconomicActivityToOrg(activityId, targetOrgId = null) {
+        this.requireAssignmentAccess([activityId], this.displayedEconomicActivities, targetOrgId);
         await persistenceService.assignEconomicActivityToOrg(activityId, targetOrgId);
         await this.loadEconomicActivities();
     }
 
     async unassignEconomicActivityFromOrg(activityId, targetOrgId = null) {
+        this.requireAssignmentAccess([activityId], this.displayedEconomicActivities, targetOrgId);
         await persistenceService.unassignEconomicActivityFromOrg(activityId, targetOrgId);
         await this.loadEconomicActivities();
     }
 
     async bulkAssignEconomicActivitiesToOrg(activityIds, targetOrgId = null) {
+        this.requireAssignmentAccess(activityIds, this.displayedEconomicActivities, targetOrgId);
         if (!Array.isArray(activityIds) || activityIds.length === 0) return;
         for (const id of activityIds) {
             await persistenceService.assignEconomicActivityToOrg(id, targetOrgId);
@@ -995,6 +1083,7 @@ export class AppStore {
     }
 
     async bulkUnassignEconomicActivitiesFromOrg(activityIds, targetOrgId = null) {
+        this.requireAssignmentAccess(activityIds, this.displayedEconomicActivities, targetOrgId);
         if (!Array.isArray(activityIds) || activityIds.length === 0) return;
         for (const id of activityIds) {
             await persistenceService.unassignEconomicActivityFromOrg(id, targetOrgId);
@@ -1003,8 +1092,10 @@ export class AppStore {
     }
 
     async upsertArcaCatalog(activitiesJson) {
-        await persistenceService.upsertArcaCatalog(activitiesJson);
+        this.requireGlobalCatalogContext();
+        const count = await persistenceService.upsertArcaCatalog(activitiesJson);
         await this.loadEconomicActivities();
+        return count;
     }
 
     async createIibbRate(payload) {
