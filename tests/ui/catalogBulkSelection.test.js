@@ -22,7 +22,10 @@ function harness(role = 'ADMIN', context = 'org-1') {
         canManageGlobalCatalog: () => role === 'SUPERADMIN' && context === null,
         canAssignCatalog: () => role === 'SUPERADMIN',
         isSuperAdmin: () => role === 'SUPERADMIN',
-        isGlobalMicaMode: () => role === 'SUPERADMIN' && context === null,
+        isGlobalMicaMode: () => context === null,
+        isCatalogPlatformContext: () => role === 'SUPERADMIN' && context === null,
+        canActivateCatalog: () => role === 'ADMIN',
+        catalogAssignmentTargets: [{ organization_id: 'org-1', organization_name: 'One' }, { organization_id: 'org-2', organization_name: 'Two' }],
         organizations: [{ id: 'org-1', name: 'One' }, { id: 'org-2', name: 'Two' }],
         taxCategories: rows.map(r => ({ ...r })), displayedEconomicActivities: rows.map(r => ({ ...r })),
         economicActivities: [], iibbRates: []

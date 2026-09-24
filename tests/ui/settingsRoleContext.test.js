@@ -10,6 +10,10 @@ const { persistenceService } = await import('../../src/js/core/services/persiste
 const ui = readFileSync('src/js/ui.js', 'utf8');
 const oeste = '1f5d071f-a09e-4825-9f12-88533383599e';
 let store;
+function grantPlatform(manage = true, assign = true) {
+    store.permissions.platform = { loaded: true, codes: [manage && 'GLOBAL_CATALOG_MANAGE', assign && 'CATALOG_ASSIGN_ANY_ORG'].filter(Boolean) };
+    store.catalogAssignmentTargets = [{ organization_id: oeste, organization_name: 'Oeste' }];
+}
 
 function renderCatalogControls() {
     const nodes = new Map();
@@ -30,11 +34,11 @@ test.each([
     ['ACCOUNTING_SUPERADMIN', 'SUPERADMIN', false, true, false, true],
     ['no assignment permission', 'SUPERADMIN', true, false, true, false],
     ['no capabilities', 'SUPERADMIN', false, false, false, false],
-    ['ADMIN even with platform booleans', 'ADMIN', true, true, false, false]
+    ['USER with platform grants', 'USER', true, true, true, true]
 ])('%s renders controls from effective capabilities', (label, role, manage, assign, seesManage, seesAssign) => {
     store.currentUserRole = role;
     store.activeOrganizationId = role === 'ADMIN' ? oeste : null;
-    store.catalogCapabilities = { loaded: true, globalCatalogManage: manage, catalogAssignAnyOrg: assign, accessAnyOrg: false };
+    grantPlatform(manage, assign);
     const nodes = renderCatalogControls();
     for (const id of ['btn-import-arca-catalog', 'btn-create-global-category']) {
         expect(nodes.get(id).hidden).toBe(!seesManage);
@@ -49,12 +53,12 @@ test.each([
 
 test('loads server capabilities without identity arguments and never bypasses organization RLS', async () => {
     store.currentUserRole = 'SUPERADMIN';
+    grantPlatform();
     store.activeOrganizationId = null;
-    rpc.mockReturnValue({ single: jest.fn().mockResolvedValue({ data: {
-        global_catalog_manage: false, catalog_assign_any_org: true, access_any_org: true
-    }, error: null }) });
+    rpc.mockImplementation(name => Promise.resolve({ data: name === 'list_catalog_assignment_targets' ? [] : ['CATALOG_ASSIGN_ANY_ORG', 'ACCESS_ANY_ORG'].map(code => ({ code, scope: 'PLATFORM', organization_id: null })), error: null }));
     await store.loadMyCatalogCapabilities();
-    expect(rpc).toHaveBeenCalledWith('get_my_catalog_capabilities');
+    expect(rpc).toHaveBeenCalledWith('get_my_effective_capabilities', { p_org_id: null });
+    expect(rpc).toHaveBeenCalledWith('list_catalog_assignment_targets');
     expect(store.canManageGlobalCatalog()).toBe(false);
     expect(store.canAssignCatalog()).toBe(true);
     expect(store.organizations).toEqual([]);
@@ -62,9 +66,9 @@ test('loads server capabilities without identity arguments and never bypasses or
 
 test.each(['error', 'malformed'])('%s loading capabilities fails closed and logs the failure', async mode => {
     store.currentUserRole = 'SUPERADMIN';
+    grantPlatform();
     store.activeOrganizationId = null;
-    rpc.mockReturnValue({ single: jest.fn().mockResolvedValue(mode === 'error'
-        ? { error: new Error('denied') } : { data: { global_catalog_manage: 'true' }, error: null }) });
+    rpc.mockResolvedValue(mode === 'error' ? { error: new Error('denied') } : { data: { invalid: true }, error: null });
     const log = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
         await store.loadMyCatalogCapabilities();
@@ -77,16 +81,17 @@ test.each(['error', 'malformed'])('%s loading capabilities fails closed and logs
 
 test('an old capability response cannot restore permissions after session reset', async () => {
     let resolve;
-    rpc.mockReturnValue({ single: () => new Promise(done => { resolve = done; }) });
+    rpc.mockImplementation(() => new Promise(done => { resolve = done; }));
     const pending = store.loadMyCatalogCapabilities();
     store.resetCatalogCapabilities();
-    resolve({ data: { global_catalog_manage: true, catalog_assign_any_org: true, access_any_org: true } });
+    resolve({ data: [{ code: 'GLOBAL_CATALOG_MANAGE', scope: 'PLATFORM', organization_id: null }] });
     await pending;
     expect(store.catalogCapabilities.loaded).toBe(false);
 });
 
 test('SUPERADMIN without capabilities cannot invoke sensitive handlers directly', async () => {
     store.currentUserRole = 'SUPERADMIN';
+    grantPlatform();
     store.activeOrganizationId = null;
     store.resetCatalogCapabilities();
     for (const name of ['handleArcaFileSelected', 'handleArcaTextInputs', 'submitArcaCatalogForm', 'submitTaxCategoryForm',
@@ -106,6 +111,7 @@ test('SUPERADMIN without capabilities cannot invoke sensitive handlers directly'
 
 test('SQL rejection is propagated despite a previously granted frontend capability', async () => {
     store.currentUserRole = 'SUPERADMIN';
+    grantPlatform();
     store.activeOrganizationId = null;
     store.organizations = [{ id: oeste, name: 'Oeste' }];
     rpc.mockResolvedValue({ error: { message: 'permission revoked on server' } });
@@ -123,10 +129,53 @@ function query(data, error = null) {
     return q;
 }
 
+test('permissions are scoped and independent of compatibility role and template', () => {
+    store.currentUserRole = 'USER';
+    expect(store.canActivateCatalog('activity')).toBe(true);
+    expect(store.hasCapability('CATALOG_ACTIVITY_MANAGE', { scope: 'ORGANIZATION', orgId: 'other' })).toBe(false);
+    expect(store.canManageGlobalCatalog()).toBe(false);
+    grantPlatform();
+    expect(store.canManageGlobalCatalog()).toBe(true);
+    expect(store.canAssignCatalog()).toBe(true);
+    store.setUserRole('SUPERADMIN');
+    expect(store.canAssignCatalog()).toBe(false);
+    expect(store.canActivateCatalog('activity')).toBe(false);
+});
+
+test('rejected server context switch preserves local context, permissions and data', async () => {
+    const before = store.permissions;
+    store.taxCategories = [{ id: 'preserve' }];
+    rpc.mockResolvedValue({ error: { message: 'context denied' } });
+    await expect(store.switchOrganizationContext('other')).rejects.toThrow('context denied');
+    expect(store.activeOrganizationId).toBe(oeste);
+    expect(store.permissions).toBe(before);
+    expect(store.taxCategories).toEqual([{ id: 'preserve' }]);
+});
+
+test('successful context switch reloads permissions after server confirmation', async () => {
+    const events = [];
+    rpc.mockImplementation(async name => {
+        events.push([name, store.activeOrganizationId]);
+        return { data: name === 'get_my_effective_capabilities' ? [] : null, error: null };
+    });
+    query([]);
+    await store.switchOrganizationContext('other');
+    expect(events[0]).toEqual(['switch_superadmin_org_context', oeste]);
+    expect(events[1]).toEqual(['get_my_effective_capabilities', 'other']);
+    expect(store.permissions.organization.orgId).toBe('other');
+    expect(store.canActivateCatalog('activity')).toBe(false);
+});
+
+test('store has exactly one role setter and role display predicate', () => {
+    const source = readFileSync('src/js/store.js', 'utf8');
+    expect(source.match(/^    setUserRole\(role\)/gm)).toHaveLength(1);
+    expect(source.match(/^    isSuperAdmin\(\)/gm)).toHaveLength(1);
+});
+
 beforeEach(() => {
     jest.resetAllMocks();
     store = new AppStore();
-    store.catalogCapabilities = { loaded: true, globalCatalogManage: true, catalogAssignAnyOrg: true, accessAnyOrg: false };
+    store.permissions.organization = { loaded: true, orgId: oeste, codes: ['CATALOG_ACTIVITY_MANAGE', 'CATALOG_CATEGORY_MANAGE'] };
     store.currentUserRole = 'ADMIN';
     store.activeOrganizationId = oeste;
 });
@@ -157,6 +206,7 @@ test('failed organization lookup clears stale names and never uses UUID or demo 
 
 test.each(['ADMIN', 'SUPERADMIN'])('%s sees global controls only in MICA context (actual renderSettings)', role => {
     store.currentUserRole = role;
+    if (role === 'SUPERADMIN') grantPlatform();
     store.activeOrganizationId = role === 'SUPERADMIN' ? null : oeste;
     const elements = Object.fromEntries(['btn-import-arca-catalog', 'btn-create-global-category'].map(id => [id, {}]));
     const doc = { getElementById: id => elements[id] || null };
@@ -171,7 +221,7 @@ test.each(['ADMIN', 'SUPERADMIN'])('%s sees global controls only in MICA context
     }
     store.activeOrganizationId = oeste;
     UI.renderSettings();
-    expect(elements['btn-import-arca-catalog'].hidden).toBe(true);
+    expect(elements['btn-import-arca-catalog'].hidden).toBe(role !== 'SUPERADMIN');
 });
 
 test('ADMIN cannot invoke global handlers directly, even without DOM controls', async () => {
@@ -182,8 +232,8 @@ test('ADMIN cannot invoke global handlers directly, even without DOM controls', 
         new Function('window', 'appStore', ui.slice(start, end))(window, store);
         await window[name](); // Accessing the DOM or persistence here would throw.
     }
-    await expect(store.upsertArcaCatalog([])).rejects.toThrow('SUPERADMIN');
-    await expect(store.createTaxCategory({ name: 'Forbidden' })).rejects.toThrow('SUPERADMIN');
+    await expect(store.upsertArcaCatalog([])).rejects.toThrow('capability required');
+    await expect(store.createTaxCategory({ name: 'Forbidden' })).rejects.toThrow('capability required');
     expect(rpc).not.toHaveBeenCalled();
 });
 
@@ -209,7 +259,7 @@ test('ADMIN loads only assigned categories and can reactivate only that subset',
     expect(rpc).toHaveBeenCalledWith('activate_tax_category', { p_category_id: 'cat' });
     rpc.mockClear();
     await expect(store.setTaxCategoriesActive(['cat', 'foreign'], true)).rejects.toThrow('asignaciones');
-    await expect(store.assignTaxCategoryToOrg('cat', 'other-org')).rejects.toThrow('SUPERADMIN');
+    await expect(store.assignTaxCategoryToOrg('cat', 'other-org')).rejects.toThrow('capability required');
     expect(rpc).not.toHaveBeenCalled();
 });
 
@@ -230,20 +280,21 @@ test('ADMIN can toggle an assigned activity but cannot introduce another activit
     expect(rpc).toHaveBeenCalledWith('deactivate_economic_activity', { p_activity_id: 'act' });
     rpc.mockClear();
     await expect(store.setEconomicActivitiesActive(['act', 'foreign'], true)).rejects.toThrow('asignaciones');
-    await expect(store.unassignEconomicActivityFromOrg('act', 'other-org')).rejects.toThrow('SUPERADMIN');
+    await expect(store.unassignEconomicActivityFromOrg('act', 'other-org')).rejects.toThrow('capability required');
     expect(rpc).not.toHaveBeenCalled();
 });
 
 test('SUPERADMIN in MICA can create/import globally and assign to an explicit organization', async () => {
     store.currentUserRole = 'SUPERADMIN';
+    grantPlatform();
     store.activeOrganizationId = null;
     store.organizations = [{ id: oeste, name: 'DEMO OESTE' }];
     query([]);
-    rpc.mockResolvedValue({ data: 'new-category', error: null });
+    rpc.mockImplementation(name => name === 'list_catalog_assignment_state' ? { range: jest.fn().mockResolvedValue({ data: [], error: null }) } : Promise.resolve({ data: 'new-category', error: null }));
     await store.createTaxCategory({ name: 'Global' });
     expect(rpc.mock.calls[0][0]).toBe('create_global_tax_category');
-    expect(rpc).toHaveBeenCalledTimes(1);
-    rpc.mockResolvedValue({ data: 1, error: null });
+    expect(rpc).toHaveBeenCalledWith('list_catalog_assignment_state', { p_catalog_type: 'category' });
+    rpc.mockImplementation(name => name === 'list_catalog_assignment_state' ? { range: jest.fn().mockResolvedValue({ data: [], error: null }) } : Promise.resolve({ data: 1, error: null }));
     await expect(store.upsertArcaCatalog([{ arca_code: '011111', name: 'Activity' }])).resolves.toBe(1);
     await store.assignTaxCategoryToOrg('new-category', oeste);
     await store.assignEconomicActivityToOrg('act', oeste);
@@ -282,7 +333,7 @@ describe.each([
         expect(q.eq).not.toHaveBeenCalledWith('is_active', true);
         expect(store[rows].map(row => row.id)).toEqual(['allowed']);
         expect(store[rows][0].is_active).toBe(false);
-        await expect(store[activate](['revoked'], true)).rejects.toThrow('ADMIN');
+        await expect(store[activate](['revoked'], true)).rejects.toThrow('asignaciones');
         expect(rpc).not.toHaveBeenCalled();
     });
 
@@ -295,26 +346,73 @@ describe.each([
         expect(rpc).toHaveBeenCalledWith(`deactivate_${rpcKind}`, { [`p_${key}`]: 'allowed' });
         expect(rpc).toHaveBeenCalledWith(`activate_${rpcKind}`, { [`p_${key}`]: 'allowed' });
         rpc.mockClear();
-        await expect(store[assign]('allowed', oeste)).rejects.toThrow('SUPERADMIN');
-        await expect(store[unassign]('allowed', oeste)).rejects.toThrow('SUPERADMIN');
+        await expect(store[assign]('allowed', oeste)).rejects.toThrow('capability required');
+        await expect(store[unassign]('allowed', oeste)).rejects.toThrow('capability required');
         store[rows][0].organization_id = 'other-org';
-        await expect(store[activate](['allowed'], true)).rejects.toThrow('ADMIN');
+        await expect(store[activate](['allowed'], true)).rejects.toThrow('asignaciones');
         expect(rpc).not.toHaveBeenCalled();
     });
 
     test('SUPERADMIN assigns/unassigns only to a recognized target and cannot use tenant activation', async () => {
         store.currentUserRole = 'SUPERADMIN';
+    grantPlatform();
         store.activeOrganizationId = null;
         store.organizations = [{ id: oeste, name: 'DEMO OESTE' }];
         query([]);
-        rpc.mockResolvedValue({ error: null });
+        rpc.mockImplementation(name => name === 'list_catalog_assignment_state' ? { range: jest.fn().mockResolvedValue({ data: [], error: null }) } : Promise.resolve({ data: null, error: null }));
         await store[assign]('global-item', oeste);
         await store[unassign]('global-item', oeste);
         expect(rpc).toHaveBeenCalledWith(`assign_${rpcKind}_to_org`, { [`p_${key}`]: 'global-item', p_target_org_id: oeste });
         expect(rpc).toHaveBeenCalledWith(`unassign_${rpcKind}_from_org`, { [`p_${key}`]: 'global-item', p_target_org_id: oeste });
         rpc.mockClear();
         await expect(store[assign]('global-item', 'unknown-org')).rejects.toThrow('destino');
-        await expect(store[activate](['global-item'], true)).rejects.toThrow('ADMIN');
+        await expect(store[activate](['global-item'], true)).rejects.toThrow('asignaciones');
         expect(rpc).not.toHaveBeenCalled();
     });
+});
+
+
+test.each([
+    ['activity', 'loadEconomicActivities', 'displayedEconomicActivities', 'eco_economic_activities'],
+    ['category', 'loadTaxCategories', 'taxCategories', 'eco_tax_categories']
+])('%s global state comes from catalog RPC without transversal assignment SELECT', async (kind, load, rows, table) => {
+    store.currentUserRole = 'USER';
+    grantPlatform(false, true);
+    store.organizations = []; // Operational RLS may legitimately expose no organizations.
+    query([{ id: 'assigned', name: 'One' }, { id: 'withdrawn', name: 'Two' }]);
+    const range = jest.fn()
+        .mockResolvedValueOnce({ data: [
+            { organization_id: oeste, item_id: 'assigned', is_assigned: true, is_active: false },
+            { organization_id: oeste, item_id: 'withdrawn', is_assigned: false, is_active: true }
+        ], error: null })
+        .mockResolvedValueOnce({ data: [], error: null });
+    rpc.mockReturnValue({ range });
+    await store[load]();
+    expect(from.mock.calls).toEqual([[table]]);
+    expect(rpc).toHaveBeenCalledWith('list_catalog_assignment_state', { p_catalog_type: kind });
+    expect(store[rows][0].assignedOrganizationIds).toEqual([oeste]);
+    expect(store[rows][1].assignedOrganizationIds).toEqual([]);
+    expect(store[rows][0].assignedState).toBe('Oeste');
+    expect(range.mock.calls).toEqual([[0, 499], [2, 501]]);
+});
+
+test('catalog state service preserves all response pages and propagates server denial', async () => {
+    const range = jest.fn()
+        .mockResolvedValueOnce({ data: [{ organization_id: oeste, item_id: 'a', is_assigned: true, is_active: true }], error: null })
+        .mockResolvedValueOnce({ data: [{ organization_id: oeste, item_id: 'b', is_assigned: true, is_active: false }], error: null })
+        .mockResolvedValueOnce({ data: [], error: null });
+    rpc.mockReturnValue({ range });
+    await expect(persistenceService.listCatalogAssignmentState('activity')).resolves.toHaveLength(2);
+    expect(range.mock.calls).toEqual([[0, 499], [1, 500], [2, 501]]);
+    range.mockResolvedValueOnce({ data: null, error: { message: 'catalog permission denied' } });
+    await expect(persistenceService.listCatalogAssignmentState('activity')).rejects.toThrow('catalog permission denied');
+});
+
+test('catalog management without assignment capability never fetches assignment metadata', async () => {
+    grantPlatform(true, false);
+    query([{ id: 'cat', name: 'Global' }]);
+    await store.loadTaxCategories();
+    expect(store.taxCategories).toHaveLength(1);
+    expect(store.taxCategories[0].assignedOrganizationIds).toEqual([]);
+    expect(rpc).not.toHaveBeenCalled();
 });

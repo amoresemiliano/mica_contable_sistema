@@ -6,6 +6,41 @@ import { supabase } from './supabaseClient.js';
  */
 export class PersistenceService {
 
+    async loadMyEffectiveCapabilities(orgId = null) {
+        const { data, error } = await supabase.rpc('get_my_effective_capabilities', { p_org_id: orgId });
+        if (error) throw new Error(error.message);
+        if (!Array.isArray(data) || data.some(r => !r || typeof r.code !== 'string' ||
+            !['PLATFORM', 'ORGANIZATION'].includes(r.scope) ||
+            (r.scope === 'ORGANIZATION' && (!orgId || r.organization_id !== orgId)))) {
+            throw new Error('Invalid effective capabilities response');
+        }
+        return data;
+    }
+
+    async listCatalogAssignmentTargets() {
+        const { data, error } = await supabase.rpc('list_catalog_assignment_targets');
+        if (error) throw new Error(error.message);
+        if (!Array.isArray(data) || data.some(row => !row || typeof row.organization_id !== 'string' || typeof row.organization_name !== 'string')) throw new Error('Invalid catalog targets response');
+        return data;
+    }
+
+    async listCatalogAssignmentState(catalogType) {
+        const rows = [];
+        // The catalog can have more assignment rows than PostgREST's response cap.
+        // SQL orders by organization/item so adjacent pages are deterministic.
+        for (;;) {
+            const { data, error } = await supabase.rpc('list_catalog_assignment_state', { p_catalog_type: catalogType })
+                .range(rows.length, rows.length + 499);
+            if (error) throw new Error(error.message);
+            if (!Array.isArray(data) || data.some(row => !row || typeof row.organization_id !== 'string' ||
+                typeof row.item_id !== 'string' || typeof row.is_assigned !== 'boolean' || typeof row.is_active !== 'boolean')) {
+                throw new Error('Invalid catalog assignment state response');
+            }
+            if (data.length === 0) return rows;
+            rows.push(...data);
+        }
+    }
+
     async loadMyCatalogCapabilities() {
         const { data, error } = await supabase.rpc('get_my_catalog_capabilities').single();
         if (error) throw error;
@@ -627,7 +662,7 @@ export class PersistenceService {
         const { error } = await supabase.rpc('switch_superadmin_org_context', {
             p_org_id: orgId || null
         });
-        if (error) console.warn("switchSuperadminOrgContext notice:", error.message);
+        if (error) throw new Error(error.message);
     }
 
     /**

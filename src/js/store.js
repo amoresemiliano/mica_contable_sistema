@@ -65,41 +65,55 @@ export class AppStore {
     }
 
     resetCatalogCapabilities() {
-        this.catalogCapabilities = { globalCatalogManage: false, catalogAssignAnyOrg: false, accessAnyOrg: false, loaded: false };
+        this.permissions = { platform: { loaded: false, codes: [] }, organization: { loaded: false, orgId: null, codes: [] } };
+        this.catalogAssignmentTargets = [];
+        this.catalogCapabilities = { loaded: false, globalCatalogManage: false, catalogAssignAnyOrg: false, accessAnyOrg: false };
+    }
+
+    hasCapability(code, { scope = 'PLATFORM', orgId = null } = {}) {
+        const p = this.permissions;
+        if (scope === 'PLATFORM') return p.platform.loaded && p.platform.codes.includes(code);
+        return scope === 'ORGANIZATION' && !!orgId && orgId === this.activeOrganizationId &&
+            p.organization.loaded && p.organization.orgId === orgId && p.organization.codes.includes(code);
     }
 
     async loadMyCatalogCapabilities() {
         this.resetCatalogCapabilities();
-        const pending = this.catalogCapabilities;
+        const pending = this.permissions;
+        const orgId = this.activeOrganizationId;
         this.notify();
         try {
-            const data = await persistenceService.loadMyCatalogCapabilities();
-            if (this.catalogCapabilities !== pending) return;
-            this.catalogCapabilities = {
-                globalCatalogManage: data.global_catalog_manage === true,
-                catalogAssignAnyOrg: data.catalog_assign_any_org === true,
-                accessAnyOrg: data.access_any_org === true,
-                loaded: true
+            const rows = await persistenceService.loadMyEffectiveCapabilities(orgId);
+            if (this.permissions !== pending || this.activeOrganizationId !== orgId) return;
+            this.permissions = {
+                platform: { loaded: true, codes: rows.filter(r => r.scope === 'PLATFORM').map(r => r.code) },
+                organization: { loaded: true, orgId, codes: rows.filter(r => r.scope === 'ORGANIZATION' && r.organization_id === orgId).map(r => r.code) }
             };
+            this.catalogCapabilities = { loaded: true,
+                globalCatalogManage: this.canManageGlobalCatalog(), catalogAssignAnyOrg: this.canAssignCatalog(),
+                accessAnyOrg: this.hasCapability('ACCESS_ANY_ORG') };
+            if (this.canAssignCatalog()) {
+                const current = this.permissions;
+                const targets = await persistenceService.listCatalogAssignmentTargets();
+                if (this.permissions === current) this.catalogAssignmentTargets = targets;
+            }
         } catch (error) {
             console.error('Could not load catalog capabilities:', error);
         }
         this.notify();
     }
 
-    canManageGlobalCatalog() {
-        return this.isGlobalMicaMode() && this.catalogCapabilities.loaded === true &&
-            this.catalogCapabilities.globalCatalogManage === true;
+    canManageGlobalCatalog() { return this.hasCapability('GLOBAL_CATALOG_MANAGE'); }
+    canAssignCatalog() { return this.hasCapability('CATALOG_ASSIGN_ANY_ORG'); }
+    canActivateCatalog(kind) {
+        return this.hasCapability(kind === 'activity' ? 'CATALOG_ACTIVITY_MANAGE' : 'CATALOG_CATEGORY_MANAGE',
+            { scope: 'ORGANIZATION', orgId: this.activeOrganizationId });
     }
-
-    canAssignCatalog() {
-        return this.isSuperAdmin() && this.catalogCapabilities.loaded === true &&
-            this.catalogCapabilities.catalogAssignAnyOrg === true;
+    isCatalogPlatformContext() {
+        return this.hasCapability('GLOBAL_CATALOG_VIEW') || this.canManageGlobalCatalog() || this.canAssignCatalog();
     }
-
-    isGlobalMicaMode() {
-        return this.isSuperAdmin() && !this.activeOrganizationId;
-    }
+    // Compatibility display only. Catalog authorization uses hasCapability().
+    isGlobalMicaMode() { return this.isSuperAdmin() && !this.activeOrganizationId; }
 
     getActiveOrganizationName() {
         if (this.isGlobalMicaMode()) return 'MICA (Modo Global)';
@@ -118,19 +132,19 @@ export class AppStore {
 
     async switchOrganizationContext(orgId) {
         const targetId = orgId || null;
+        await persistenceService.switchSuperadminOrgContext(targetId);
         this.activeOrganizationId = targetId;
+        this.resetCatalogCapabilities();
+        this.taxCategories = [];
+        this.economicActivities = [];
+        this.displayedEconomicActivities = [];
+        this.globalEconomicActivities = [];
+        this.iibbRates = [];
         if (typeof sessionStorage !== 'undefined') {
-            if (targetId) {
-                sessionStorage.setItem('mica_active_org_id', targetId);
-            } else {
-                sessionStorage.removeItem('mica_active_org_id');
-            }
+            if (targetId) sessionStorage.setItem('mica_active_org_id', targetId);
+            else sessionStorage.removeItem('mica_active_org_id');
         }
-
-        if (this.isSuperAdmin()) {
-            await persistenceService.switchSuperadminOrgContext(targetId);
-        }
-
+        await this.loadMyCatalogCapabilities();
         await this.loadTaxCategories();
         await this.loadEconomicActivities();
         await this.loadIibbRates();
@@ -146,26 +160,26 @@ export class AppStore {
     }
 
     requireGlobalCatalogContext() {
-        if (!this.canManageGlobalCatalog()) throw new Error('Esta acción requiere SUPERADMIN en modo MICA.');
+        if (!this.canManageGlobalCatalog()) throw new Error('GLOBAL_CATALOG_MANAGE capability required.');
     }
 
     requireAssignmentAccess(ids, rows, targetOrgId) {
-        if (!this.canAssignCatalog()) throw new Error('SUPERADMIN requires catalog assignment capability.');
-        if (!targetOrgId || !this.organizations.some(o => o.id === targetOrgId)) {
+        if (!this.canAssignCatalog()) throw new Error('CATALOG_ASSIGN_ANY_ORG capability required.');
+        if (!targetOrgId || !this.catalogAssignmentTargets.some(o => o.organization_id === targetOrgId)) {
             throw new Error('Selecciona una organización destino válida.');
         }
     }
 
-    requireActivationAccess(ids, rows) {
-        if (this.currentUserRole !== 'ADMIN' || !this.activeOrganizationId ||
+    requireActivationAccess(ids, rows, kind) {
+        if (!this.canActivateCatalog(kind) || !this.activeOrganizationId ||
             ids.some(id => !rows.some(row => row.id === id && row.is_assigned === true &&
                 row.organization_id === this.activeOrganizationId))) {
-            throw new Error('Solo ADMIN puede activar/desactivar asignaciones de su organización.');
+            throw new Error('Permiso requerido para activar/desactivar asignaciones propias.');
         }
     }
 
     async setTaxCategoriesActive(ids, active) {
-        this.requireActivationAccess(ids, this.taxCategories);
+        this.requireActivationAccess(ids, this.taxCategories, 'category');
         for (const id of ids) {
             if (active) await persistenceService.activateTaxCategory(id);
             else await persistenceService.deactivateTaxCategory(id);
@@ -174,7 +188,7 @@ export class AppStore {
     }
 
     async setEconomicActivitiesActive(ids, active) {
-        this.requireActivationAccess(ids, this.displayedEconomicActivities);
+        this.requireActivationAccess(ids, this.displayedEconomicActivities, 'activity');
         for (const id of ids) {
             if (active) await persistenceService.activateEconomicActivity(id);
             else await persistenceService.deactivateEconomicActivity(id);
@@ -349,7 +363,7 @@ export class AppStore {
 
     async loadGlobalEconomicActivities() {
         try {
-            const globalActs = this.isGlobalMicaMode() ? await persistenceService.loadGlobalEconomicActivities() : [];
+            const globalActs = this.isCatalogPlatformContext() ? await persistenceService.loadGlobalEconomicActivities() : [];
             this.globalEconomicActivities = globalActs || [];
             this.notify();
         } catch (e) {
@@ -795,25 +809,13 @@ export class AppStore {
     }
 
     // --- MÓDULO CATEGORIZACIÓN & ROLES ---
-    setUserRole(role) {
-        this.currentUserRole = role || 'USER';
-        if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.setItem('mica_user_role', this.currentUserRole);
-        }
-        this.notify();
-    }
-
-    isSuperAdmin() {
-        return this.currentUserRole === 'SUPERADMIN';
-    }
-
     // --- MÓDULO CATEGORIZACIÓN & ROLES ---
     async loadTaxCategories() {
         this.taxCategories = [];
         try {
             if (!persistenceService.supabase?.from) return;
 
-            if (this.isGlobalMicaMode()) {
+            if (this.isCatalogPlatformContext()) {
                 // MODO GLOBAL MICA: muestra todo el catálogo global y estado de asignación multi-organización
                 const { data: globalCats, error: gErr } = await persistenceService.supabase
                     .from('eco_tax_categories')
@@ -821,17 +823,15 @@ export class AppStore {
                     .order('name', { ascending: true });
                 if (gErr) throw gErr;
 
-                const { data: orgCats, error: oErr } = await persistenceService.supabase
-                    .from('eco_org_tax_categories')
-                    .select('category_id, organization_id, is_assigned, is_active, organization:eco_organizations(id, name)')
-                    .eq('is_assigned', true);
-                if (oErr) throw oErr;
+                const assignmentRows = this.canAssignCatalog()
+                    ? await persistenceService.listCatalogAssignmentState('category') : [];
+                const orgCats = assignmentRows.map(row => ({ ...row, category_id: row.item_id }));
 
                 const categoryOrgMap = new Map();
                 (orgCats || []).forEach(row => {
                     if (row && row.is_assigned && row.category_id) {
-                        const orgName = row.organization?.name;
-                        if (orgName && orgName !== 'MICA') {
+                        const orgName = this.catalogAssignmentTargets.find(org => org.organization_id === row.organization_id)?.organization_name;
+                        if (orgName) {
                             if (!categoryOrgMap.has(row.category_id)) {
                                 categoryOrgMap.set(row.category_id, []);
                             }
@@ -896,22 +896,20 @@ export class AppStore {
         try {
             if (!persistenceService.supabase?.from) return;
 
-            const globalActs = this.isGlobalMicaMode() ? await persistenceService.loadGlobalEconomicActivities() : [];
+            const globalActs = this.isCatalogPlatformContext() ? await persistenceService.loadGlobalEconomicActivities() : [];
             this.globalEconomicActivities = globalActs || [];
 
-            if (this.isGlobalMicaMode()) {
+            if (this.isCatalogPlatformContext()) {
                 // MODO GLOBAL MICA: Muestra las 958 actividades y sus asignaciones
-                const { data: orgActs, error: oErr } = await persistenceService.supabase
-                    .from('eco_org_economic_activities')
-                    .select('activity_id, organization_id, is_assigned, is_active, organization:eco_organizations(id, name)')
-                    .eq('is_assigned', true);
-                if (oErr) throw oErr;
+                const assignmentRows = this.canAssignCatalog()
+                    ? await persistenceService.listCatalogAssignmentState('activity') : [];
+                const orgActs = assignmentRows.map(row => ({ ...row, activity_id: row.item_id }));
 
                 const activityOrgMap = new Map();
                 (orgActs || []).forEach(row => {
                     if (row && row.is_assigned && row.activity_id) {
-                        const orgName = row.organization?.name;
-                        if (orgName && orgName !== 'MICA') {
+                        const orgName = this.catalogAssignmentTargets.find(org => org.organization_id === row.organization_id)?.organization_name;
+                        if (orgName) {
                             if (!activityOrgMap.has(row.activity_id)) {
                                 activityOrgMap.set(row.activity_id, []);
                             }

@@ -2001,7 +2001,8 @@ export class UIManager {
 
     static renderSettings() {
         const canManageGlobal = appStore.canManageGlobalCatalog();
-        const canActOnCatalog = appStore.isGlobalMicaMode() ? appStore.canAssignCatalog() : appStore.currentUserRole === 'ADMIN';
+        const canActOnTax = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('category');
+        const canActOnActivity = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('activity');
         for (const id of ['btn-import-arca-catalog', 'btn-create-global-category']) {
             const control = document.getElementById(id);
             if (control) {
@@ -2014,7 +2015,7 @@ export class UIManager {
             this.closeModal('modal-tax-category');
         }
         const isSuperAdmin = appStore.isSuperAdmin();
-        const isGlobalMode = appStore.isGlobalMicaMode();
+        const isGlobalMode = appStore.isCatalogPlatformContext();
 
         // 0. Render Context Switcher Dropdown para SUPERADMIN
         const switcherContainer = document.getElementById('org-context-switcher-container');
@@ -2037,7 +2038,7 @@ export class UIManager {
         const selectTargetTaxCat = document.getElementById('select-target-org-tax-cat');
         if (targetTaxCatContainer && selectTargetTaxCat) {
             targetTaxCatContainer.style.display = isGlobalMode && appStore.canAssignCatalog() ? 'flex' : 'none';
-            const orgs = appStore.organizations || [];
+            const orgs = (appStore.catalogAssignmentTargets || []).map(o => ({ id: o.organization_id, name: o.organization_name }));
             const previousTarget = selectTargetTaxCat.value;
             selectTargetTaxCat.innerHTML = orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
             selectTargetTaxCat.onchange = () => window.handleCatalogTargetChange('categories');
@@ -2047,7 +2048,7 @@ export class UIManager {
         const selectTargetEconAct = document.getElementById('select-target-org-econ-act');
         if (targetEconActContainer && selectTargetEconAct) {
             targetEconActContainer.style.display = isGlobalMode && appStore.canAssignCatalog() ? 'flex' : 'none';
-            const orgs = appStore.organizations || [];
+            const orgs = (appStore.catalogAssignmentTargets || []).map(o => ({ id: o.organization_id, name: o.organization_name }));
             const previousTarget = selectTargetEconAct.value;
             selectTargetEconAct.innerHTML = orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
             selectTargetEconAct.onchange = () => window.handleCatalogTargetChange('activities');
@@ -2152,8 +2153,8 @@ export class UIManager {
                 masterToggleHandler: 'window.toggleMasterTaxCategories',
                 allowEdit: canManageGlobal,
                 allowClone: canManageGlobal,
-                allowToggle: canActOnCatalog,
-                allowDelete: canActOnCatalog,
+                allowToggle: canActOnTax,
+                allowDelete: canActOnTax,
                 toggleLabel: isGlobalMode ? 'Asignar' : 'Activar',
                 deleteLabel: isGlobalMode ? 'Desasignar' : 'Desactivar'
             }
@@ -2173,7 +2174,7 @@ export class UIManager {
                         ${isGlobalMode ? `<td>${c.assignedState ? `<span style="color:var(--success); font-weight: 600;">${c.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
                         <td>
                             ${canManageGlobal ? `<button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.editSingleTaxCategory('${c.id}')">Editar</button>` : ''}
-                            ${canActOnCatalog ? `<button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleTaxCategoryAssignment('${c.id}')">${isGlobalMode ? (c.isAssignedToOrg ? 'Desasignar' : 'Asignar') : (c.is_active ? 'Desactivar' : 'Activar')}</button>` : ''}
+                            ${canActOnTax ? `<button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleTaxCategoryAssignment('${c.id}')">${isGlobalMode ? (c.isAssignedToOrg ? 'Desasignar' : 'Asignar') : (c.is_active ? 'Desactivar' : 'Activar')}</button>` : ''}
                         </td>
                     </tr>
                 `).join('');
@@ -2237,8 +2238,8 @@ export class UIManager {
                 allowEdit: false,
                 allowClone: true,
                 isCloneDisabled: true,
-                allowToggle: canActOnCatalog,
-                allowDelete: canActOnCatalog,
+                allowToggle: canActOnActivity,
+                allowDelete: canActOnActivity,
                 toggleLabel: isGlobalMode ? 'Asignar' : 'Activar',
                 deleteLabel: isGlobalMode ? 'Desasignar' : 'Desactivar'
             }
@@ -2257,7 +2258,7 @@ export class UIManager {
                         <td><strong>${a.name}</strong></td>
                         ${isGlobalMode ? `<td>${a.assignedState ? `<span style="color:var(--success); font-weight: 600;">${a.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
                         <td>
-                            ${canActOnCatalog ? `<button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleEconomicActivityAssignment('${a.id}')">${isGlobalMode ? (a.isAssignedToOrg ? 'Desasignar' : 'Asignar') : (a.is_active ? 'Desactivar' : 'Activar')}</button>` : ''}
+                            ${canActOnActivity ? `<button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleEconomicActivityAssignment('${a.id}')">${isGlobalMode ? (a.isAssignedToOrg ? 'Desasignar' : 'Asignar') : (a.is_active ? 'Desactivar' : 'Activar')}</button>` : ''}
                         </td>
                     </tr>
                 `).join('');
@@ -2442,7 +2443,7 @@ window.handleOrgContextChange = async function(orgId) {
 window.handleTaxCategoriesSearch = function(query) {
     taxCategoriesGrid.displayLimitCustom = false;
     taxCategoriesGrid.searchQuery = query || '';
-    const limit = appStore.isGlobalMicaMode() ? 10 : 5;
+    const limit = appStore.isCatalogPlatformContext() ? 10 : 5;
     taxCategoriesGrid.resetDisplayLimit(limit);
     UIManager.renderSettings();
 };
@@ -2456,14 +2457,14 @@ window.setTaxCategoriesStatusFilter = function(status) {
 
 window.loadMoreTaxCategories = function() {
     taxCategoriesGrid.displayLimitCustom = true;
-    const step = appStore.isGlobalMicaMode() ? 10 : 5;
+    const step = appStore.isCatalogPlatformContext() ? 10 : 5;
     taxCategoriesGrid.loadMoreRows(step);
     UIManager.renderSettings();
 };
 
 window.loadLessTaxCategories = function() {
     taxCategoriesGrid.displayLimitCustom = false;
-    const limit = appStore.isGlobalMicaMode() ? 10 : 5;
+    const limit = appStore.isCatalogPlatformContext() ? 10 : 5;
     taxCategoriesGrid.resetDisplayLimit(limit);
     UIManager.renderSettings();
 };
@@ -2471,7 +2472,7 @@ window.loadLessTaxCategories = function() {
 window.handleEconomicActivitiesSearch = function(query) {
     economicActivitiesGrid.displayLimitCustom = false;
     economicActivitiesGrid.searchQuery = query || '';
-    const limit = appStore.isGlobalMicaMode() ? 10 : 5;
+    const limit = appStore.isCatalogPlatformContext() ? 10 : 5;
     economicActivitiesGrid.resetDisplayLimit(limit);
     UIManager.renderSettings();
 };
@@ -2485,14 +2486,14 @@ window.setEconomicActivitiesStatusFilter = function(status) {
 
 window.loadMoreEconomicActivities = function() {
     economicActivitiesGrid.displayLimitCustom = true;
-    const step = appStore.isGlobalMicaMode() ? 10 : 5;
+    const step = appStore.isCatalogPlatformContext() ? 10 : 5;
     economicActivitiesGrid.loadMoreRows(step);
     UIManager.renderSettings();
 };
 
 window.loadLessEconomicActivities = function() {
     economicActivitiesGrid.displayLimitCustom = false;
-    const limit = appStore.isGlobalMicaMode() ? 10 : 5;
+    const limit = appStore.isCatalogPlatformContext() ? 10 : 5;
     economicActivitiesGrid.resetDisplayLimit(limit);
     UIManager.renderSettings();
 };
@@ -2508,7 +2509,7 @@ window.toggleMasterTaxCategories = function(checked) {
     const allCats = appStore.taxCategories || [];
     const taxSearch = (taxCategoriesGrid.searchQuery || '').toLowerCase();
     const taxStatus = taxCategoriesGrid.getFilterStatus();
-    const isGlobalMode = appStore.isGlobalMicaMode();
+    const isGlobalMode = appStore.isCatalogPlatformContext();
 
     const filtered = allCats.filter(c => {
         const matchesSearch = !taxSearch || (c.name || '').toLowerCase().includes(taxSearch) || (c.description || '').toLowerCase().includes(taxSearch);
@@ -2576,11 +2577,11 @@ window.actionCloneTaxCategory = function() {
 };
 
 window.toggleSingleTaxCategoryAssignment = async function(id) {
-    if (appStore.isGlobalMicaMode() ? !appStore.canAssignCatalog() : appStore.currentUserRole !== 'ADMIN') return;
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('category')) return;
     UIManager.renderSettings();
     const row = appStore.taxCategories.find(r => r.id === id);
     if (!row) return;
-    const globalMode = appStore.isGlobalMicaMode();
+    const globalMode = appStore.isCatalogPlatformContext();
     const enabled = globalMode ? row.isAssignedToOrg : row.is_active;
     const action = globalMode ? (enabled ? 'Desasignar' : 'Asignar') : (enabled ? 'Desactivar' : 'Activar');
     if (!confirm(`¿${action} categoría "${row.name}"?`)) return;
@@ -2598,11 +2599,11 @@ window.toggleSingleTaxCategoryAssignment = async function(id) {
     }
 };
 window.actionToggleTaxCategories = async function() {
-    if (appStore.isGlobalMicaMode() ? !appStore.canAssignCatalog() : appStore.currentUserRole !== 'ADMIN') return;
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('category')) return;
     UIManager.renderSettings(); // Reconcile selection against the current visible rows.
     const ids = taxCategoriesGrid.getSelectedIds();
     if (ids.length === 0) return;
-    const globalMode = appStore.isGlobalMicaMode();
+    const globalMode = appStore.isCatalogPlatformContext();
     const action = globalMode ? 'Asignar' : 'Activar';
     if (!confirm(`¿${action} ${ids.length} elemento(s)?`)) return;
     try {
@@ -2619,11 +2620,11 @@ window.actionToggleTaxCategories = async function() {
     }
 };
 window.actionDeleteTaxCategories = async function() {
-    if (appStore.isGlobalMicaMode() ? !appStore.canAssignCatalog() : appStore.currentUserRole !== 'ADMIN') return;
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('category')) return;
     UIManager.renderSettings(); // Reconcile selection against the current visible rows.
     const ids = taxCategoriesGrid.getSelectedIds();
     if (ids.length === 0) return;
-    const globalMode = appStore.isGlobalMicaMode();
+    const globalMode = appStore.isCatalogPlatformContext();
     const action = globalMode ? 'Desasignar' : 'Desactivar';
     if (!confirm(`¿${action} ${ids.length} elemento(s)?`)) return;
     try {
@@ -2644,7 +2645,7 @@ window.toggleMasterEconomicActivities = function(checked) {
     const allActs = appStore.displayedEconomicActivities || appStore.economicActivities || [];
     const econSearch = (economicActivitiesGrid.searchQuery || '').toLowerCase();
     const econStatus = economicActivitiesGrid.getFilterStatus();
-    const isGlobalMode = appStore.isGlobalMicaMode();
+    const isGlobalMode = appStore.isCatalogPlatformContext();
 
     const filtered = allActs.filter(a => {
         const matchesSearch = !econSearch || (a.arca_code || '').toLowerCase().includes(econSearch) || (a.name || '').toLowerCase().includes(econSearch);
@@ -2679,11 +2680,11 @@ window.actionCloneEconomicActivity = function() {
 };
 
 window.toggleSingleEconomicActivityAssignment = async function(id) {
-    if (appStore.isGlobalMicaMode() ? !appStore.canAssignCatalog() : appStore.currentUserRole !== 'ADMIN') return;
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('activity')) return;
     UIManager.renderSettings();
     const row = appStore.displayedEconomicActivities.find(r => r.id === id);
     if (!row) return;
-    const globalMode = appStore.isGlobalMicaMode();
+    const globalMode = appStore.isCatalogPlatformContext();
     const enabled = globalMode ? row.isAssignedToOrg : row.is_active;
     const action = globalMode ? (enabled ? 'Desasignar' : 'Asignar') : (enabled ? 'Desactivar' : 'Activar');
     if (!confirm(`¿${action} actividad "${row.name}"?`)) return;
@@ -2701,11 +2702,11 @@ window.toggleSingleEconomicActivityAssignment = async function(id) {
     }
 };
 window.actionAssignEconomicActivities = async function() {
-    if (appStore.isGlobalMicaMode() ? !appStore.canAssignCatalog() : appStore.currentUserRole !== 'ADMIN') return;
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('activity')) return;
     UIManager.renderSettings(); // Reconcile selection against the current visible rows.
     const ids = economicActivitiesGrid.getSelectedIds();
     if (ids.length === 0) return;
-    const globalMode = appStore.isGlobalMicaMode();
+    const globalMode = appStore.isCatalogPlatformContext();
     const action = globalMode ? 'Asignar' : 'Activar';
     if (!confirm(`¿${action} ${ids.length} elemento(s)?`)) return;
     try {
@@ -2722,11 +2723,11 @@ window.actionAssignEconomicActivities = async function() {
     }
 };
 window.actionUnassignEconomicActivities = async function() {
-    if (appStore.isGlobalMicaMode() ? !appStore.canAssignCatalog() : appStore.currentUserRole !== 'ADMIN') return;
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('activity')) return;
     UIManager.renderSettings(); // Reconcile selection against the current visible rows.
     const ids = economicActivitiesGrid.getSelectedIds();
     if (ids.length === 0) return;
-    const globalMode = appStore.isGlobalMicaMode();
+    const globalMode = appStore.isCatalogPlatformContext();
     const action = globalMode ? 'Desasignar' : 'Desactivar';
     if (!confirm(`¿${action} ${ids.length} elemento(s)?`)) return;
     try {
@@ -3092,7 +3093,7 @@ window.submitTaxCategoryForm = async () => {
     }
 
     const activeOrgId = appStore.activeOrganizationId;
-    if (!activeOrgId && !appStore.isGlobalMicaMode()) {
+    if (!activeOrgId && !appStore.isCatalogPlatformContext()) {
         if (feedback) {
             feedback.innerText = "No hay una organización activa seleccionada.";
             feedback.className = "auth-status-banner auth-error";
