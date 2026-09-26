@@ -28,6 +28,18 @@ export class OperationalGrid {
         this.visibleColumns = this.loadColumnPreferences();
     }
 
+    resetTenantState() {
+        this.searchQuery = '';
+        this.dateMode = 'month';
+        this.periodFilter = this.startDate = this.endDate = '';
+        this.primaryFilter = this.filterStatus = 'all';
+        this.sortColumn = this.sortDirection = null;
+        this.sortDataType = 'text';
+        this.selectedRowIds.clear();
+        this.displayLimit = 10;
+        this.displayLimitCustom = false;
+    }
+
     // --- Persistencia de Columnas ---
     loadColumnPreferences() {
         try {

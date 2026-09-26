@@ -1,3 +1,4 @@
+import { renderOperationalHeader } from '../../src/js/components/operationalOrgSelector.js';
 import { jest } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { OperationalGrid } from '../../src/js/core/operationalGrid.js';
@@ -65,6 +66,7 @@ test('loads server capabilities without identity arguments and never bypasses or
 });
 
 test.each(['error', 'malformed'])('%s loading capabilities fails closed and logs the failure', async mode => {
+    store.strictLoads = false; // The interactive loader logs; the atomic hydration draft propagates errors.
     store.currentUserRole = 'SUPERADMIN';
     grantPlatform();
     store.activeOrganizationId = null;
@@ -143,9 +145,11 @@ test('permissions are scoped and independent of compatibility role and template'
 });
 
 test('rejected server context switch preserves local context, permissions and data', async () => {
+    store.permissions.platform = { loaded: true, codes: ['ACCESS_ANY_ORG'] };
     const before = store.permissions;
     store.taxCategories = [{ id: 'preserve' }];
-    rpc.mockResolvedValue({ error: { message: 'context denied' } });
+    rpc.mockImplementation(async name => name === 'get_my_operational_context'
+        ? { data: { organization_id: oeste, organization_name: 'Oeste' } } : { error: { message: 'context denied' } });
     await expect(store.switchOrganizationContext('other')).rejects.toThrow('context denied');
     expect(store.activeOrganizationId).toBe(oeste);
     expect(store.permissions).toBe(before);
@@ -153,15 +157,19 @@ test('rejected server context switch preserves local context, permissions and da
 });
 
 test('successful context switch reloads permissions after server confirmation', async () => {
+    store.permissions.platform = { loaded: true, codes: ['ACCESS_ANY_ORG'] };
     const events = [];
     rpc.mockImplementation(async name => {
         events.push([name, store.activeOrganizationId]);
+        if (name === 'get_my_operational_context') return { data: { organization_id: 'other', organization_name: 'Other' } };
+        if (name === 'get_operational_snapshot') return { data: { organization_id: 'other', categories: [], activities: [], rates: [] } };
+        if (name === 'get_operational_records_page' || name === 'get_operational_financials_page') return { data: [] };
         return { data: name === 'get_my_effective_capabilities' ? [] : null, error: null };
     });
     query([]);
     await store.switchOrganizationContext('other');
     expect(events[0]).toEqual(['switch_superadmin_org_context', oeste]);
-    expect(events[1]).toEqual(['get_my_effective_capabilities', 'other']);
+    expect(events).toContainEqual(['get_my_effective_capabilities', 'other']);
     expect(store.permissions.organization.orgId).toBe('other');
     expect(store.canActivateCatalog('activity')).toBe(false);
 });
@@ -175,6 +183,7 @@ test('store has exactly one role setter and role display predicate', () => {
 beforeEach(() => {
     jest.resetAllMocks();
     store = new AppStore();
+    store.strictLoads = true; // Unit-test legacy catalog mappings independently of session bootstrap.
     store.permissions.organization = { loaded: true, orgId: oeste, codes: ['CATALOG_ACTIVITY_MANAGE', 'CATALOG_CATEGORY_MANAGE'] };
     store.currentUserRole = 'ADMIN';
     store.activeOrganizationId = oeste;
@@ -190,7 +199,7 @@ test('ADMIN resolves DEMO OESTE through an explicit RLS-filtered SELECT and upda
     const elements = { 'user-header-info': {}, 'current-entity-label': {} };
     const window = { currentSessionUserIdentity: 'Usuario', currentUserRole: 'ADMIN' };
     const code = ui.slice(ui.indexOf('window.updateUserHeaderDisplay ='), ui.indexOf('window.handleOrgContextChange ='));
-    new Function('window', 'document', 'appStore', code)(window, { getElementById: id => elements[id] }, store);
+    new Function('window', 'document', 'appStore', 'renderOperationalHeader', code)(window, { getElementById: id => elements[id] }, store, renderOperationalHeader);
     window.updateUserHeaderDisplay();
     expect(elements['current-entity-label'].innerText).toBe('Organización: DEMO OESTE');
     expect(elements['user-header-info'].innerText).not.toContain(oeste);
@@ -221,7 +230,7 @@ test.each(['ADMIN', 'SUPERADMIN'])('%s sees global controls only in MICA context
     }
     store.activeOrganizationId = oeste;
     UI.renderSettings();
-    expect(elements['btn-import-arca-catalog'].hidden).toBe(role !== 'SUPERADMIN');
+    expect(elements['btn-import-arca-catalog'].hidden).toBe(true);
 });
 
 test('ADMIN cannot invoke global handlers directly, even without DOM controls', async () => {
@@ -378,6 +387,7 @@ test.each([
 ])('%s global state comes from catalog RPC without transversal assignment SELECT', async (kind, load, rows, table) => {
     store.currentUserRole = 'USER';
     grantPlatform(false, true);
+    store.activeOrganizationId = null;
     store.organizations = []; // Operational RLS may legitimately expose no organizations.
     query([{ id: 'assigned', name: 'One' }, { id: 'withdrawn', name: 'Two' }]);
     const range = jest.fn()
@@ -410,6 +420,7 @@ test('catalog state service preserves all response pages and propagates server d
 
 test('catalog management without assignment capability never fetches assignment metadata', async () => {
     grantPlatform(true, false);
+    store.activeOrganizationId = null;
     query([{ id: 'cat', name: 'Global' }]);
     await store.loadTaxCategories();
     expect(store.taxCategories).toHaveLength(1);

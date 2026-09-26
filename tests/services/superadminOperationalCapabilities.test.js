@@ -1,3 +1,4 @@
+import { operationalContextFixture } from '../helpers/operationalContextFixture.js';
 import { jest } from '@jest/globals';
 import fs from 'fs';
 import path from 'path';
@@ -35,6 +36,7 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
         jest.clearAllMocks();
         mockRpc.mockResolvedValue({ data: null, error: null });
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
         appStore.activeOrganizationId = null;
     });
 
@@ -87,6 +89,7 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
 
     test('SUPERADMIN in GLOBAL MICA mode is blocked from tenant write/import RPCs', async () => {
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
         await appStore.switchOrganizationContext(null);
         expect(appStore.isGlobalMicaMode()).toBe(true);
 
@@ -103,6 +106,7 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
 
     test('SUPERADMIN with active organization context (DEMO NORTE) can invoke tenant import', async () => {
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
         await appStore.switchOrganizationContext('demo-norte-id');
         expect(appStore.isGlobalMicaMode()).toBe(false);
         expect(appStore.activeOrganizationId).toBe('demo-norte-id');
@@ -122,6 +126,7 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
 
     test('SUPERADMIN can administer global tax categories in Global Mode', async () => {
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
         await appStore.switchOrganizationContext(null);
 
         mockRpc
@@ -135,6 +140,7 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
 
     test('SUPERADMIN can refresh ARCA activity catalog via upsert_arca_activity_catalog', async () => {
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
 
         mockRpc.mockResolvedValueOnce({
             data: null,
@@ -165,6 +171,7 @@ describe('M018 SUPERADMIN Operational Capability Inheritance & Security Isolatio
 
     test('Context switch across DEMO NORTE -> DEMO SUR -> GLOBAL updates activeOrganizationId without stale state', async () => {
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
 
         await appStore.switchOrganizationContext('demo-norte-id');
         expect(appStore.activeOrganizationId).toBe('demo-norte-id');

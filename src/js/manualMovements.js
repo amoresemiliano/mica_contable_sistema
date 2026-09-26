@@ -4,6 +4,8 @@ import { appStore } from './store.js';
 export class ManualMovements {
     // Registra una compra manual con el formato estricto de REGINFO/LID AFIP
     static saveReginfoPurchase(fields) {
+        // Phase 1: no tenant-safe persistent reader/writer exists for manual movements.
+        return { success: false, error: 'La carga manual no está habilitada en esta fase.' };
         // Validaciones críticas
         if (!fields.fecha || fields.fecha.length !== 8) {
             return { success: false, error: "La fecha debe tener 8 caracteres (AAAAMMDD)." };
@@ -83,6 +85,8 @@ export class ManualMovements {
 
     // Registra movimientos internos de caja chica
     static saveInternalMovement(fields) {
+        // Phase 1: never create unscoped local records that cannot be rehydrated.
+        return { success: false, error: 'La carga manual no está habilitada en esta fase.' };
         if (!fields.tipo || !fields.fecha || !fields.imputacion || !fields.importe) {
             return { success: false, error: "Los campos Tipo, Fecha, Imputación e Importe son obligatorios." };
         }

@@ -24,16 +24,18 @@ export class AppStore {
         this.activeOrganizationId = savedOrgId; // null para GLOBAL MICA MODE, o UUID de DEMO NORTE / SUR / OESTE
         
         this.organizations = [];
+        this.operationalOrgTargets = [];
+        this.contextState = 'SIGNED_OUT';
+        this.contextError = '';
+        this.contextGeneration = 0;
+        this.sessionUserId = null;
+        this.sessionEmail = '';
+        this.effectiveProfileName = '';
+        this.confirmedOrganizationName = '';
+        this.tenantResetListeners = [];
         this.resetCatalogCapabilities();
 
-        const getLocalJSON = (key) => {
-            if (typeof localStorage !== 'undefined' && localStorage.getItem) {
-                try { return JSON.parse(localStorage.getItem(key)); } catch(e) { return null; }
-            }
-            return null;
-        };
-
-        this.bankRules = getLocalJSON('mica_bank_rules') || {
+        this.bankRules = {
             debit: [
                 { pattern: 'MANTE', category: 'Gasto Bancario' },
                 { pattern: 'COMIS', category: 'Gasto Bancario' },
@@ -52,12 +54,32 @@ export class AppStore {
             ]
         };
 
-        this.bankTemplates = getLocalJSON('mica_bank_templates') || {};
+        this.bankTemplates = {};
+        this.defaultBankRules = { debit: this.bankRules.debit.slice(), credit: this.bankRules.credit.slice() };
         this.currentFilter = 'all';
         this.currentBankFilter = 'all';
         this.currentJurisdiction = 'all';
         this.searchQuery = '';
         this.listeners = [];
+        this.pendingOperations = 0;
+        // Keep the whole operation (including follow-up reloads) inside the switch barrier.
+        for (const name of ['confirmItem', 'bulkSoftDeleteSelected', 'promptBulkClassification',
+            'bulkSoftDeleteSelectedPercepciones', 'bulkSoftDeleteBankMovements', 'promptBankBulkClassification',
+            'setTaxCategoriesActive', 'setEconomicActivitiesActive', 'createTaxCategory', 'updateTaxCategory',
+            'assignTaxCategoryToOrg', 'bulkAssignTaxCategories', 'unassignTaxCategoryFromOrg', 'bulkUnassignTaxCategories',
+            'assignEconomicActivityToOrg', 'unassignEconomicActivityFromOrg', 'bulkAssignEconomicActivitiesToOrg',
+            'bulkUnassignEconomicActivitiesFromOrg', 'upsertArcaCatalog', 'createIibbRate', 'updateIibbRate',
+            'bulkToggleIibbRates', 'bulkDeleteIibbRates']) {
+            const operation = this[name];
+            this[name] = async (...args) => {
+                if (this.sessionUserId && !['TENANT_READY', 'PLATFORM_READY'].includes(this.contextState)) {
+                    throw new Error('Esperá a que el contexto esté listo.');
+                }
+                ++this.pendingOperations;
+                try { return await operation.apply(this, args); }
+                finally { --this.pendingOperations; }
+            };
+        }
     }
 
     isSuperAdmin() {
@@ -98,6 +120,7 @@ export class AppStore {
                 if (this.permissions === current) this.catalogAssignmentTargets = targets;
             }
         } catch (error) {
+            if (this.strictLoads) throw error;
             console.error('Could not load catalog capabilities:', error);
         }
         this.notify();
@@ -110,13 +133,14 @@ export class AppStore {
             { scope: 'ORGANIZATION', orgId: this.activeOrganizationId });
     }
     isCatalogPlatformContext() {
-        return this.hasCapability('GLOBAL_CATALOG_VIEW') || this.canManageGlobalCatalog() || this.canAssignCatalog();
+        return !this.activeOrganizationId && (this.hasCapability('GLOBAL_CATALOG_VIEW') || this.canManageGlobalCatalog() || this.canAssignCatalog());
     }
     // Compatibility display only. Catalog authorization uses hasCapability().
-    isGlobalMicaMode() { return this.isSuperAdmin() && !this.activeOrganizationId; }
+    isGlobalMicaMode() { return !this.activeOrganizationId; }
 
     getActiveOrganizationName() {
-        if (this.isGlobalMicaMode()) return 'MICA (Modo Global)';
+        if (this.isGlobalMicaMode()) return 'MICA / Plataforma';
+        if (this.confirmedOrganizationName) return this.confirmedOrganizationName;
         const org = this.organizations.find(o => o.id === this.activeOrganizationId);
         return org ? org.name : (this.activeOrganizationId ? 'Nombre de organización no disponible' : 'Organización');
     }
@@ -131,32 +155,190 @@ export class AppStore {
     }
 
     async switchOrganizationContext(orgId) {
+        if (!this.hasCapability('ACCESS_ANY_ORG')) throw new Error('ACCESS_ANY_ORG requerido.');
+        if (this.pendingOperations) throw new Error('Esperá a que termine la operación en curso.');
+        if (['SWITCHING', 'LOADING'].includes(this.contextState)) throw new Error('Hay un cambio de organización en curso.');
         const targetId = orgId || null;
-        await persistenceService.switchSuperadminOrgContext(targetId);
-        this.activeOrganizationId = targetId;
-        this.resetCatalogCapabilities();
-        this.taxCategories = [];
-        this.economicActivities = [];
-        this.displayedEconomicActivities = [];
-        this.globalEconomicActivities = [];
-        this.iibbRates = [];
-        if (typeof sessionStorage !== 'undefined') {
-            if (targetId) sessionStorage.setItem('mica_active_org_id', targetId);
-            else sessionStorage.removeItem('mica_active_org_id');
+        const previousState = this.contextState;
+        const generation = ++this.contextGeneration;
+        this.contextState = 'SWITCHING';
+        this.contextError = '';
+        this.notify();
+        try {
+            await persistenceService.switchSuperadminOrgContext(targetId);
+        } catch (error) {
+            if (generation !== this.contextGeneration) return;
+            // A transport failure can occur after commit. Reconcile before displaying old data.
+            try {
+                const context = await persistenceService.getOperationalContext();
+                if (generation !== this.contextGeneration) return;
+                if (context.organization_id !== this.activeOrganizationId) {
+                    this.clearTenantState();
+                    await this.hydrateConfirmedContext(context, generation);
+                    return;
+                }
+                this.contextState = previousState;
+            } catch {
+                if (generation !== this.contextGeneration) return;
+                this.clearTenantState();
+                this.contextState = 'ERROR';
+            }
+            this.contextError = error.message;
+            this.notify();
+            throw error;
         }
-        await this.loadMyCatalogCapabilities();
-        await this.loadTaxCategories();
-        await this.loadEconomicActivities();
-        await this.loadIibbRates();
+        if (generation !== this.contextGeneration) return;
+        this.clearTenantState();
+        this.contextState = 'LOADING';
+        try {
+            const context = await persistenceService.getOperationalContext();
+            if (generation !== this.contextGeneration) return;
+            if (context.organization_id !== targetId) throw new Error('El contexto cambió en otra sesión. Volvé a cargarlo.');
+            await this.hydrateConfirmedContext(context, generation);
+        } catch (error) {
+            if (generation !== this.contextGeneration) return;
+            this.clearTenantState();
+            this.contextState = 'ERROR';
+            this.contextError = error.message;
+            this.notify();
+            throw error;
+        }
+    }
+
+    clearTenantState() {
+        for (const key of ['items', 'perceptions', 'bankTransactions', 'salariesList', 'manualMovements',
+            'ocrHistory', 'importIssues', 'taxCategories', 'economicActivities', 'displayedEconomicActivities',
+            'globalEconomicActivities', 'iibbRates']) this[key] = [];
+        this.salaries = null;
+        this.currentFilter = this.currentBankFilter = this.currentJurisdiction = 'all';
+        this.searchQuery = '';
+        this.bankTemplates = {};
+        this.bankRules = { debit: [], credit: [] };
+        categorizer.setContext(null, null);
+        for (const reset of this.tenantResetListeners) reset();
+    }
+
+    endSession() {
+        ++this.contextGeneration;
+        this.clearTenantState();
+        this.resetCatalogCapabilities();
+        this.activeOrganizationId = null;
+        this.sessionUserId = null;
+        this.sessionEmail = this.effectiveProfileName = this.confirmedOrganizationName = '';
+        this.organizations = this.operationalOrgTargets = [];
+        this.contextState = 'SIGNED_OUT';
+        this.contextError = '';
+        if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('mica_active_org_id');
+        this.notify();
+    }
+
+    async initializeSession(user) {
+        this.endSession();
+        this.sessionUserId = user.id;
+        this.sessionEmail = user.email || 'Email no disponible';
+        return this.reloadOperationalContext();
+    }
+
+    async reloadOperationalContext() {
+        const generation = ++this.contextGeneration;
+        this.contextState = 'LOADING';
+        this.contextError = '';
+        this.clearTenantState();
+        this.notify();
+        try {
+            const context = await persistenceService.getOperationalContext();
+            if (generation !== this.contextGeneration) return;
+            await this.hydrateConfirmedContext(context, generation);
+        } catch (error) {
+            if (generation !== this.contextGeneration) return;
+            this.contextState = 'ERROR';
+            this.contextError = error.message;
+            this.notify();
+            throw error;
+        }
+    }
+
+    async hydrateConfirmedContext(context, generation) {
+        if (generation !== this.contextGeneration) return;
+        this.activeOrganizationId = context.organization_id;
+        this.confirmedOrganizationName = context.organization_name || '';
+        this.effectiveProfileName = context.profile_name || 'Permisos personalizados';
+        this.contextState = 'LOADING';
+        this.resetCatalogCapabilities();
+        this.notify();
+        const draft = new AppStore();
+        draft.strictLoads = true;
+        draft.activeOrganizationId = context.organization_id;
+        await draft.loadMyCatalogCapabilities();
+        if (generation !== this.contextGeneration) return;
+        // Retain only freshly verified platform authority so a failed tenant load can return to Platform.
+        // Organization permissions and datasets remain unpublished until hydration completes.
+        this.permissions.platform = draft.permissions.platform;
+        const targets = draft.hasCapability('ACCESS_ANY_ORG') ? await persistenceService.listOperationalOrgTargets() : [];
+        if (generation !== this.contextGeneration) return;
+        this.operationalOrgTargets = targets;
+        if (context.organization_id) {
+            Object.assign(draft, await persistenceService.loadOperationalSnapshot(context.organization_id));
+            draft.salaries = draft.salariesList[0] || null;
+        } else {
+            await draft.loadTaxCategories();
+            await draft.loadEconomicActivities();
+        }
+        // Also catches a context change made elsewhere while this snapshot was loading.
+        const latest = await persistenceService.getOperationalContext();
+        if (generation !== this.contextGeneration) return;
+        if (latest.organization_id !== context.organization_id) throw new Error('El contexto del servidor cambió. Reintentá la carga.');
+        for (const key of ['items', 'perceptions', 'bankTransactions', 'salaries', 'salariesList',
+            'taxCategories', 'economicActivities', 'displayedEconomicActivities', 'globalEconomicActivities',
+            'iibbRates', 'permissions', 'catalogCapabilities', 'catalogAssignmentTargets']) this[key] = draft[key];
+        this.operationalOrgTargets = targets;
+        this.organizations = targets.map(o => ({ id: o.organization_id, name: o.organization_name }));
+        if (context.organization_id && !this.organizations.some(o => o.id === context.organization_id)) {
+            this.organizations.push({ id: context.organization_id, name: context.organization_name });
+        }
+        this.loadTenantPreferences();
+        this.contextState = context.organization_id ? 'TENANT_READY' : 'PLATFORM_READY';
+        this.contextError = '';
+        this.notify();
+    }
+
+    tenantStorageKey(resource) { return `mica:v2:${this.sessionUserId}:${this.activeOrganizationId}:${resource}`; }
+
+    loadTenantPreferences() {
+        const read = (key, fallback) => {
+            try { return JSON.parse(localStorage.getItem(this.tenantStorageKey(key))) || fallback; }
+            catch { return fallback; }
+        };
+        this.bankRules = read('bank_rules', structuredClone(this.defaultBankRules));
+        this.bankTemplates = read('bank_templates', {});
+        categorizer.setContext(this.sessionUserId, this.activeOrganizationId);
+    }
+
+    canImportOperational(type) {
+        if (this.contextState !== 'TENANT_READY' || this.hasCapability('ACCESS_ANY_ORG')) return false;
+        const options = { scope: 'ORGANIZATION', orgId: this.activeOrganizationId };
+        const extra = { percepcion: 'PERCEPTION_IMPORT', banco: 'BANK_IMPORT', sueldo: 'PAYROLL_IMPORT' }[type];
+        return ['recibido', 'emitido', 'percepcion', 'banco', 'sueldo'].includes(type) &&
+            this.hasCapability('IMPORT_CREATE', options) && (!extra || this.hasCapability(extra, options));
+    }
+
+    async refreshOperationalCatalogs() {
+        const generation = this.contextGeneration;
+        const orgId = this.activeOrganizationId;
+        const snapshot = await persistenceService.loadOperationalSnapshot(orgId, { catalogOnly: true });
+        if (generation !== this.contextGeneration || orgId !== this.activeOrganizationId) return;
+        for (const key of ['taxCategories', 'economicActivities', 'displayedEconomicActivities', 'iibbRates']) this[key] = snapshot[key];
         this.notify();
     }
 
     async loadOrganizations() {
         this.organizations = [];
-        if (!this.isSuperAdmin() && !this.activeOrganizationId) return;
-        this.organizations = await persistenceService.loadOrganizations(
-            this.isSuperAdmin() ? null : this.activeOrganizationId
-        );
+        if (this.hasCapability('ACCESS_ANY_ORG')) {
+            this.operationalOrgTargets = await persistenceService.listOperationalOrgTargets();
+            this.organizations = this.operationalOrgTargets.map(o => ({ id: o.organization_id, name: o.organization_name }));
+        } else if (this.activeOrganizationId) {
+            this.organizations = await persistenceService.loadOrganizations(this.activeOrganizationId);
+        }
     }
 
     requireGlobalCatalogContext() {
@@ -296,14 +478,14 @@ export class AppStore {
     addBankRule(type, pattern, category) {
         if (!this.bankRules[type]) this.bankRules[type] = [];
         this.bankRules[type].push({ pattern: pattern.toUpperCase(), category });
-        localStorage.setItem('mica_bank_rules', JSON.stringify(this.bankRules));
+        localStorage.setItem(this.tenantStorageKey('bank_rules'), JSON.stringify(this.bankRules));
         this.notify();
     }
 
     // Registrar Plantilla de Mapeo de Banco
     saveBankTemplate(bankName, mapping) {
         this.bankTemplates[bankName] = mapping;
-        localStorage.setItem('mica_bank_templates', JSON.stringify(this.bankTemplates));
+        localStorage.setItem(this.tenantStorageKey('bank_templates'), JSON.stringify(this.bankTemplates));
     }
 
     // Cargar Sueldos consolidados de Acompy
@@ -362,8 +544,10 @@ export class AppStore {
     }
 
     async loadGlobalEconomicActivities() {
+        const generation = this.contextGeneration;
         try {
             const globalActs = this.isCatalogPlatformContext() ? await persistenceService.loadGlobalEconomicActivities() : [];
+            if (generation !== this.contextGeneration) return;
             this.globalEconomicActivities = globalActs || [];
             this.notify();
         } catch (e) {
@@ -487,11 +671,13 @@ export class AppStore {
     }
 
     async confirmItem(id) {
+        const generation = this.contextGeneration;
         const item = this.items.find(i => i.id === id);
         if (item && item.category_id) {
             item.confirmada = true;
             try {
                 await persistenceService.bulkUpdateRecordClassification([item.id], item.cuit, item.category_id, item.activity_id);
+                if (generation !== this.contextGeneration) return;
             } catch (e) {
                 console.error("Failed to persist classification", e);
                 item.confirmada = false;
@@ -537,6 +723,7 @@ export class AppStore {
     }
 
     async bulkSoftDeleteSelected() {
+        const generation = this.contextGeneration;
         const checkboxes = document.querySelectorAll('.comprobante-checkbox:checked');
         const ids = Array.from(checkboxes).map(cb => cb.value);
         if (ids.length === 0) return;
@@ -544,6 +731,7 @@ export class AppStore {
         if (confirm(`¿Estás seguro de enviar ${ids.length} registro(s) a la papelera?`)) {
             try {
                 await persistenceService.bulkSoftDeleteRecords(ids);
+                if (generation !== this.contextGeneration) return;
                 this.items = this.items.filter(i => !ids.includes(i.id));
                 this.updateBulkSelectionBar();
                 this.notify();
@@ -554,6 +742,7 @@ export class AppStore {
     }
 
     async promptBulkClassification() {
+        const generation = this.contextGeneration;
         const checkboxes = document.querySelectorAll('.comprobante-checkbox:checked');
         const ids = Array.from(checkboxes).map(cb => cb.value);
         if (ids.length === 0) return;
@@ -578,6 +767,7 @@ export class AppStore {
         if (confirm(`¿Clasificar los ${ids.length} registros seleccionados del proveedor CUIT ${cuit} con la categoría actual?`)) {
             try {
                 await persistenceService.bulkUpdateRecordClassification(ids, cuit, firstItem.category_id, firstItem.activity_id);
+                if (generation !== this.contextGeneration) return;
                 ids.forEach(id => {
                     const it = this.items.find(i => i.id === id);
                     if (it) {
@@ -602,36 +792,15 @@ export class AppStore {
 
     // Import Issues
     async loadImportIssues() {
-        // Fetch from eco_import_issues (since we didn't add the RPC yet, let's just make it a placeholder or simple query)
-        try {
-            const { data, error } = await persistenceService.supabase
-                .from('eco_import_issues')
-                .select('*')
-                .is('resolved_at', null);
-            if (error) throw error;
-            this.importIssues = data || [];
-            this.notify();
-        } catch (e) {
-            console.error("Failed to load import issues", e);
-        }
+        // Phase 1: do not reintroduce an unscoped direct-table reader after a safe snapshot.
+        this.importIssues = [];
+        this.notify();
     }
 
     async resolveAllImportIssues() {
-        if (!confirm("¿Marcar todos los errores de importación como resueltos?")) return;
-        try {
-            const { error } = await persistenceService.supabase
-                .from('eco_import_issues')
-                .update({ resolved_at: new Date().toISOString(), resolved_by: 'system' })
-                .is('resolved_at', null);
-            if (error) throw error;
-            this.importIssues = [];
-            this.notify();
-        } catch (e) {
-            alert("Error: " + e.message);
-        }
+        throw new Error('La revisión de incidencias requiere un contrato por organización.');
     }
 
-    // Bank Bulk Actions
     updateBankBulkSelectionBar() {
         const checkboxes = document.querySelectorAll('.banco-checkbox:checked');
         const count = checkboxes.length;
@@ -682,6 +851,7 @@ export class AppStore {
     }
 
     async bulkSoftDeleteSelectedPercepciones() {
+        const generation = this.contextGeneration;
         const checkboxes = document.querySelectorAll('.percepcion-checkbox:checked');
         const ids = Array.from(checkboxes).map(cb => cb.value);
         if (ids.length === 0) return;
@@ -689,6 +859,7 @@ export class AppStore {
         if (confirm(`¿Estás seguro de enviar ${ids.length} percepción(es) a la papelera?`)) {
             try {
                 await persistenceService.bulkSoftDeleteRecords(ids);
+                if (generation !== this.contextGeneration) return;
                 this.perceptions = (this.perceptions || []).filter(i => !ids.includes(i.id));
                 this.updatePercepcionesBulkSelectionBar();
                 this.notify();
@@ -699,6 +870,7 @@ export class AppStore {
     }
 
     async bulkSoftDeleteBankMovements() {
+        const generation = this.contextGeneration;
         const checkboxes = document.querySelectorAll('.banco-checkbox:checked');
         const ids = Array.from(checkboxes).map(cb => cb.value);
         if (ids.length === 0) return;
@@ -706,6 +878,7 @@ export class AppStore {
         if (confirm(`¿Enviar ${ids.length} extractos bancarios a la papelera?`)) {
             try {
                 await persistenceService.bulkSoftDeleteFinancialMovements(ids);
+                if (generation !== this.contextGeneration) return;
                 this.bankTransactions = this.bankTransactions.filter(i => !ids.includes(i.id));
                 this.updateBankBulkSelectionBar();
                 this.notify();
@@ -716,6 +889,7 @@ export class AppStore {
     }
 
     async promptBankBulkClassification() {
+        const generation = this.contextGeneration;
         const checkboxes = document.querySelectorAll('.banco-checkbox:checked');
         const ids = Array.from(checkboxes).map(cb => cb.value);
         if (ids.length === 0) return;
@@ -737,6 +911,7 @@ export class AppStore {
                         activity_id: firstItem.activity_id 
                     })
                     .in('id', ids);
+                    if (generation !== this.contextGeneration) return;
                 
                 if (error) throw error;
                 
@@ -811,6 +986,9 @@ export class AppStore {
     // --- MÓDULO CATEGORIZACIÓN & ROLES ---
     // --- MÓDULO CATEGORIZACIÓN & ROLES ---
     async loadTaxCategories() {
+        if (this.activeOrganizationId && this.contextState === 'TENANT_READY') return this.refreshOperationalCatalogs();
+        if (!this.strictLoads && !['PLATFORM_READY', 'TENANT_READY'].includes(this.contextState)) return;
+        const generation = this.contextGeneration;
         this.taxCategories = [];
         try {
             if (!persistenceService.supabase?.from) return;
@@ -821,10 +999,12 @@ export class AppStore {
                     .from('eco_tax_categories')
                     .select('*')
                     .order('name', { ascending: true });
+            if (generation !== this.contextGeneration) return;
                 if (gErr) throw gErr;
 
                 const assignmentRows = this.canAssignCatalog()
                     ? await persistenceService.listCatalogAssignmentState('category') : [];
+            if (generation !== this.contextGeneration) return;
                 const orgCats = assignmentRows.map(row => ({ ...row, category_id: row.item_id }));
 
                 const categoryOrgMap = new Map();
@@ -860,6 +1040,7 @@ export class AppStore {
                     .select('id, organization_id, category_id, is_assigned, is_active, custom_name, category:eco_tax_categories(id, name, description, category_type)')
                     .eq('organization_id', this.activeOrganizationId)
                     .eq('is_assigned', true);
+            if (generation !== this.contextGeneration) return;
                 
                 if (aErr) throw aErr;
 
@@ -885,11 +1066,15 @@ export class AppStore {
             }
             this.notify();
         } catch (e) {
+            if (this.strictLoads) throw e;
             console.error("Failed to load tax categories:", e);
         }
     }
 
     async loadEconomicActivities() {
+        if (this.activeOrganizationId && this.contextState === 'TENANT_READY') return this.refreshOperationalCatalogs();
+        if (!this.strictLoads && !['PLATFORM_READY', 'TENANT_READY'].includes(this.contextState)) return;
+        const generation = this.contextGeneration;
         this.economicActivities = [];
         this.displayedEconomicActivities = [];
         this.globalEconomicActivities = [];
@@ -897,12 +1082,14 @@ export class AppStore {
             if (!persistenceService.supabase?.from) return;
 
             const globalActs = this.isCatalogPlatformContext() ? await persistenceService.loadGlobalEconomicActivities() : [];
+            if (generation !== this.contextGeneration) return;
             this.globalEconomicActivities = globalActs || [];
 
             if (this.isCatalogPlatformContext()) {
                 // MODO GLOBAL MICA: Muestra las 958 actividades y sus asignaciones
                 const assignmentRows = this.canAssignCatalog()
                     ? await persistenceService.listCatalogAssignmentState('activity') : [];
+            if (generation !== this.contextGeneration) return;
                 const orgActs = assignmentRows.map(row => ({ ...row, activity_id: row.item_id }));
 
                 const activityOrgMap = new Map();
@@ -938,6 +1125,7 @@ export class AppStore {
                     .select('id, organization_id, activity_id, is_assigned, is_active, activity:eco_economic_activities(id, name, arca_code, description)')
                     .eq('organization_id', this.activeOrganizationId)
                     .eq('is_assigned', true);
+            if (generation !== this.contextGeneration) return;
                 if (aErr) throw aErr;
 
                 const assignedList = (orgAssigned || []).filter(row => row.activity && row.is_assigned === true).map(row => ({
@@ -965,11 +1153,15 @@ export class AppStore {
             }
             this.notify();
         } catch (e) {
+            if (this.strictLoads) throw e;
             console.error("Failed to load economic activities:", e);
         }
     }
 
     async loadIibbRates() {
+        if (this.activeOrganizationId && this.contextState === 'TENANT_READY') return this.refreshOperationalCatalogs();
+        if (!this.strictLoads && !['PLATFORM_READY', 'TENANT_READY'].includes(this.contextState)) return;
+        const generation = this.contextGeneration;
         try {
             if (this.isGlobalMicaMode()) {
                 this.iibbRates = [];
@@ -978,6 +1170,7 @@ export class AppStore {
             }
 
             const rates = await persistenceService.loadActiveIibbRates();
+            if (generation !== this.contextGeneration) return;
             const activitiesMap = new Map();
             (this.globalEconomicActivities || []).forEach(a => {
                 activitiesMap.set(a.id, a.name || a.arca_code || a.code);
@@ -993,6 +1186,7 @@ export class AppStore {
             }));
             this.notify();
         } catch (e) {
+            if (this.strictLoads) throw e;
             console.error("Failed to load IIBB rates:", e);
         }
     }

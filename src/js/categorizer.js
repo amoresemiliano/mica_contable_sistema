@@ -1,9 +1,14 @@
 // 1. MOTOR DE CATEGORIZACIÓN INTELIGENTE (SOLID: Single Responsibility)
 export class CategorizationEngine {
     constructor() {
-        this.storageKey = 'mica_category_history';
-        const raw = (typeof localStorage !== 'undefined' && localStorage.getItem) ? localStorage.getItem(this.storageKey) : null;
-        this.history = JSON.parse(raw) || {};
+        this.storageKey = null;
+        this.history = {};
+    }
+
+    setContext(userId, orgId) {
+        this.storageKey = userId && orgId ? `mica:v2:${userId}:${orgId}:category_history` : null;
+        try { this.history = this.storageKey ? JSON.parse(localStorage.getItem(this.storageKey)) || {} : {}; }
+        catch { this.history = {}; }
     }
 
     // Busca si ya hay un patrón registrado para este CUIT
@@ -16,7 +21,7 @@ export class CategorizationEngine {
 
     // Registra una nueva regla persistente
     saveMapping(cuit, category) {
-        if (!cuit || cuit === "S/D") return;
+        if (!this.storageKey || !cuit || cuit === "S/D") return;
         this.history[cuit] = category;
         localStorage.setItem(this.storageKey, JSON.stringify(this.history));
     }

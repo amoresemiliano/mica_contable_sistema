@@ -1,3 +1,5 @@
+import { persistenceService } from '../../src/js/core/services/persistenceService.js';
+import { operationalContextFixture } from '../helpers/operationalContextFixture.js';
 import { jest } from '@jest/globals';
 import { OperationalGrid } from '../../src/js/core/operationalGrid.js';
 
@@ -98,12 +100,13 @@ describe('Multitenant Organization Context & Categorization Isolation Matrix', (
     test('Single authenticated user context switching across DEMO NORTE, DEMO SUR, DEMO OESTE', async () => {
         const { appStore } = await import('../../src/js/store.js');
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
         expect(appStore.isSuperAdmin()).toBe(true);
 
         // Global MICA mode (no active org selected)
         await appStore.switchOrganizationContext(null);
         expect(appStore.isGlobalMicaMode()).toBe(true);
-        expect(appStore.getActiveOrganizationName()).toBe('MICA (Modo Global)');
+        expect(appStore.getActiveOrganizationName()).toBe('MICA / Plataforma');
 
         // Switch to DEMO NORTE
         await appStore.switchOrganizationContext(orgNorteId);
@@ -250,6 +253,7 @@ describe('M017 Auth & Multitenant Security Adversarial Verification', () => {
     test('SUPERADMIN can switch to DEMO NORTE/SUR/OESTE and return to GLOBAL MICA mode', async () => {
         const { appStore } = await import('../../src/js/store.js');
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
 
         // Switch to DEMO NORTE
         await appStore.switchOrganizationContext('demo-norte-id');
@@ -270,7 +274,7 @@ describe('M017 Auth & Multitenant Security Adversarial Verification', () => {
         await appStore.switchOrganizationContext(null);
         expect(appStore.activeOrganizationId).toBeNull();
         expect(appStore.isGlobalMicaMode()).toBe(true);
-        expect(appStore.getActiveOrganizationName()).toBe('MICA (Modo Global)');
+        expect(appStore.getActiveOrganizationName()).toBe('MICA / Plataforma');
     });
 
     test('ADMIN role cannot switch organization context (clears active org)', async () => {
@@ -278,7 +282,8 @@ describe('M017 Auth & Multitenant Security Adversarial Verification', () => {
         appStore.setUserRole('ADMIN');
         expect(appStore.isSuperAdmin()).toBe(false);
         expect(appStore.activeOrganizationId).toBeNull();
-        expect(appStore.isGlobalMicaMode()).toBe(false);
+        expect(appStore.isGlobalMicaMode()).toBe(true);
+        await expect(appStore.switchOrganizationContext('other')).rejects.toThrow('ACCESS_ANY_ORG');
     });
 
     test('USER role cannot switch organization context (clears active org)', async () => {
@@ -291,10 +296,11 @@ describe('M017 Auth & Multitenant Security Adversarial Verification', () => {
     test('GLOBAL MICA mode does not become DEMO NORTE', async () => {
         const { appStore } = await import('../../src/js/store.js');
         appStore.setUserRole('SUPERADMIN');
+        operationalContextFixture(appStore, persistenceService);
         await appStore.switchOrganizationContext(null);
 
         expect(appStore.getActiveOrganizationName()).not.toBe('DEMO NORTE');
-        expect(appStore.getActiveOrganizationName()).toBe('MICA (Modo Global)');
+        expect(appStore.getActiveOrganizationName()).toBe('MICA / Plataforma');
     });
 
     test('Preflight SQL check verifies auth_user_id and forbids firebase_uid', async () => {

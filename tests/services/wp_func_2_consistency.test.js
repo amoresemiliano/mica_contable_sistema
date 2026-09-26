@@ -37,7 +37,7 @@ describe('WP-FUNC-2 Operational Consistency Tests', () => {
 
         store.currentUserRole = 'SUPERADMIN';
         store.activeOrganizationId = null;
-        expect(store.getActiveOrganizationName()).toBe('MICA (Modo Global)');
+        expect(store.getActiveOrganizationName()).toBe('MICA / Plataforma');
     });
 
     test('2. bulkSoftDeleteRecords invokes canonical soft_delete_normalized_record RPC', async () => {

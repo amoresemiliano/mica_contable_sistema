@@ -1,3 +1,4 @@
+import { mountOperationalOrgSelectors, renderOperationalImportControls, renderOperationalHeader } from './components/operationalOrgSelector.js';
 import { supabase } from './core/services/supabaseClient.js';
 import { appStore } from './store.js';
 import { setupOCR, renderOcrHistory } from './ocr.js';
@@ -339,8 +340,8 @@ async function loginWithGoogle() {
 }
 
 async function logout() {
-  appStore.resetCatalogCapabilities();
-  appStore.notify();
+  ++authCheckGeneration;
+  appStore.endSession();
   const { error } = await supabase.auth.signOut();
   if (error) {
     alert('Error al cerrar sesión: ' + error.message);
@@ -355,131 +356,48 @@ const loginContainer = document.getElementById('login-container');
 const authStatusMsg = document.getElementById('auth-status-message');
 const loginBtn = document.getElementById('google-login-btn');
 
+let authCheckGeneration = 0;
 async function checkUserProfile(session) {
-  appStore.resetCatalogCapabilities();
-  let fallbackBtn = document.getElementById('fallback-logout-btn');
-  if (!fallbackBtn && authStatusMsg) {
-    fallbackBtn = document.createElement('button');
-    fallbackBtn.id = 'fallback-logout-btn';
-    fallbackBtn.className = 'btn-secondary';
-    fallbackBtn.innerText = 'Cerrar Sesión';
-    fallbackBtn.style.marginTop = '20px';
-    fallbackBtn.onclick = logout;
-    authStatusMsg.parentNode.appendChild(fallbackBtn);
-  }
-
-  const userInfoEl = document.getElementById('user-header-info');
-
+  const check = ++authCheckGeneration;
   if (!session) {
+    appStore.endSession();
     appContainer.classList.add('hidden');
     loginContainer.style.display = 'flex';
     authStatusMsg.style.display = 'none';
     loginBtn.style.display = 'flex';
-    if (fallbackBtn) fallbackBtn.style.display = 'none';
-    if (userInfoEl) userInfoEl.innerText = '';
     return;
   }
-
   loginBtn.style.display = 'none';
   authStatusMsg.style.display = 'block';
-  authStatusMsg.innerText = 'Verificando permisos...';
-  if (fallbackBtn) fallbackBtn.style.display = 'none';
-
-  const { data: profile, error } = await supabase
-    .from('eco_user_profiles')
-    .select('id, organization_id, role, is_active')
-    .eq('auth_user_id', session.user.id)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    appContainer.classList.add('hidden');
-    loginContainer.style.display = 'flex';
-    authStatusMsg.innerText = 'No se pudo verificar el acceso.';
-    if (fallbackBtn) fallbackBtn.style.display = 'block';
-    if (userInfoEl) userInfoEl.innerText = '';
-    return;
-  }
-
-  if (error?.code === 'PGRST116' || !profile) {
-    appContainer.classList.add('hidden');
-    loginContainer.style.display = 'flex';
-    authStatusMsg.innerText = 'Acceso pendiente de aprobación.';
-    if (fallbackBtn) fallbackBtn.style.display = 'block';
-    if (userInfoEl) userInfoEl.innerText = '';
-    return;
-  }
-
-  if (profile.is_active === false) {
-    appContainer.classList.add('hidden');
-    loginContainer.style.display = 'flex';
-    authStatusMsg.innerText = 'Acceso pendiente de aprobación o deshabilitado.';
-    if (fallbackBtn) fallbackBtn.style.display = 'block';
-    if (userInfoEl) userInfoEl.innerText = '';
-    return;
-  }
-
-  const role = profile.role || 'USER';
-  appStore.currentUserRole = role;
-  if (!appStore.isSuperAdmin()) appStore.activeOrganizationId = profile.organization_id || null;
-  appStore.taxCategories = [];
-  appStore.economicActivities = [];
-  appStore.displayedEconomicActivities = [];
-  appStore.globalEconomicActivities = [];
-  // Resolver el nombre bajo RLS con el contexto del perfil ya establecido.
+  authStatusMsg.innerText = 'Verificando acceso…';
   try {
-    await appStore.loadOrganizations();
-  } catch (e) {
-    console.warn("Error al cargar organizaciones:", e.message);
-  }
-
-  appStore.setUserRole(role);
-  await appStore.loadMyCatalogCapabilities();
-
-  // Identidad del usuario (preferir full_name de Google metadata, fallback a email)
-  const userIdentity = session.user?.user_metadata?.full_name || session.user?.email || 'Usuario';
-  window.currentSessionUserIdentity = userIdentity;
-  window.currentUserRole = role;
-
-  window.updateUserHeaderDisplay();
-
-  loginContainer.style.display = 'none';
-  appContainer.classList.remove('hidden');
-  if (fallbackBtn) fallbackBtn.style.display = 'none';
-
-  // Rehidratar registros persistidos en Supabase Staging para la sesión activa
-  try {
-    const loadedItems = await persistenceService.loadActiveFiscalRecords();
-    if (loadedItems && loadedItems.length > 0) {
-      appStore.addItems(loadedItems);
+    await appStore.initializeSession(session.user);
+    if (check !== authCheckGeneration) return;
+    window.currentSessionUserIdentity = session.user.email || 'Email no disponible';
+    loginContainer.style.display = 'none';
+    appContainer.classList.remove('hidden');
+    window.updateUserHeaderDisplay();
+  } catch (error) {
+    if (check !== authCheckGeneration) return;
+    appContainer.classList.add('hidden');
+    loginContainer.style.display = 'flex';
+    authStatusMsg.innerText = 'No se pudo cargar el acceso: ' + error.message;
+    let retry = document.getElementById('retry-session-context');
+    if (!retry) {
+      retry = document.createElement('button');
+      retry.id = 'retry-session-context';
+      retry.textContent = 'Reintentar';
+      authStatusMsg.after(retry);
     }
-
-    const loadedPerceptions = await persistenceService.loadActivePerceptions();
-    if (loadedPerceptions && loadedPerceptions.length > 0) {
-      appStore.addPerceptions(loadedPerceptions);
+    retry.onclick = () => checkUserProfile(session);
+    let logoutButton = document.getElementById('fallback-logout-btn');
+    if (!logoutButton) {
+      logoutButton = document.createElement('button');
+      logoutButton.id = 'fallback-logout-btn';
+      logoutButton.textContent = 'Cerrar sesión';
+      logoutButton.onclick = logout;
+      authStatusMsg.after(logoutButton);
     }
-    
-    const loadedFinancials = await persistenceService.loadActiveFinancialMovements();
-    if (loadedFinancials && loadedFinancials.length > 0) {
-      const bankMovements = loadedFinancials
-        .filter(f => f.operationType === 'BANCO')
-        .map(f => ({ ...f.rawRecord, id: f.id }));
-      const salaries = loadedFinancials
-        .filter(f => f.operationType === 'SUELDO')
-        .map(f => ({ ...f.rawRecord, id: f.id }));
-      
-      if (bankMovements.length > 0) {
-        appStore.addBankTransactions(bankMovements);
-      }
-      if (salaries.length > 0) {
-        appStore.addSalary(salaries[0]); // Por ahora guardamos 1 como estaba.
-      }
-    }
-
-    if ((loadedItems && loadedItems.length > 0) || (loadedPerceptions && loadedPerceptions.length > 0) || (loadedFinancials && loadedFinancials.length > 0)) {
-      UIManager.render();
-    }
-  } catch (rehydrateErr) {
-    console.error("Error al rehidratar registros desde Supabase:", rehydrateErr);
   }
 }
 
@@ -541,7 +459,7 @@ export function switchTab(tabId) {
     const titleElement = document.getElementById('page-title');
     if (tabId === 'tab-conciliador') {
         titleElement.innerText = "Comprobantes (Compras y Ventas)";
-        if (appStore.loadImportIssues) appStore.loadImportIssues();
+        // Issues are cleared on context changes; phase 1 does not query unscoped issue rows.
         if (appStore.taxCategories.length === 0 && appStore.loadTaxCategories) appStore.loadTaxCategories();
         if (appStore.economicActivities.length === 0 && appStore.loadEconomicActivities) appStore.loadEconomicActivities();
     }
@@ -998,6 +916,9 @@ function showColumnMapperModal(headers, title, onApply) {
     modal.classList.remove('hidden');
 }// MOSTRAR VISTA PREVIA (STAGING)
 function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
+    const generation = appStore.contextGeneration;
+    const validContext = () => generation === appStore.contextGeneration && appStore.canImportOperational(context?.tipoOperacion === 'COMPRA' ? 'recibido' : 'emitido');
+
     if (typeof context === 'function') {
         onConfirm = context;
         context = { tenant: getActiveCompanyCuit(), tipoOperacion: 'COMPRA' };
@@ -1093,6 +1014,7 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
     const confirmBtn = overlay.querySelector('.btn-confirm-modal');
     if (confirmBtn) {
         confirmBtn.onclick = async () => {
+            if (!validContext()) return;
             const isCompra = (context && context.tipoOperacion === 'COMPRA') || (validRows.length > 0 && validRows[0].tipoOperacion === 'COMPRA');
             const isVenta = (context && context.tipoOperacion === 'VENTA') || (validRows.length > 0 && validRows[0].tipoOperacion === 'VENTA');
             const isArca = isCompra || isVenta;
@@ -1149,9 +1071,11 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                 try {
                     // 1. Hash SHA-256
                     const hashHex = await persistenceService.sha256File(rawFile);
+                    if (!validContext()) return;
 
                     // 2. Pre-check de idempotencia
                     const checkResult = await persistenceService.checkFileImportable(hashHex);
+                    if (!validContext()) return;
                     if (checkResult && checkResult.importable === false) {
                         alert("Este archivo ya fue importado anteriormente.");
                         closeAndRemove();
@@ -1164,8 +1088,10 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                     let importInfo;
                     if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
                         importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                        if (!validContext()) return;
                     } else {
                         importInfo = await persistenceService.createImport(sourceType, operationType);
+                        if (!validContext()) return;
                     }
 
                     // 4. Safe filename y MIME fallback
@@ -1178,6 +1104,7 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                         safeFilename: safeFilename,
                         mimeType: rawFile.type
                     });
+                    if (!validContext()) return;
 
                     // 6. Persistencia del Lote mediante RPC transaccional
                     try {
@@ -1192,9 +1119,11 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                             },
                             stagedRows: stagedRows
                         });
+                        if (!validContext()) return;
                     } catch (persistErr) {
                         // Cleanup compensatorio de storage en caso de fallo
                         await persistenceService.cleanupStorageFile(uploadResult.path);
+                        if (!validContext()) return;
                         throw persistErr;
                     }
 
@@ -1411,9 +1340,14 @@ export class UIManager {
     }
 
     static async processFile(file, type) {
+        if (!appStore.canImportOperational(type)) return;
+        const generation = appStore.contextGeneration;
+        const validContext = () => generation === appStore.contextGeneration && appStore.canImportOperational(type);
         try {
             const buffer = await readFileAsArrayBuffer(file);
+            if (!validContext()) return;
             const text = await readFileAsText(file).catch(() => '');
+            if (!validContext()) return;
             const formatInfo = detectFileFormat({ arrayBuffer: buffer, text, fileName: file.name, mimeType: file.type });
             
             const isExcelFormat = formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF' || file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx');
@@ -1446,8 +1380,10 @@ export class UIManager {
                     context, 
                     fingerprintProvider 
                 });
+                if (!validContext()) return;
                 
                 showStagingPreviewModal(staged, file.name, context, (acceptedItems) => {
+                    if (!validContext()) return;
                     appStore.addItems(acceptedItems);
                     if (type === 'emitido') checkMultiActivityQueue();
                     UIManager.render();
@@ -1481,6 +1417,7 @@ export class UIManager {
                     alert("No se encontraron percepciones válidas en el archivo.");
                 } else {
                     showPerceptionsPreviewModal(validPerceptions, invalidRows.length, file.name, async (acceptedItems) => {
+                        if (!validContext()) return;
                         const btnConfirm = document.querySelector('.btn-confirm-modal');
                         if (btnConfirm) {
                             btnConfirm.disabled = true;
@@ -1488,8 +1425,10 @@ export class UIManager {
                         }
                         try {
                             const hashHex = await persistenceService.sha256File(file);
+                            if (!validContext()) return;
                             
                             const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            if (!validContext()) return;
                             if (checkResult && checkResult.importable === false) {
                                 alert("Este archivo de percepciones ya fue importado anteriormente.");
                                 return;
@@ -1498,8 +1437,10 @@ export class UIManager {
                             let importInfo;
                             if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
                                 importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                                if (!validContext()) return;
                             } else {
                                 importInfo = await persistenceService.createImport(sourceType, 'PERCEPCION');
+                                if (!validContext()) return;
                             }
                             const safeFilename = persistenceService.getSafeFilename(file.name);
                             
@@ -1509,6 +1450,7 @@ export class UIManager {
                                 safeFilename: safeFilename,
                                 mimeType: file.type || 'text/plain'
                             });
+                            if (!validContext()) return;
                             
                             try {
                                 await persistenceService.persistPerceptionsBatch({
@@ -1522,8 +1464,10 @@ export class UIManager {
                                     },
                                     stagedRows: parsedItems
                                 });
+                                if (!validContext()) return;
                             } catch (persistErr) {
                                 await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!validContext()) return;
                                 throw persistErr;
                             }
                             
@@ -1559,8 +1503,10 @@ export class UIManager {
                         }
                         try {
                             const hashHex = await persistenceService.sha256File(file);
+                            if (!validContext()) return;
                             
                             const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            if (!validContext()) return;
                             if (checkResult && checkResult.importable === false) {
                                 alert("Este archivo bancario ya fue importado anteriormente.");
                                 return;
@@ -1569,8 +1515,10 @@ export class UIManager {
                             let importInfo;
                             if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
                                 importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                                if (!validContext()) return;
                             } else {
                                 importInfo = await persistenceService.createImport('BANK_STATEMENT_BBVA', 'BANCO');
+                                if (!validContext()) return;
                             }
                             const safeFilename = persistenceService.getSafeFilename(file.name);
                             
@@ -1580,6 +1528,7 @@ export class UIManager {
                                 safeFilename: safeFilename,
                                 mimeType: file.type || 'text/csv'
                             });
+                            if (!validContext()) return;
                             
                             try {
                                 await persistenceService.persistFinancialMovementsBatch({
@@ -1593,8 +1542,10 @@ export class UIManager {
                                     },
                                     stagedRows: result
                                 });
+                                if (!validContext()) return;
                             } catch (persistErr) {
                                 await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!validContext()) return;
                                 throw persistErr;
                             }
                             
@@ -1620,8 +1571,10 @@ export class UIManager {
                 } else if (firstRes && firstRes.normalizedData) {
                     try {
                         const hashHex = await persistenceService.sha256File(file);
+                        if (!validContext()) return;
                         
                         const checkResult = await persistenceService.checkFileImportable(hashHex);
+                        if (!validContext()) return;
                         if (checkResult && checkResult.importable === false) {
                             alert("Este archivo de sueldos ya fue importado anteriormente.");
                             return;
@@ -1630,8 +1583,10 @@ export class UIManager {
                         let importInfo;
                         if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
                             importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                            if (!validContext()) return;
                         } else {
                             importInfo = await persistenceService.createImport('PAYROLL_ACONPY', 'SUELDO');
+                            if (!validContext()) return;
                         }
                         const safeFilename = persistenceService.getSafeFilename(file.name);
                         
@@ -1641,6 +1596,7 @@ export class UIManager {
                             safeFilename: safeFilename,
                             mimeType: file.type || 'text/plain'
                         });
+                        if (!validContext()) return;
                         
                         try {
                             await persistenceService.persistFinancialMovementsBatch({
@@ -1654,8 +1610,10 @@ export class UIManager {
                                 },
                                 stagedRows: results
                             });
+                            if (!validContext()) return;
                         } catch (persistErr) {
                             await persistenceService.cleanupStorageFile(uploadResult.path);
+                            if (!validContext()) return;
                             throw persistErr;
                         }
                         
@@ -2000,7 +1958,7 @@ export class UIManager {
     }
 
     static renderSettings() {
-        const canManageGlobal = appStore.canManageGlobalCatalog();
+        const canManageGlobal = appStore.isCatalogPlatformContext() && appStore.canManageGlobalCatalog();
         const canActOnTax = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('category');
         const canActOnActivity = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('activity');
         for (const id of ['btn-import-arca-catalog', 'btn-create-global-category']) {
@@ -2014,24 +1972,7 @@ export class UIManager {
             this.closeModal('modal-arca-catalog');
             this.closeModal('modal-tax-category');
         }
-        const isSuperAdmin = appStore.isSuperAdmin();
         const isGlobalMode = appStore.isCatalogPlatformContext();
-
-        // 0. Render Context Switcher Dropdown para SUPERADMIN
-        const switcherContainer = document.getElementById('org-context-switcher-container');
-        const selectOrgContext = document.getElementById('select-org-context');
-        if (switcherContainer && selectOrgContext) {
-            if (isSuperAdmin) {
-                switcherContainer.style.display = 'flex';
-                const orgs = appStore.organizations || [];
-                selectOrgContext.innerHTML = `
-                    <option value="" ${!appStore.activeOrganizationId ? 'selected' : ''}>[ MICA / Modo Global ]</option>
-                    ${orgs.map(o => `<option value="${o.id}" ${appStore.activeOrganizationId === o.id ? 'selected' : ''}>${o.name}</option>`).join('')}
-                `;
-            } else {
-                switcherContainer.style.display = 'none';
-            }
-        }
 
         // Target Org Containers para Global Mode
         const targetTaxCatContainer = document.getElementById('target-org-tax-categories-container');
@@ -2416,28 +2357,12 @@ window.handleBancosCustomDateChange = function() {
 // --- CONTEXTO ORGANIZACIONAL Y CATEGORIZACIÓN ---
 
 window.updateUserHeaderDisplay = function() {
-    const userInfoEl = document.getElementById('user-header-info');
-    const entityLabelEl = document.getElementById('current-entity-label');
-    const orgName = appStore.getActiveOrganizationName();
-    
-    if (entityLabelEl) {
-        entityLabelEl.innerText = `Organización: ${orgName}`;
-    }
-
-    if (userInfoEl) {
-        const userIdentity = window.currentSessionUserIdentity || 'Usuario';
-        const role = window.currentUserRole || appStore.currentUserRole || 'USER';
-        userInfoEl.innerText = `${orgName} · ${userIdentity} · ${role}`;
-    }
+    renderOperationalHeader(appStore, document);
 };
 
 window.handleOrgContextChange = async function(orgId) {
-    taxCategoriesGrid.clearSelection();
-    economicActivitiesGrid.clearSelection();
-    iibbRatesGrid.clearSelection();
-    await appStore.switchOrganizationContext(orgId);
-    window.updateUserHeaderDisplay();
-    UIManager.renderSettings();
+    try { await appStore.switchOrganizationContext(orgId); }
+    catch (error) { console.error('Context switch:', error); }
 };
 
 window.handleTaxCategoriesSearch = function(query) {
@@ -3134,9 +3059,33 @@ window.submitTaxCategoryForm = async () => {
     }
 };
 
+appStore.tenantResetListeners.push(() => {
+    for (const grid of [comprobantesGrid, percepcionesGrid, bancosGrid, taxCategoriesGrid, economicActivitiesGrid, iibbRatesGrid]) grid.resetTenantState();
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+        if (el.id) el.classList.add('hidden');
+        else el.remove();
+    });
+    document.querySelectorAll('.modal').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.tab-content input, .tab-content select, .tab-content textarea').forEach(el => {
+        if (el.classList.contains('operational-org-select')) return;
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = false;
+        else el.value = '';
+    });
+    document.querySelectorAll('form[data-editing-id]').forEach(el => delete el.dataset.editingId);
+    document.getElementById('bulk-actions-bar')?.classList.add('hidden');
+    parsedArcaCatalogState = null;
+});
+
 // Suscribirse a los eventos del store para reactividad
 appStore.subscribe(() => {
+    renderOperationalHeader(appStore, document);
+    renderOperationalImportControls(appStore, document);
+    document.querySelectorAll('.modal, .modal-overlay').forEach(el => {
+        el.inert = !['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState);
+    });
+    if (!['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState)) return;
     UIManager.render();
+    updateSalaryFormFields();
     renderClientDashboard();
     renderOcrHistory();
     renderResolucionManual();
@@ -3146,6 +3095,8 @@ appStore.subscribe(() => {
 
 // Inicialización de componentes al cargar el documento
 document.addEventListener('DOMContentLoaded', () => {
+    mountOperationalOrgSelectors(appStore, document);
+    renderOperationalImportControls(appStore, document);
     UIManager.init();
     setupOCR();
 

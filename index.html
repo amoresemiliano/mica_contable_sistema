@@ -93,12 +93,6 @@
             </div>
             <div style="display: flex; align-items: center; gap: 12px;">
                 <!-- Control Selector de Contexto de Organización para SUPERADMIN -->
-                <div id="org-context-switcher-container" style="display: none; align-items: center; gap: 6px; background: var(--bg-card); padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border-color); font-size: 13px;">
-                    <span style="font-weight: 600; color: var(--text-muted);">Organización de trabajo:</span>
-                    <select id="select-org-context" class="form-control" style="font-size: 12px; padding: 3px 8px; font-weight: 600;" onchange="window.handleOrgContextChange(this.value)">
-                        <option value="">[ MICA / Modo Global ]</option>
-                    </select>
-                </div>
                 <div id="user-header-info" style="font-size: 13px; font-weight: 600; color: var(--primary); background: var(--bg-card); padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border-color);">Usuario · ROLE · Org</div>
             </div>
         </header>
@@ -578,6 +572,7 @@
 
         <!-- SECCIÓN 4: MOVIMIENTOS MANUALES -->
         <section id="tab-movimientos-manuales" class="tab-content hidden">
+            <p class="context-unavailable">Este módulo no está habilitado en esta fase.</p>
             <div class="grid-inputs">
                 <!-- Formulario de Compra Manual REGINFO AFIP -->
                 <div class="card" style="grid-column: span 2;">
@@ -1061,6 +1056,7 @@
 
         <!-- SECCIÓN 8: HUB DE USUARIO - CARGA OCR (TICKETS Y GASTOS FÍSICOS) -->
         <section id="tab-client-ocr" class="tab-content hidden">
+            <p class="context-unavailable">Este módulo no está habilitado en esta fase.</p>
             <div class="card">
                 <h3>Cargar Comprobantes Físicos (Lector Inteligente OCR)</h3>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">

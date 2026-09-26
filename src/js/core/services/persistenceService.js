@@ -306,8 +306,8 @@ export class PersistenceService {
     /**
      * Rehidrata los movimientos financieros activos del usuario desde DB.
      */
-    async loadActiveFinancialMovements() {
-        const { data, error } = await supabase.rpc('get_active_financial_movements');
+    async loadActiveFinancialMovements(rows = null) {
+        const { data, error } = rows === null ? await supabase.rpc('get_active_financial_movements') : { data: rows };
 
         if (error) {
             throw new Error(`Error en RPC get_active_financial_movements: ${error.message}`);
@@ -319,6 +319,7 @@ export class PersistenceService {
             const d = r.normalized_payload || {};
             return {
                 id: r.id,
+                organization_id: r.organization_id,
                 sourceType: r.source_type,
                 operationType: r.operation_type,
                 fecha: r.fecha,
@@ -340,8 +341,8 @@ export class PersistenceService {
     /**
      * Rehidrata los comprobantes fiscales (ARCA) activos del usuario desde DB.
      */
-    async loadActiveFiscalRecords() {
-        const { data, error } = await supabase.rpc('get_active_normalized_records');
+    async loadActiveFiscalRecords(rows = null) {
+        const { data, error } = rows === null ? await supabase.rpc('get_active_normalized_records') : { data: rows };
 
         if (error) {
             throw new Error(`Error en RPC get_active_normalized_records: ${error.message}`);
@@ -361,6 +362,7 @@ export class PersistenceService {
                 const razonVal = r.razon_social || d.razonSocial || '';
                 return {
                     id: r.id,
+                    organization_id: r.organization_id,
                     fecha: d.fecha || r.fecha,
                     tipo: isCompra ? 'recibido' : 'emitido',
                     tipoOperacion: isCompra ? 'COMPRA' : 'VENTA',
@@ -397,8 +399,8 @@ export class PersistenceService {
     /**
      * Rehidrata las percepciones impositivas activas del usuario desde DB.
      */
-    async loadActivePerceptions() {
-        const { data, error } = await supabase.rpc('get_active_normalized_records');
+    async loadActivePerceptions(rows = null) {
+        const { data, error } = rows === null ? await supabase.rpc('get_active_normalized_records') : { data: rows };
 
         if (error) {
             throw new Error(`Error en RPC get_active_normalized_records: ${error.message}`);
@@ -416,6 +418,7 @@ export class PersistenceService {
                 const d = r.normalized_payload || {};
                 return {
                     id: r.id,
+                    organization_id: r.organization_id,
                     cuit: r.cuit || d.cuit || '',
                     razonSocial: r.razon_social || d.razonSocial || 'AGENTE PERCEPCION',
                     fecha: d.fecha || r.fecha,
@@ -663,6 +666,96 @@ export class PersistenceService {
             p_org_id: orgId || null
         });
         if (error) throw new Error(error.message);
+    }
+
+    async listOperationalOrgTargets() {
+        const rows = [];
+        for (let offset = 0; ; offset += 500) {
+            const { data, error } = await supabase.rpc('list_operational_org_targets').range(offset, offset + 499);
+            if (error) throw new Error(error.message);
+            if (!Array.isArray(data) || data.some(r => !r.organization_id || typeof r.organization_name !== 'string')) {
+                throw new Error('Invalid operational targets response');
+            }
+            rows.push(...data);
+            if (data.length === 0) return rows;
+        }
+    }
+
+    async getOperationalContext() {
+        const { data, error } = await supabase.rpc('get_my_operational_context');
+        if (error) throw new Error(error.message);
+        if (!data || !Object.hasOwn(data, 'organization_id') ||
+            (data.organization_id !== null && (typeof data.organization_id !== 'string' || !data.organization_name))) {
+            throw new Error('Invalid canonical context response');
+        }
+        return data;
+    }
+
+    async loadOperationalPages(rpcName, orgId) {
+        const rows = [];
+        let afterId = null;
+        for (;;) {
+            const { data, error } = await supabase.rpc(rpcName, {
+                p_org_id: orgId, p_after_id: afterId, p_limit: 500
+            });
+            if (error) throw new Error(error.message);
+            if (!Array.isArray(data) || data.length > 500 || data.some((r, i) =>
+                r.organization_id !== orgId || typeof r.id !== 'string' || !r.id ||
+                (i ? r.id <= data[i - 1].id : afterId !== null && r.id <= afterId))) {
+                throw new Error(`Invalid tenant data or cursor: ${rpcName}`);
+            }
+            if (!data.length) return rows;
+            rows.push(...data);
+            afterId = data[data.length - 1].id;
+            // Do not stop on a short page: PostgREST may impose a smaller row limit.
+        }
+    }
+
+    async loadOperationalSnapshot(orgId, { catalogOnly = false } = {}) {
+        const { data, error } = await supabase.rpc('get_operational_snapshot', { p_org_id: orgId });
+        if (error) throw new Error(error.message);
+        if (!data || data.organization_id !== orgId) throw new Error('Operational context mismatch');
+        for (const key of ['categories', 'activities', 'rates']) {
+            if (!Array.isArray(data[key]) || data[key].some(r => r.organization_id !== orgId)) {
+                throw new Error(`Invalid tenant data: ${key}`);
+            }
+        }
+        const catalogs = {
+            taxCategories: data.categories.map(c => ({ ...c, isAssignedToOrg: true, assignedState: '' })),
+            economicActivities: data.activities.filter(a => a.is_active),
+            displayedEconomicActivities: data.activities,
+            iibbRates: data.rates.map(r => ({ ...r, rate_percent: r.rate,
+                activity_name: data.activities.find(a => a.id === r.activity_id)?.name || '' }))
+        };
+        if (catalogOnly) return catalogs;
+        const [recordRows, financialRows] = await Promise.all([
+            this.loadOperationalPages('get_operational_records_page', orgId),
+            this.loadOperationalPages('get_operational_financials_page', orgId)
+        ]);
+        // UUID cursors bound server responses; preserve newest-first presentation after loading.
+        const newestFirst = (a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')) || b.id.localeCompare(a.id);
+        recordRows.sort(newestFirst);
+        financialRows.sort(newestFirst);
+        const [items, perceptions, financials] = await Promise.all([
+            this.loadActiveFiscalRecords(recordRows), this.loadActivePerceptions(recordRows),
+            this.loadActiveFinancialMovements(financialRows)
+        ]);
+        const financialRecord = f => ({ ...f.rawRecord, id: f.id, organization_id: orgId,
+            periodo: f.periodo || f.rawRecord.periodo, fecha: f.rawRecord.fecha || f.fecha });
+        return {
+            items, perceptions,
+            bankTransactions: financials.filter(f => f.operationType === 'BANCO').map(financialRecord),
+            salariesList: financials.filter(f => f.operationType === 'SUELDO').map(f => {
+                const s = financialRecord(f);
+                return { ...s, sueldoBruto: s.sueldoBruto || s.sueldoBrutoCalculado || s.remunerativo || 0,
+                    sueldoBrutoCalculado: s.sueldoBrutoCalculado || s.remunerativo || 0,
+                    anticipos: s.anticipos || s.anticipoSueldo || 0, anticipoSueldo: s.anticipoSueldo || s.anticipos || 0,
+                    sindicatoAporte: s.sindicatoAporte || s.aporteSindicalCalculado || s.aporteSindicalObligatorio || 0,
+                    aporteSindicalCalculado: s.aporteSindicalCalculado || s.aporteSindicalObligatorio || 0,
+                    sueldoNeto: s.sueldoNeto || 0, remunerativo: s.remunerativo || 0, noRemunerativo: s.noRemunerativo || 0 };
+            }),
+            ...catalogs
+        };
     }
 
     /**

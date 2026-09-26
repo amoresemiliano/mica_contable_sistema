@@ -4,6 +4,11 @@ import { appStore } from './store.js';
 export function setupOCR() {
     const ocrInput = document.getElementById('ocr-input');
     if (!ocrInput) return;
+    // Phase 1: this is a simulator, not a persistent tenant-scoped OCR pipeline.
+    if (!appStore.ocrPersistenceEnabled) {
+        ocrInput.disabled = true;
+        return;
+    }
 
     ocrInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
