@@ -1,0 +1,8 @@
+#mica-administration .mica-admin-form { display: grid; gap: .8rem; margin: 1rem 0; padding: 1rem; border: 1px solid var(--border-color, #ddd); border-radius: 8px; }
+#mica-administration label { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+#mica-administration input:not([type=checkbox]), #mica-administration select { min-width: 0; max-width: 100%; padding: .5rem; }
+#mica-administration fieldset { display: grid; gap: .5rem; max-height: 22rem; overflow: auto; padding: 1rem; }
+#mica-administration li { padding: .4rem; overflow-wrap: anywhere; }
+#mica-administration button { padding: .5rem .8rem; cursor: pointer; }
+#mica-administration [role=status] { overflow-wrap: anywhere; }
+@media (max-width: 640px) { #mica-administration label { flex-wrap: wrap; } }

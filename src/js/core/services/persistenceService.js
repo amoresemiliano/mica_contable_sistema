@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js';
+import { isMicaCapability } from '../micaCapabilities.js';
 
 /**
  * Servicio de Persistencia para MICA (Fase 2 - Supabase Staging)
@@ -14,7 +15,7 @@ export class PersistenceService {
             (r.scope === 'ORGANIZATION' && (!orgId || r.organization_id !== orgId)))) {
             throw new Error('Invalid effective capabilities response');
         }
-        return data;
+        return data.filter(row => isMicaCapability(row.code, row.scope));
     }
 
     async listCatalogAssignmentTargets() {
@@ -496,13 +497,12 @@ export class PersistenceService {
      */
     async bulkUpdateRecordClassification(recordIds, cuit, categoryId, activityId = null) {
         if (!recordIds || recordIds.length === 0) return;
-        const { error } = await supabase.rpc('bulk_update_record_classification', {
-            p_record_ids: recordIds,
-            p_cuit: cuit,
-            p_category_id: categoryId,
-            p_activity_id: activityId
-        });
-        if (error) throw new Error(`Error bulk_update_record_classification: ${error.message}`);
+        for (const id of recordIds) {
+            const { error } = await supabase.rpc('update_record_classification', {
+                p_record_id: id, p_category_id: categoryId, p_activity_id: activityId
+            });
+            if (error) throw new Error(`Error update_record_classification: ${error.message}`);
+        }
     }
 
     /**
@@ -711,8 +711,11 @@ export class PersistenceService {
         }
     }
 
-    async loadOperationalSnapshot(orgId, { catalogOnly = false } = {}) {
-        const { data, error } = await supabase.rpc('get_operational_snapshot', { p_org_id: orgId });
+    async loadOperationalSnapshot(orgId, { catalogOnly = false, capabilities = [] } = {}) {
+        const readCatalog = capabilities.includes('ORG_VIEW'), readRates = capabilities.includes('CATALOG_ORG_VIEW');
+        const { data, error } = readCatalog || readRates
+            ? await supabase.rpc('get_operational_snapshot', { p_org_id: orgId })
+            : { data: { organization_id: orgId, categories: [], activities: [], rates: [] } };
         if (error) throw new Error(error.message);
         if (!data || data.organization_id !== orgId) throw new Error('Operational context mismatch');
         for (const key of ['categories', 'activities', 'rates']) {
@@ -721,16 +724,16 @@ export class PersistenceService {
             }
         }
         const catalogs = {
-            taxCategories: data.categories.map(c => ({ ...c, isAssignedToOrg: true, assignedState: '' })),
-            economicActivities: data.activities.filter(a => a.is_active),
-            displayedEconomicActivities: data.activities,
-            iibbRates: data.rates.map(r => ({ ...r, rate_percent: r.rate,
+            taxCategories: (readCatalog ? data.categories : []).map(c => ({ ...c, isAssignedToOrg: true, assignedState: '' })),
+            economicActivities: readCatalog ? data.activities.filter(a => a.is_active) : [],
+            displayedEconomicActivities: readCatalog ? data.activities : [],
+            iibbRates: (readRates ? data.rates : []).map(r => ({ ...r, rate_percent: r.rate,
                 activity_name: data.activities.find(a => a.id === r.activity_id)?.name || '' }))
         };
         if (catalogOnly) return catalogs;
         const [recordRows, financialRows] = await Promise.all([
-            this.loadOperationalPages('get_operational_records_page', orgId),
-            this.loadOperationalPages('get_operational_financials_page', orgId)
+            capabilities.includes('RECORD_VIEW') ? this.loadOperationalPages('get_operational_records_page', orgId) : [],
+            capabilities.includes('RECORD_VIEW') ? this.loadOperationalPages('get_operational_financials_page', orgId) : []
         ]);
         // UUID cursors bound server responses; preserve newest-first presentation after loading.
         const newestFirst = (a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')) || b.id.localeCompare(a.id);

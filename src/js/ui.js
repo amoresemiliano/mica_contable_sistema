@@ -1,5 +1,7 @@
 import { mountOperationalOrgSelectors, renderOperationalImportControls, renderOperationalHeader } from './components/operationalOrgSelector.js';
 import { supabase } from './core/services/supabaseClient.js';
+import { openAdministration } from './components/administration.js';
+import { renderModuleAccess } from './core/moduleAccess.js';
 import { appStore } from './store.js';
 import { setupOCR, renderOcrHistory } from './ocr.js';
 import { Reconciler } from './reconciler.js';
@@ -444,6 +446,7 @@ function getActiveCompanyCuit() {
 
 // 5. CONTROLADOR NAVEGACIÓN SPA E INTERFAZ (SOLID: Single Responsibility)
 export function switchTab(tabId) {
+    if (!appStore.canVisitModule(tabId)) return false;
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.getElementById(tabId)?.classList.remove('hidden');
 
@@ -485,12 +488,17 @@ export function switchTab(tabId) {
         if (appStore.loadEconomicActivities) appStore.loadEconomicActivities();
         if (appStore.loadIibbRates) appStore.loadIibbRates();
     }
-    else if (tabId === 'tab-configuracion') titleElement.innerText = "Configuración del Sistema";
+    else if (tabId === 'tab-configuracion') {
+        titleElement.innerText = "Administración MICA";
+        openAdministration(appStore);
+    }
     else if (tabId === 'tab-client-dashboard') {
         titleElement.innerText = "Panel Gerencial (Dashboard)";
         renderClientDashboard();
     }
     else if (tabId === 'tab-client-ocr') titleElement.innerText = "Lector de Documentos (OCR)";
+    else if (tabId === 'tab-access') titleElement.innerText = "Acceso MICA";
+    return true;
 }
 
 export function toggleMobileMoreSheet(show) {
@@ -3078,6 +3086,7 @@ appStore.tenantResetListeners.push(() => {
 
 // Suscribirse a los eventos del store para reactividad
 appStore.subscribe(() => {
+    renderModuleAccess(appStore, document, switchTab);
     renderOperationalHeader(appStore, document);
     renderOperationalImportControls(appStore, document);
     document.querySelectorAll('.modal, .modal-overlay').forEach(el => {
@@ -3086,16 +3095,39 @@ appStore.subscribe(() => {
     if (!['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState)) return;
     UIManager.render();
     updateSalaryFormFields();
-    renderClientDashboard();
-    renderOcrHistory();
-    renderResolucionManual();
-    UIManager.renderCategorization();
-    UIManager.renderImportIssues();
+    if (appStore.canVisitModule('tab-client-dashboard')) renderClientDashboard();
+    if (appStore.canVisitModule('tab-client-ocr')) renderOcrHistory();
+    if (appStore.canVisitModule('tab-movimientos-manuales')) renderResolucionManual();
+    if (appStore.canVisitModule('tab-categorizacion')) UIManager.renderCategorization();
+    if (appStore.hasCapability('IMPORT_VIEW', { scope: 'ORGANIZATION', orgId: appStore.activeOrganizationId })) UIManager.renderImportIssues();
 });
 
 // Inicialización de componentes al cargar el documento
+// Refresh a returned session before allowing stale module authority to persist.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && appStore.sessionUserId && !appStore.pendingOperations &&
+        ['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState)) {
+        appStore.reloadOperationalContext().catch(error => console.error('Access refresh failed:', error));
+    }
+});
+
+// Direct calls to grid/catalog UI handlers obey the same module boundary as navigation.
+for (const [pattern, module] of [
+    [/Comprobantes/, 'tab-conciliador'], [/Percepciones/, 'tab-percepciones'],
+    [/Bancos/, 'tab-bancos'], [/TaxCategor|EconomicActivit|Iibb|ArcaCatalog/, 'tab-categorizacion']
+]) {
+    for (const name of Object.keys(window)) {
+        if (!pattern.test(name) || typeof window[name] !== 'function') continue;
+        const handler = window[name];
+        window[name] = function (...args) {
+            if (!appStore.canVisitModule(module)) return false;
+            return handler.apply(this, args);
+        };
+    }
+}
 document.addEventListener('DOMContentLoaded', () => {
     mountOperationalOrgSelectors(appStore, document);
+    renderModuleAccess(appStore, document, switchTab);
     renderOperationalImportControls(appStore, document);
     UIManager.init();
     setupOCR();

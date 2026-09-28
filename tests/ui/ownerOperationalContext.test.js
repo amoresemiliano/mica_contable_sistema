@@ -21,7 +21,7 @@ const snapshot = org => ({ organization_id: org,
 function server(name, args) {
     if (name === 'switch_superadmin_org_context') { serverOrg = args.p_org_id; return Promise.resolve({ error: null }); }
     if (name === 'get_my_operational_context') return Promise.resolve({ data: context() });
-    if (name === 'get_my_effective_capabilities') return Promise.resolve({ data: ['ACCESS_ANY_ORG', 'GLOBAL_CATALOG_MANAGE'].map(code => ({ code, scope: 'PLATFORM', organization_id: null })) });
+    if (name === 'get_my_effective_capabilities') return Promise.resolve({ data: [...['ACCESS_ANY_ORG', 'GLOBAL_CATALOG_MANAGE'].map(code => ({ code, scope: 'PLATFORM', organization_id: null })), ...(args.p_org_id ? ['RECORD_VIEW','ORG_VIEW','CATALOG_ORG_VIEW'].map(code => ({code, scope:'ORGANIZATION', organization_id:args.p_org_id})) : [])] });
     if (name === 'list_operational_org_targets') return { range: async offset => ({ data: offset ? [] : targets }) };
     if (name === 'get_operational_snapshot') {
         const { records, financials, ...catalogs } = snapshot(args.p_org_id);
@@ -38,6 +38,38 @@ beforeEach(() => {
     rpc.mockReset().mockImplementation(server);
     serverOrg = null;
     store = new AppStore();
+});
+
+test('037 scoped platform profile switches without ACCESS_ANY_ORG or invented tenant role', async () => {
+    rpc.mockImplementation((name, args) => {
+        if (name === 'get_my_operational_context') return Promise.resolve({ data: {
+            ...context(), profile_name: 'Contadora', can_switch_platform_context: true
+        } });
+        if (name === 'get_my_effective_capabilities') return Promise.resolve({ data: [
+            { code: 'GLOBAL_CATALOG_VIEW', scope: 'PLATFORM', organization_id: null },
+            ...(args.p_org_id ? [{ code: 'RECORD_VIEW', scope: 'ORGANIZATION', organization_id: args.p_org_id }] : []),
+            { code: 'RECIPES_VIEW', scope: 'PLATFORM', organization_id: null }
+        ] });
+        if (name === 'list_operational_org_targets') return { range: async offset => ({ data: offset ? [] : [targets[0]] }) };
+        if (name === 'switch_superadmin_org_context' && args.p_org_id === 'SUR') return Promise.resolve({ error: { message: 'Outside scope' } });
+        return server(name, args);
+    });
+    await store.initializeSession({ id: 'accountant', email: 'accountant@example.com' });
+    expect(store.hasCapability('ACCESS_ANY_ORG')).toBe(false);
+    expect(store.hasCapability('RECIPES_VIEW')).toBe(false);
+    expect(store.canSwitchOperationalContext()).toBe(true);
+    await store.switchOrganizationContext('NORTE');
+    expect(store.hasCapability('RECORD_VIEW', { scope: 'ORGANIZATION', orgId: 'NORTE' })).toBe(true);
+    expect(store.effectiveProfileName).toBe('Contadora');
+    const previousItems = store.items;
+    await expect(store.switchOrganizationContext('SUR')).rejects.toThrow('Outside scope');
+    expect(store.activeOrganizationId).toBe('NORTE');
+    expect(store.items).toBe(previousItems);
+    await store.switchOrganizationContext(null);
+    expect(store.items).toEqual([]);
+    expect(store.hasCapability('RECORD_VIEW', { scope: 'ORGANIZATION', orgId: 'NORTE' })).toBe(false);
+    store.endSession();
+    expect(store.canSwitchOperationalContext()).toBe(false);
 });
 
 test('PLATFORM -> NORTE -> SUR -> PLATFORM replaces every dataset and retains all salary periods', async () => {
@@ -131,7 +163,7 @@ test('late response after logout cannot repopulate state; overlapping switches a
 test('paged reader rejects foreign records instead of silently rendering them', async () => {
     rpc.mockImplementation((name, args) => name === 'get_operational_records_page'
         ? Promise.resolve({ data: snapshot('SUR').records }) : server(name, args));
-    await expect(persistenceService.loadOperationalSnapshot('NORTE')).rejects.toThrow('Invalid tenant data');
+    await expect(persistenceService.loadOperationalSnapshot('NORTE', { capabilities: ['RECORD_VIEW'] })).rejects.toThrow('Invalid tenant data');
 });
 
 test('short pages keep loading until empty and each request carries confirmed org and cursor', async () => {
@@ -162,20 +194,28 @@ test('historical page failure after switching leaves all tenant datasets empty',
 });
 
 test('catalog refresh does not download historical pages', async () => {
-    const result = await persistenceService.loadOperationalSnapshot('NORTE', { catalogOnly: true });
+    const result = await persistenceService.loadOperationalSnapshot('NORTE', { catalogOnly: true, capabilities: ['ORG_VIEW','CATALOG_ORG_VIEW'] });
     expect(result.taxCategories[0].organization_id).toBe('NORTE');
     expect(result).not.toHaveProperty('items');
     expect(rpc.mock.calls.map(([name]) => name)).toEqual(['get_operational_snapshot']);
 });
 
-test('owner imports denied; tenant imports follow effective capability combinations', async () => {
+test('039 no VIEW means no dataset RPC, even with scope and import action grants', async () => {
+    const data = await persistenceService.loadOperationalSnapshot('NORTE', { capabilities: ['IMPORT_CREATE','BANK_IMPORT'] });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(data.items).toEqual([]);
+    expect(data.bankTransactions).toEqual([]);
+    expect(data.taxCategories).toEqual([]);
+});
+
+test('scope alone cannot import; owner and tenant follow effective capability combinations', async () => {
     await store.initializeSession({ id: 'owner', email: 'owner@example.com' });
     await store.switchOrganizationContext('NORTE');
     expect(store.canImportOperational('recibido')).toBe(false);
     store.permissions.platform.codes = [];
     store.currentUserRole = 'SUPERADMIN'; // Compatibility text must not authorize anything.
-    store.permissions.organization = { loaded: true, orgId: 'NORTE', codes: ['IMPORT_CREATE', 'BANK_IMPORT'] };
-    expect(store.canImportOperational('recibido')).toBe(true);
+    store.permissions.organization = { loaded: true, orgId: 'NORTE', codes: ['RECORD_VIEW', 'IMPORT_CREATE', 'BANK_IMPORT'] };
+    expect(store.canImportOperational('recibido')).toBe(false);
     expect(store.canImportOperational('banco')).toBe(true);
     expect(store.canImportOperational('sueldo')).toBe(false);
     const nodes = new Map();
@@ -184,8 +224,12 @@ test('owner imports denied; tenant imports follow effective capability combinati
     expect(nodes.get('zone-bancos').hidden).toBe(false);
     store.permissions.platform.codes = ['ACCESS_ANY_ORG'];
     renderOperationalImportControls(store, document);
-    expect(nodes.get('zone-bancos').hidden).toBe(true);
-    expect(nodes.get('file-bancos').disabled).toBe(true);
+    expect(nodes.get('zone-bancos').hidden).toBe(false);
+    expect(nodes.get('file-bancos').disabled).toBe(false);
+    store.permissions.organization.codes.push('DOCUMENTS_UPLOAD','DOCUMENTS_OCR_PROCESS','DOCUMENTS_OCR_VERIFY');
+    renderOperationalImportControls(store, document);
+    expect(nodes.get('ocr-input').disabled).toBe(true);
+    expect(nodes.get('ocr-dropzone').inert).toBe(true);
 });
 
 test('real header uses session email, confirmed organization and actual platform preset', async () => {
@@ -220,7 +264,7 @@ test('all selector instances share context, preserve current tab, hide for catal
     store.permissions.platform.codes = ['CATALOG_ASSIGN_ANY_ORG'];
     store.notify();
     for (const section of sections) expect(section.children[0].children[0].hidden).toBe(true);
-    await expect(store.switchOrganizationContext('SUR')).rejects.toThrow('ACCESS_ANY_ORG');
+    await expect(store.switchOrganizationContext('SUR')).rejects.toThrow('Alcance operacional de plataforma');
 });
 
 test('grid clears selections, filters, range and pagination', () => {

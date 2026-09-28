@@ -283,7 +283,7 @@ describe('M017 Auth & Multitenant Security Adversarial Verification', () => {
         expect(appStore.isSuperAdmin()).toBe(false);
         expect(appStore.activeOrganizationId).toBeNull();
         expect(appStore.isGlobalMicaMode()).toBe(true);
-        await expect(appStore.switchOrganizationContext('other')).rejects.toThrow('ACCESS_ANY_ORG');
+        await expect(appStore.switchOrganizationContext('other')).rejects.toThrow('Alcance operacional de plataforma');
     });
 
     test('USER role cannot switch organization context (clears active org)', async () => {

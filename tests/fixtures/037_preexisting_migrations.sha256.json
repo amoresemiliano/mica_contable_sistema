@@ -1,0 +1,18 @@
+{
+  "sql/031_platform_owner_access_any_org.sql": "44075e96fed79ae5f92fa6ced723dac2217ff0bba1838d4399d0ac3cd2b11569",
+  "sql/031_platform_owner_access_any_org_down.sql": "5ab61dcdb878103dccddc933f0ac694efbc9a26772a32b772757e0714d46347a",
+  "sql/032_accounting_catalog_preset.sql": "7debd8ff7e02fbdbd3b09c1e79459996aa78bd39a14b49ce38c0238ccf868a56",
+  "sql/032_accounting_catalog_preset_down.sql": "b8588b079a6c3098cd8a6de6db4c2bd03d435010cfba56615a45dd998ded336e",
+  "sql/033_capability_block_readonly_checks.sql": "c74e50a5cf537c8831beec088d748602b09c03d1ca9b80cf8fef5e2dd83dbc0e",
+  "sql/033_catalog_capability_core.sql": "e48d9ea7a9acacfc543d561d7cba591f13032b2e6c71ff68ad975cda1dd5a266",
+  "sql/033_catalog_capability_core_down.sql": "d035320a284e80fffa74c002c046dcae7683087e0b8e4dddf4a4e9579cf9746e",
+  "sql/034_consultant_readonly_checks.sql": "1c99621b0126e99f77d024e00fb793fad60ae416280343550e65ed74f6c5d8d2",
+  "sql/034_normalize_consultant_scope_and_catalog_grants.sql": "3467a659d57df186e096ae2b66ff83f899f3335cb5af60cd8f19bb807ed3728e",
+  "sql/034_normalize_consultant_scope_and_catalog_grants_down.sql": "3e34b798c706128c92c8a3dde21c7f5d4ff47492ea96465f3bcedd913c4ff014",
+  "sql/035a_normalize_argentina_organization_defaults.sql": "8069d6fc5685613d4d28f5f1c7b75a20d970ff981abdfee8196afa48a069ecae",
+  "sql/035a_normalize_argentina_organization_defaults_down.sql": "6be8f6fc9b09a12b8772d68ce0b516179ebcc0456147b175c5a25a583f0e94ac",
+  "sql/035_owner_operational_context.sql": "c9a5c95be674fc5307617d9698123d58e1e6153177837db817a75e54bce5d585",
+  "sql/035_owner_operational_context_down.sql": "e24aaef58b9499eea454dc68cd9f5e4062666f4a1fde810302a1d6708f45daee",
+  "sql/036_owner_core_and_delegation_guard.sql": "6fba0e969a90152dc5511670f82c63c34a8ff195626f0a244437e6513faf8d3f",
+  "sql/036_owner_core_and_delegation_guard_down.sql": "9a28ea8c9b5efecc0b1de14f7664c8250d973157a6b2d7f06ffba83ec4436007"
+}

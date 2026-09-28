@@ -1,4 +1,5 @@
 import { categorizer } from './categorizer.js';
+import { canVisitModule, canImport, canOcr, tenantCan, pruneDeniedDatasets } from './core/moduleAccess.js';
 import { persistenceService } from './core/services/persistenceService.js';
 
 // 3. STORE GLOBAL DE LA APP (SOLID: Single Responsibility / Decoupled via Observer Pattern)
@@ -72,6 +73,12 @@ export class AppStore {
             'bulkToggleIibbRates', 'bulkDeleteIibbRates']) {
             const operation = this[name];
             this[name] = async (...args) => {
+                const actions = { confirmItem: 'RECORD_CLASSIFY', bulkSoftDeleteSelected: 'RECORD_SOFT_DELETE',
+                    promptBulkClassification: 'RECORD_CLASSIFY', bulkSoftDeleteSelectedPercepciones: 'RECORD_SOFT_DELETE',
+                    bulkSoftDeleteBankMovements: 'RECORD_SOFT_DELETE', promptBankBulkClassification: 'RECORD_CLASSIFY' };
+                if (actions[name] && (!tenantCan(this, 'RECORD_VIEW') || !tenantCan(this, actions[name]))) {
+                    throw new Error('No tenés permisos para esta acción en el contexto actual.');
+                }
                 if (this.sessionUserId && !['TENANT_READY', 'PLATFORM_READY'].includes(this.contextState)) {
                     throw new Error('Esperá a que el contexto esté listo.');
                 }
@@ -90,6 +97,10 @@ export class AppStore {
         this.permissions = { platform: { loaded: false, codes: [] }, organization: { loaded: false, orgId: null, codes: [] } };
         this.catalogAssignmentTargets = [];
         this.catalogCapabilities = { loaded: false, globalCatalogManage: false, catalogAssignAnyOrg: false, accessAnyOrg: false };
+    }
+
+    canSwitchOperationalContext() {
+        return this.platformContextSwitchAllowed === true || this.hasCapability('ACCESS_ANY_ORG');
     }
 
     hasCapability(code, { scope = 'PLATFORM', orgId = null } = {}) {
@@ -155,7 +166,7 @@ export class AppStore {
     }
 
     async switchOrganizationContext(orgId) {
-        if (!this.hasCapability('ACCESS_ANY_ORG')) throw new Error('ACCESS_ANY_ORG requerido.');
+        if (!this.canSwitchOperationalContext()) throw new Error('Alcance operacional de plataforma requerido.');
         if (this.pendingOperations) throw new Error('Esperá a que termine la operación en curso.');
         if (['SWITCHING', 'LOADING'].includes(this.contextState)) throw new Error('Hay un cambio de organización en curso.');
         const targetId = orgId || null;
@@ -219,6 +230,7 @@ export class AppStore {
     }
 
     endSession() {
+        this.platformContextSwitchAllowed = false;
         ++this.contextGeneration;
         this.clearTenantState();
         this.resetCatalogCapabilities();
@@ -260,6 +272,7 @@ export class AppStore {
 
     async hydrateConfirmedContext(context, generation) {
         if (generation !== this.contextGeneration) return;
+        this.platformContextSwitchAllowed = context.can_switch_platform_context === true;
         this.activeOrganizationId = context.organization_id;
         this.confirmedOrganizationName = context.organization_name || '';
         this.effectiveProfileName = context.profile_name || 'Permisos personalizados';
@@ -274,11 +287,13 @@ export class AppStore {
         // Retain only freshly verified platform authority so a failed tenant load can return to Platform.
         // Organization permissions and datasets remain unpublished until hydration completes.
         this.permissions.platform = draft.permissions.platform;
-        const targets = draft.hasCapability('ACCESS_ANY_ORG') ? await persistenceService.listOperationalOrgTargets() : [];
+        const targets = this.platformContextSwitchAllowed || draft.hasCapability('ACCESS_ANY_ORG')
+            ? await persistenceService.listOperationalOrgTargets() : [];
         if (generation !== this.contextGeneration) return;
         this.operationalOrgTargets = targets;
         if (context.organization_id) {
-            Object.assign(draft, await persistenceService.loadOperationalSnapshot(context.organization_id));
+            Object.assign(draft, await persistenceService.loadOperationalSnapshot(context.organization_id,
+                { capabilities: draft.permissions.organization.codes }));
             draft.salaries = draft.salariesList[0] || null;
         } else {
             await draft.loadTaxCategories();
@@ -315,25 +330,26 @@ export class AppStore {
     }
 
     canImportOperational(type) {
-        if (this.contextState !== 'TENANT_READY' || this.hasCapability('ACCESS_ANY_ORG')) return false;
-        const options = { scope: 'ORGANIZATION', orgId: this.activeOrganizationId };
-        const extra = { percepcion: 'PERCEPTION_IMPORT', banco: 'BANK_IMPORT', sueldo: 'PAYROLL_IMPORT' }[type];
-        return ['recibido', 'emitido', 'percepcion', 'banco', 'sueldo'].includes(type) &&
-            this.hasCapability('IMPORT_CREATE', options) && (!extra || this.hasCapability(extra, options));
+        return canImport(this, type);
     }
+
+    canVisitModule(id) { return canVisitModule(this, id); }
+    canOcrAction(action) { return canOcr(this, action); }
 
     async refreshOperationalCatalogs() {
         const generation = this.contextGeneration;
         const orgId = this.activeOrganizationId;
-        const snapshot = await persistenceService.loadOperationalSnapshot(orgId, { catalogOnly: true });
-        if (generation !== this.contextGeneration || orgId !== this.activeOrganizationId) return;
+        const permissions = this.permissions;
+        const snapshot = await persistenceService.loadOperationalSnapshot(orgId,
+            { catalogOnly: true, capabilities: permissions.organization.codes });
+        if (generation !== this.contextGeneration || orgId !== this.activeOrganizationId || permissions !== this.permissions) return;
         for (const key of ['taxCategories', 'economicActivities', 'displayedEconomicActivities', 'iibbRates']) this[key] = snapshot[key];
         this.notify();
     }
 
     async loadOrganizations() {
         this.organizations = [];
-        if (this.hasCapability('ACCESS_ANY_ORG')) {
+        if (this.canSwitchOperationalContext()) {
             this.operationalOrgTargets = await persistenceService.listOperationalOrgTargets();
             this.organizations = this.operationalOrgTargets.map(o => ({ id: o.organization_id, name: o.organization_name }));
         } else if (this.activeOrganizationId) {
@@ -383,6 +399,7 @@ export class AppStore {
     }
 
     notify() {
+        if (this.sessionUserId) pruneDeniedDatasets(this);
         this.listeners.forEach(listener => listener());
     }
 
@@ -904,17 +921,13 @@ export class AppStore {
 
         if (confirm(`¿Clasificar los ${ids.length} movimientos seleccionados con la categoría actual?`)) {
             try {
-                const { error } = await persistenceService.supabase
-                    .from('eco_financial_movements')
-                    .update({ 
-                        category_id: firstItem.category_id,
-                        activity_id: firstItem.activity_id 
-                    })
-                    .in('id', ids);
+                for (const id of ids) {
+                    const { error } = await persistenceService.supabase.rpc('update_movement_classification', {
+                        p_movement_id: id, p_category_id: firstItem.category_id, p_activity_id: firstItem.activity_id
+                    });
+                    if (error) throw error;
                     if (generation !== this.contextGeneration) return;
-                
-                if (error) throw error;
-                
+                }
                 ids.forEach(id => {
                     const it = this.bankTransactions.find(i => i.id === id);
                     if (it) {

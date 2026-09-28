@@ -1091,3 +1091,4 @@ tr:hover {
 .operational-context-toolbar [role="status"] { font-size: 13px; color: var(--text-muted); }
 .operational-module-body[hidden], .drop-zone[hidden], [hidden].operational-context-toolbar { display: none !important; }
 .operational-context-toolbar [hidden], form[hidden], #ocr-dropzone[hidden] { display: none !important; }
+.sidebar-nav a[hidden], [data-tab][hidden], .mobile-more-sheet a[hidden] { display: none !important; }

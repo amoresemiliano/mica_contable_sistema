@@ -28,7 +28,7 @@ export function mountOperationalOrgSelectors(store, document) {
         const ready = ['TENANT_READY', 'PLATFORM_READY'].includes(store.contextState);
         const busy = ['SWITCHING', 'LOADING'].includes(store.contextState);
         for (const view of views) {
-            view.label.hidden = !store.hasCapability('ACCESS_ANY_ORG');
+            view.label.hidden = !store.canSwitchOperationalContext();
             view.select.disabled = busy;
             view.select.replaceChildren();
             const choices = [{ organization_id: '', organization_name: 'MICA / Plataforma' }, ...store.operationalOrgTargets];
@@ -44,8 +44,8 @@ export function mountOperationalOrgSelectors(store, document) {
             view.select.value = store.activeOrganizationId || '';
             view.status.textContent = store.contextError || (busy ? 'Cargando contexto…' : '');
             view.retry.hidden = store.contextState !== 'ERROR';
-            const platformPage = ['tab-categorizacion', 'tab-configuracion'].includes(view.section.id);
-            const blocked = !ready || (!store.activeOrganizationId && !platformPage);
+            const platformPage = ['tab-categorizacion', 'tab-configuracion', 'tab-access'].includes(view.section.id);
+            const blocked = !ready || !store.canVisitModule(view.section.id) || (!store.activeOrganizationId && !platformPage);
             view.body.hidden = blocked;
             view.body.inert = blocked;
             if (ready && !store.activeOrganizationId && !platformPage) view.status.textContent = 'Seleccioná una organización para revisar este módulo.';
@@ -66,10 +66,15 @@ export function renderOperationalImportControls(store, document) {
         if (input) input.disabled = !allowed;
     }
     // Phase 1: local-only manual/OCR simulators have no safe rehydration contract.
-    for (const id of ['form-internal-movement', 'form-purchase-reginfo', 'ocr-dropzone']) {
+    for (const id of ['form-internal-movement', 'form-purchase-reginfo']) {
         const control = document.getElementById(id);
         if (control) { control.inert = true; control.hidden = true; }
     }
+    const ocr = document.getElementById('ocr-dropzone');
+    const ocrInput = document.getElementById('ocr-input');
+    if (ocr) { ocr.hidden = !store.canOcrAction('upload'); ocr.inert = true; }
+    // No real OCR backend exists. Capability never enables the old fabricated-invoice simulator.
+    if (ocrInput) ocrInput.disabled = true;
 }
 
 export function renderOperationalHeader(store, document) {

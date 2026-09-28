@@ -6,6 +6,7 @@
     <title>Mica Contable - Sistema Integral</title>
     <!-- Estilos externalizados -->
     <link rel="stylesheet" href="src/css/styles.css">
+    <link rel="stylesheet" href="src/css/administration.css">
     <!-- Biblioteca SheetJS para parsear planillas Excel (.xlsx/.xls) en el cliente -->
     <script src="src/js/vendor/xlsx.full.min.js"></script>
 </head>
@@ -73,6 +74,7 @@
             <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Movimientos Manuales</span></a></li>
             <li><a onclick="switchTab('tab-categorizacion')">🏷️ <span class="nav-text">Categorización</span></a></li>
             <li><a onclick="switchTab('tab-client-dashboard')">📊 <span class="nav-text">Panel Gerencial</span></a></li>
+            <li><a onclick="switchTab('tab-client-ocr')">?? <span class="nav-text">Documentos OCR</span></a></li>
             <li><a onclick="switchTab('tab-configuracion')">⚙️ <span class="nav-text">Configuración</span></a></li>
         </ul>
 
@@ -932,68 +934,11 @@
         </section>
 
         <!-- SECCIÓN 6: CONFIGURACIÓN GENERAL (ADMIN) -->
+        <section id="tab-access" class="tab-content hidden">
+            <div class="card"><h3>Acceso MICA</h3><p>No hay módulos habilitados en este contexto. Seleccioná una organización autorizada o solicitá permisos.</p></div>
+        </section>
         <section id="tab-configuracion" class="tab-content hidden">
-            <div class="card">
-                <h3>Administración de Clientes / Empresas Representadas</h3>
-                <table class="simple-table" id="table-clients">
-                    <thead>
-                        <tr>
-                            <th>CUIT</th>
-                            <th>Denominación Social</th>
-                            <th>Condición Fiscal</th>
-                            <th>Jurisdicción</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>20263235550</td>
-                            <td>VARONE VANESA PAOLA</td>
-                            <td>Responsable Inscripto</td>
-                            <td>AGIP (CABA)</td>
-                        </tr>
-                        <tr>
-                            <td>30710536461</td>
-                            <td>QUINTO ELEMENTO S.A</td>
-                            <td>Responsable Inscripto</td>
-                            <td>ARBA (Bs. As.)</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="card">
-                <h3>Usuarios del Sistema</h3>
-                <table class="simple-table">
-                    <thead>
-                        <tr>
-                            <th>Usuario</th>
-                            <th>Rol</th>
-                            <th>Empresa Vinculada</th>
-                            <th>Último Acceso</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>emiliano_admin</td>
-                            <td>Administrador General</td>
-                            <td>Todas</td>
-                            <td>Hoy, 15:32</td>
-                        </tr>
-                        <tr>
-                            <td>micaela_contable</td>
-                            <td>Estudio Contable (Asesor)</td>
-                            <td>Todas</td>
-                            <td>Ayer, 18:20</td>
-                        </tr>
-                        <tr>
-                            <td>vanesa_gerente</td>
-                            <td>Gerente / Cliente Final</td>
-                            <td>VARONE VANESA PAOLA</td>
-                            <td>Hace 3 días</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <div id="mica-administration" aria-live="polite"></div>
         </section>
 
         <!-- SECCIÓN 7: HUB DE USUARIO - PANEL GERENCIAL (TABLERO UNIFICADO) -->
