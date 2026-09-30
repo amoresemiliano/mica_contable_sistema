@@ -1,107 +1,83 @@
 import { appStore } from './store.js';
+import { supabase } from './core/services/supabaseClient.js';
+let renderEpoch = 0;
+appStore.tenantResetListeners.push(() => {
+    ++renderEpoch;
+    globalThis.document?.getElementById?.('manual-records')?.replaceChildren?.();
+});
 
-// 5. REGISTRO Y VALIDACIÓN DE MOVIMIENTOS MANUALES (SOLID: Single Responsibility)
+export async function manualRequest(action, fields = {}, id = null, store = appStore, client = supabase) {
+    const capability = { create:'manualCreate', edit:'manualEdit', delete:'manualSoftDelete' }[action];
+    if (capability && !store.canOperationalAction(capability)) throw new Error('No tenés permiso para esta acción manual.');
+    const org = store.activeOrganizationId, generation = store.contextGeneration;
+    if (!org || store.contextState !== 'TENANT_READY') throw new Error('Seleccioná una organización.');
+    ++store.pendingOperations;
+    try {
+        const { data, error } = await client.rpc('mica_manual_records', {
+            p_action: action, p_expected_org: org, p_id: id, p_data: fields
+        });
+        if (error) throw new Error(error.message);
+        if (generation !== store.contextGeneration || org !== store.activeOrganizationId) throw new Error('El contexto cambió. Recargá los movimientos.');
+        return data;
+    } finally { --store.pendingOperations; }
+}
+
 export class ManualMovements {
-    // Registra una compra manual con el formato estricto de REGINFO/LID AFIP
-    static saveReginfoPurchase(fields) {
-        // Phase 1: no tenant-safe persistent reader/writer exists for manual movements.
-        return { success: false, error: 'La carga manual no está habilitada en esta fase.' };
-        // Validaciones críticas
-        if (!fields.fecha || fields.fecha.length !== 8) {
-            return { success: false, error: "La fecha debe tener 8 caracteres (AAAAMMDD)." };
-        }
-        if (!fields.tipoComprobante || fields.tipoComprobante.length !== 3) {
-            return { success: false, error: "El tipo de comprobante debe ser de 3 caracteres (ej: 001)." };
-        }
-        if (!fields.puntoVenta || fields.puntoVenta.length !== 5 || isNaN(fields.puntoVenta)) {
-            return { success: false, error: "Punto de Venta debe ser numérico de 5 dígitos." };
-        }
-        if (!fields.numeroComprobante || fields.numeroComprobante.length !== 8 || isNaN(fields.numeroComprobante)) {
-            return { success: false, error: "El número de comprobante debe ser numérico de 8 dígitos." };
-        }
-
-        const total = parseFloat(fields.importeTotal) || 0;
-        const noGravado = parseFloat(fields.importeNoGravado) || 0;
-        const exento = parseFloat(fields.importeExento) || 0;
-        const percIva = parseFloat(fields.importePercepIva) || 0;
-        const percIibb = parseFloat(fields.importePercepIibb) || 0;
-        const percMun = parseFloat(fields.importePercepMun) || 0;
-        const impInternos = parseFloat(fields.importeInternos) || 0;
-        
-        // Tipo de cambio (por defecto 1.000000)
-        let tipoCambio = parseFloat(fields.tipoCambio) || 1;
-        
-        const movement = {
-            id: `reginfo-${Date.now()}`,
-            origen: 'manual-reginfo',
-            fecha: `${fields.fecha.substring(0,4)}-${fields.fecha.substring(4,6)}-${fields.fecha.substring(6,8)}`, // YYYY-MM-DD
-            fechaRaw: fields.fecha,
-            tipoComprobante: fields.tipoComprobante,
-            puntoVenta: fields.puntoVenta,
-            numeroComprobante: fields.numeroComprobante,
-            cuit: fields.cuit.replace(/\D/g, ''),
-            razonSocial: fields.razonSocial || 'Proveedor Manual',
-            total,
-            noGravado,
-            exento,
-            percIva,
-            percIibb,
-            percMun,
-            impInternos,
-            moneda: fields.moneda || 'PES',
-            tipoCambio,
-            cantidadAlicuotas: parseInt(fields.cantidadAlicuotas) || 1,
-            confirmada: true
-        };
-
-        // Guardamos en el store unificado
-        appStore.addManualMovement(movement);
-
-        // Agregamos también como renglón a la grilla general para que se compute en las liquidaciones
-        // Para simular la compra de ARCA, normalizamos para el store de compras
-        appStore.addItems([{
-            id: movement.id,
-            tipo: 'recibido',
-            fecha: `${fields.fecha.substring(6,8)}/${fields.fecha.substring(4,6)}/${fields.fecha.substring(0,4)}`, // DD/MM/YYYY
-            comprobante: `${fields.tipoComprobante} - Factura Manual`,
-            cuit: movement.cuit,
-            razonSocial: movement.razonSocial,
-            total,
-            otrosTributos: percIva + percIibb + percMun + impInternos,
-            saldoAExplicar: 0, // Las manuales se asumen ya explicadas por desglose
-            percepcionesMapeadas: [
-                { jurisdiction: 'IVA', amount: percIva },
-                { jurisdiction: 'IIBB', amount: percIibb },
-                { jurisdiction: 'MUNICIPAL', amount: percMun },
-                { jurisdiction: 'INTERNOS', amount: impInternos }
-            ],
-            categoria: fields.categoria || 'Mercaderías / Insumos',
-            sugerida: false,
-            confirmada: true
-        }]);
-
-        return { success: true, movement };
+    static async save(kind, fields) {
+        try {
+            await manualRequest('create', { kind, fields });
+            await renderManualRecords();
+            return { success:true };
+        } catch (error) { return { success:false, error:error.message }; }
     }
+    static saveReginfoPurchase(fields) { return this.save('PURCHASE', fields); }
+    static saveInternalMovement(fields) { return this.save('INTERNAL', fields); }
+}
 
-    // Registra movimientos internos de caja chica
-    static saveInternalMovement(fields) {
-        // Phase 1: never create unscoped local records that cannot be rehydrated.
-        return { success: false, error: 'La carga manual no está habilitada en esta fase.' };
-        if (!fields.tipo || !fields.fecha || !fields.imputacion || !fields.importe) {
-            return { success: false, error: "Los campos Tipo, Fecha, Imputación e Importe son obligatorios." };
+export async function renderManualRecords() {
+    const root = document.getElementById('manual-records');
+    if (!root?.replaceChildren) return;
+    const generation = appStore.contextGeneration;
+    const epoch = ++renderEpoch;
+    root.replaceChildren();
+    if (!appStore.hasCapability('MANUAL_MOVEMENT_VIEW', { scope:'ORGANIZATION', orgId:appStore.activeOrganizationId })) return;
+    try {
+        const rows = await manualRequest('list');
+        if (generation !== appStore.contextGeneration || epoch !== renderEpoch) return;
+        for (const row of rows) {
+            const line = document.createElement('div'); line.className = 'manual-record-row';
+            const caption = document.createElement('span');
+            caption.textContent = `${row.payload.fields.fecha} · ${row.payload.fields.razonSocial || row.payload.fields.descripcion || row.payload.fields.tipo} · ${row.payload.fields.importeTotal || row.payload.fields.importe}`;
+            line.append(caption);
+            if (appStore.canOperationalAction('manualEdit')) {
+                const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = 'Editar';
+                edit.onclick = () => {
+                    const form = document.createElement('form');
+                    for (const [name,value] of Object.entries(row.payload.fields)) {
+                        const template = document.getElementById(row.payload.kind === 'PURCHASE' ? 'form-purchase-reginfo' : 'form-internal-movement');
+                        const original = template?.querySelector(`[name="${name}"]`);
+                        const label = document.createElement('label');
+                        label.textContent = original?.closest('.form-group')?.querySelector('label')?.textContent || name;
+                        const input = original && original.type !== 'radio' ? original.cloneNode(true) : document.createElement('input');
+                        input.removeAttribute('id'); input.name = name; input.value = value; label.append(input); form.append(label);
+                    }
+                    const submit = document.createElement('button'); submit.textContent = 'Guardar cambios';
+                    const status = document.createElement('p'); status.setAttribute('role','status'); form.append(submit,status);
+                    form.onsubmit = async e => { e.preventDefault(); submit.disabled = true;
+                        try { await manualRequest('edit',{kind:row.payload.kind,fields:Object.fromEntries(new FormData(form))},row.id); await renderManualRecords(); }
+                        catch(error) { status.textContent = error.message; submit.disabled = false; }
+                    }; line.append(form); edit.disabled = true;
+                }; line.append(edit);
+            }
+            if (appStore.canOperationalAction('manualSoftDelete')) {
+                const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Eliminar';
+                remove.onclick = async () => { remove.disabled = true;
+                    try { await manualRequest('delete',{},row.id); await renderManualRecords(); }
+                    catch(error) { remove.disabled = false; caption.textContent = error.message; }
+                }; line.append(remove);
+            }
+            root.append(line);
         }
-
-        const movement = {
-            origen: 'manual-interno',
-            tipo: fields.tipo, // 'Ingreso' o 'Gasto'
-            fecha: fields.fecha, // YYYY-MM-DD
-            imputacion: fields.imputacion, // YYYY-MM (impacto contable)
-            importe: parseFloat(fields.importe) || 0,
-            descripcion: fields.descripcion || '',
-            confirmada: true
-        };
-
-        appStore.addManualMovement(movement);
-        return { success: true, movement };
-    }
+        if (!rows.length) root.textContent = 'Sin movimientos manuales guardados.';
+    } catch(error) { if (generation === appStore.contextGeneration && epoch === renderEpoch) root.textContent = error.message; }
 }

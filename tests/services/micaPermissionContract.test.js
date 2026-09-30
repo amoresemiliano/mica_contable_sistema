@@ -42,7 +42,7 @@ test.each(Object.keys(presets))('%s: module, direct navigation, importer and act
     expect(canOperationalAction(s,'softDelete')).toBe(canOperationalAction(s,'classify'));
     expect(canOperationalAction(s,'restore')).toBe(['ROOT_TECHNICAL_MICA','ACCOUNTING_SUPERADMIN'].includes(preset));
     expect(canOperationalAction(s,'export')).toBe(preset!=='MICA_IMPORT_OPERATOR');
-    expect(canOperationalAction(s,'manualCreate')).toBe(false);
+    expect(canOperationalAction(s,'manualCreate')).toBe(['ROOT_TECHNICAL_MICA','ACCOUNTING_SUPERADMIN','MICA_ORG_ADMIN','MICA_ACCOUNTANT'].includes(preset));
     const noTenant=actor(codes,platform,null);
     for(const type of Object.keys(MICA_IMPORT_CONTRACT)) expect(canImport(noTenant,type)).toBe(false);
     expect(canVisitModule(noTenant,'tab-bancos')).toBe(false);
@@ -64,12 +64,12 @@ test('approved additions are assignable independently of their unavailable backe
     expect(editableCapabilities(additions,'ORGANIZATION')).toEqual(additions);
     for(const c of additions) {
         expect(c.delegationClass).toBe('ORGANIZATION_DELEGABLE');
-        expect(c.runtimeStatus).toBe('DISABLED_PENDING_BACKEND');
+        expect(c.runtimeStatus).toBe(c.code.startsWith('MANUAL_MOVEMENT_')?'ACTIVE':'DISABLED_PENDING_BACKEND');
         expect(isMicaCapability(c.code,c.scope)).toBe(true);
     }
     const s=actor(catalog.filter(c=>c.scope==='ORGANIZATION').map(c=>c.code));
-    for(const action of ['manualCreate','manualEdit','manualSoftDelete']) expect(canOperationalAction(s,action)).toBe(false);
-    expect(canImport(s,'recibido')).toBe(false);
+    for(const action of ['manualCreate','manualEdit','manualSoftDelete']) expect(canOperationalAction(s,action)).toBe(true);
+    expect(canImport(s,'recibido')).toBe(true);
 });
 test('historical tenant restore and ACCESS_ANY_ORG cannot bypass the new platform gate', () => {
     const contextual=['RECORD_VIEW','RECORD_RESTORE'];

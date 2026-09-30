@@ -573,12 +573,12 @@
 
         <!-- SECCIÓN 4: MOVIMIENTOS MANUALES -->
         <section id="tab-movimientos-manuales" class="tab-content hidden">
-            <p class="context-unavailable">Este módulo no está habilitado en esta fase.</p>
             <div class="grid-inputs">
                 <!-- Formulario de Compra Manual REGINFO AFIP -->
-                <div class="card" style="grid-column: span 2;">
+                <div class="card" style="grid-column: 1 / -1;">
                     <h3>Registrar Compra Manual (Formato REGINFO)</h3>
                     <form id="form-purchase-reginfo">
+                        <p>El comprobante se guarda en el registro manual de esta organización.</p>
                         <div class="grid-inputs" style="margin-bottom: 12px;">
                             <div class="form-group">
                                 <label>Fecha Comprobante (AAAAMMDD)</label>
@@ -705,7 +705,8 @@
                     </form>
                 </div>
             </div>
-            <details id="manual-ocr-panel" class="card">
+            <div class="card"><h3>Registro manual</h3><div id="manual-records" role="status"></div></div>
+            <details id="manual-ocr-panel" class="card" open>
                 <summary>Documentos y OCR</summary>
             <div class="card">
                 <h3>Documentos y OCR</h3>
@@ -713,8 +714,8 @@
 
                 <div class="ocr-zone" id="ocr-dropzone">
                     <p style="font-size: 15px; font-weight: 600; color: var(--accent);">
-                        Carga de documentos pendiente de habilitación</p>
-                    <span style="font-size: 12px; color: var(--text-muted);">Servicio pendiente de conexión</span>
+                        Seleccionar imagen / PDF o arrastrar aquí</p>
+                    <span style="font-size: 12px; color: var(--text-muted);">OCR próximamente · selección local, sin procesamiento</span>
                     <input type="file" id="ocr-input" accept="image/*,application/pdf" style="position: absolute; top:0; left:0; width:100%; height:100%; opacity:0; cursor:pointer;">
                 </div>
 

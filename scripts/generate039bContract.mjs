@@ -1,7 +1,8 @@
 // Generates review artifacts only. Never connects to a DB or executes SQL.
 import fs from 'node:fs';
-import { MICA_PERMISSION_CATALOG as catalog, MICA_PRESET_DEFINITIONS as presets, PERMISSION_GROUPS as groups,
-    SCOPE_LABELS, presetCapabilities, MICA_BUSINESS_FUNCTIONS } from '../src/js/core/micaPermissionContract.js';
+import { MICA_PERMISSION_CATALOG_039B as catalog, MICA_PRESET_DEFINITIONS as presets, PERMISSION_GROUPS as groups,
+    SCOPE_LABELS, MICA_BUSINESS_FUNCTIONS } from '../src/js/core/micaPermissionContract.js';
+const presetCapabilities = (preset, scope) => catalog.filter(c=>c.scope===scope && c.defaultPresets.includes(preset)).map(c=>c.code);
 const check = process.argv.includes('--check');
 const quote = s => "'" + s.replaceAll("'", "''") + "'";
 const array = list => 'ARRAY[' + list.map(quote).join(',') + ']::TEXT[]';

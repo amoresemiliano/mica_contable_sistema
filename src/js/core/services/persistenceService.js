@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient.js';
 import { isMicaCapability } from '../micaCapabilities.js';
+import { validateImportEnvelope } from '../importEnvelope.js';
 
 /**
  * Servicio de Persistencia para MICA (Fase 2 - Supabase Staging)
@@ -146,7 +147,7 @@ export class PersistenceService {
             throw new Error(`Error en RPC create_import: ${error.message}`);
         }
 
-        return data;
+        return validateImportEnvelope(data);
     }
 
     /**
@@ -161,12 +162,23 @@ export class PersistenceService {
             throw new Error(`Error en RPC request_failed_import_retry: ${error.message}`);
         }
 
-        return {
-            import_id: data.new_import_id || data.import_id,
-            organization_id: data.organization_id,
-            storage_prefix: data.storage_prefix,
-            ...data
-        };
+        return validateImportEnvelope(data);
+    }
+
+    async inspectImportedFile(fileId) {
+        const { data, error } = await supabase.rpc('mica_import_file_status', { p_file: fileId });
+        if (error) throw new Error(error.message);
+        return data;
+    }
+
+    async uploadImportSource(envelope, options) {
+        validateImportEnvelope(envelope);
+        if (envelope.source_file_reused) {
+            if (!envelope.storage_path?.startsWith(envelope.organization_id + '/'))
+                throw new Error('Referencia al archivo original inválida.');
+            return { path: envelope.storage_path, mimeType: this.getMimeTypeFallback(options.file.name, options.mimeType), reused: true };
+        }
+        return this.uploadSourceFile({ ...options, storagePrefix: envelope.storage_prefix });
     }
 
     /**

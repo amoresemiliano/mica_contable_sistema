@@ -14,6 +14,27 @@ const node = tag => ({ tag, children: [], value: '', hidden: false, events: {},
 const all = n => [n, ...(n.children || []).filter(c => typeof c === 'object').flatMap(all)];
 const rows = Array.from({length: 123}, (_, i) => ({id: String(i), name: i < 66 ? 'Norte' : 'Sur', fecha: '2026-09-01'}));
 
+test('039c invitation UI filters preset scope and keeps activation separate',async()=>{
+    const oldDocument=global.document,oldFormData=global.FormData;
+    global.document={createElement:node};
+    global.FormData=class {constructor(f){this.inputs=all(f);}get(name){return this.inputs.find(n=>n.name===name)?.value;}};
+    try {
+        const data=fixture(),root=node('root'); data.presets.push({id:'tenant',name:'Contador',scope:'ORGANIZATION',is_active:true});
+        const invitation=jest.fn(async(action)=>action==='list'?[]:{status:'PENDING_AUTHENTICATION'}),apply=jest.fn();
+        const store={sessionUserId:'actor',contextState:'TENANT_READY',activeOrganizationId:'NORTE',contextGeneration:1,pendingOperations:0,subscribe(){}};
+        await createAdministrationView(root,store,{read:async()=>data,invitation,apply}).load();
+        all(root).find(n=>n.textContent==='+ Invitar usuario').onclick();
+        const f=all(root).find(n=>n.tag==='form'&&all(n).some(c=>c.textContent==='Invitar usuario'));
+        const scope=all(f).find(n=>n.name==='scope'),preset=all(f).find(n=>n.name==='preset');
+        expect(preset.children.map(n=>n.value)).toEqual(['tenant']);
+        scope.value='PLATFORM';scope.onchange();expect(preset.children.map(n=>n.value)).toEqual(['p']);
+        all(f).find(n=>n.name==='email').value='new@example.invalid';preset.value='p';
+        await f.events.submit({preventDefault(){}});
+        expect(invitation).toHaveBeenCalledWith('create',null,{email:'new@example.invalid',role_template_id:'p'});
+        expect(apply).not.toHaveBeenCalled();
+    } finally {global.document=oldDocument;global.FormData=oldFormData;}
+});
+
 test('pagination bounds, sizes, filter reset, empty results and tenant reset', () => {
     const grid = new OperationalGrid({moduleId:'comprobantes',searchFields:['name']});
     expect(grid.paginate(rows)).toMatchObject({page:1,pages:3,total:123,pageSize:50});
@@ -138,7 +159,7 @@ test('approved pending features remain selectable and persist in a custom preset
         const boxes=all(form).filter(n=>n.type==='checkbox');
         expect(boxes.map(n=>n.value)).toEqual(approved.map(c=>c.code));
         for(const box of boxes) {expect(box.disabled).not.toBe(true); box.checked=true; box.onchange();}
-        expect(all(form).filter(n=>n.textContent==='Permiso asignable · función pendiente de backend')).toHaveLength(11);
+        expect(all(form).filter(n=>n.textContent==='Permiso asignable · función pendiente de backend')).toHaveLength(7);
         for(const c of approved) {
             expect(all(form).some(n=>n.tag==='strong'&&n.textContent===c.label)).toBe(true);
             expect(all(form).some(n=>n.className==='mica-permission-code'&&n.textContent===c.code)).toBe(true);

@@ -9,9 +9,22 @@ export function requireOcrAction(action, store = appStore) {
 }
 export function setupOCR() {
     const input = document.getElementById('ocr-input');
-    if (input) input.disabled = true;
     const status = document.getElementById('ocr-status-text');
     if (status) status.textContent = 'OCR pendiente de conexión al servicio real; no se procesan ni confirman documentos.';
+    const select = file => {
+        if (!appStore.canOcrAction('upload') || !file) return;
+        if (status) status.textContent = `${file.name} seleccionado. OCR próximamente; el archivo no se subió ni procesó.`;
+    };
+    if (input) input.onchange = () => select(input.files?.[0]);
+    const zone = document.getElementById('ocr-dropzone');
+    if (zone) {
+        zone.ondragover = event => event.preventDefault();
+        zone.ondrop = event => { event.preventDefault(); select(event.dataTransfer.files?.[0]); };
+    }
+    appStore.tenantResetListeners.push(() => {
+        if (input) input.value = '';
+        if (status) status.textContent = 'OCR próximamente. Seleccioná una imagen o PDF.';
+    });
 }
 export function renderOcrHistory() {
     const body = document.getElementById('ocr-history-table');

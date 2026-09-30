@@ -1,3 +1,5 @@
+import { initializeWithSessionRecovery } from './core/sessionRecovery.js';
+import { validateImportEnvelope, refreshDuplicateImport, assertImportResult } from './core/importEnvelope.js';
 import { renderGridPagination } from './components/gridPagination.js';
 import { requestOperationalData } from './components/operationalDataStatus.js';
 import { MICA_MODULE_CONTRACT } from './core/micaPermissionContract.js';
@@ -8,7 +10,7 @@ import { renderModuleAccess } from './core/moduleAccess.js';
 import { appStore } from './store.js';
 import { setupOCR, renderOcrHistory } from './ocr.js';
 import { Reconciler } from './reconciler.js';
-import { ManualMovements } from './manualMovements.js';
+import { ManualMovements, renderManualRecords } from './manualMovements.js';
 import { Activities } from './activities.js';
 import { readFileAsArrayBuffer, readFileAsText, detectFileFormat } from './core/adapters/fileAdapter.js';
 import { createSheetJsAdapter } from './core/adapters/sheetJsAdapter.js';
@@ -364,6 +366,8 @@ const loginBtn = document.getElementById('google-login-btn');
 let authCheckGeneration = 0;
 async function checkUserProfile(session) {
   const check = ++authCheckGeneration;
+  document.getElementById('retry-session-context')?.remove?.();
+  document.getElementById('fallback-logout-btn')?.remove?.();
   if (!session) {
     appStore.endSession();
     appContainer.classList.add('hidden');
@@ -376,7 +380,8 @@ async function checkUserProfile(session) {
   authStatusMsg.style.display = 'block';
   authStatusMsg.innerText = 'Verificando acceso…';
   try {
-    await appStore.initializeSession(session.user);
+    await initializeWithSessionRecovery({ session, auth: supabase.auth,
+      initialize: user => appStore.initializeSession(user), isCurrent: () => check === authCheckGeneration });
     if (check !== authCheckGeneration) return;
     window.currentSessionUserIdentity = session.user.email || 'Email no disponible';
     loginContainer.style.display = 'none';
@@ -406,13 +411,19 @@ async function checkUserProfile(session) {
   }
 }
 
-supabase.auth.getSession().then(({ data: { session } }) => {
+let authEventVersion = 0;
+supabase.auth.getSession().then(({ data: { session }, error }) => {
+  if (authEventVersion) return;
+  if (error) { authStatusMsg.textContent=error.message; authStatusMsg.style.display='block'; return; }
   checkUserProfile(session);
 });
 
 supabase.auth.onAuthStateChange((event, session) => {
   if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_DELETED') {
-    checkUserProfile(session);
+    const version = ++authEventVersion;
+    ++authCheckGeneration;
+    // Leave the auth callback before RPCs or refreshSession acquire the auth lock.
+    setTimeout(() => { if (version === authEventVersion) checkUserProfile(session); }, 0);
   }
 });
 
@@ -481,6 +492,7 @@ export function switchTab(tabId) {
         updateSalaryFormFields();
     }
     else if (tabId === 'tab-movimientos-manuales') {
+        renderManualRecords();
     }
     else if (tabId === 'tab-categorizacion') {
         if (appStore.loadTaxCategories) appStore.loadTaxCategories();
@@ -1082,7 +1094,7 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                     const checkResult = await persistenceService.checkFileImportable(hashHex);
                     if (!validContext()) return;
                     if (checkResult && checkResult.importable === false) {
-                        alert("Este archivo ya fue importado anteriormente.");
+                        await showExistingImport(checkResult, isCompra ? 'recibido' : 'emitido', validContext);
                         closeAndRemove();
                         return;
                     }
@@ -1100,10 +1112,11 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                     }
 
                     // 4. Safe filename y MIME fallback
+                    validateImportEnvelope(importInfo, appStore.activeOrganizationId);
                     const safeFilename = persistenceService.getSafeFilename(rawFile.name);
 
                     // 5. Upload a Storage privado
-                    const uploadResult = await persistenceService.uploadSourceFile({
+                    const uploadResult = await persistenceService.uploadImportSource(importInfo, {
                         file: rawFile,
                         storagePrefix: importInfo.storage_prefix,
                         safeFilename: safeFilename,
@@ -1112,8 +1125,9 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                     if (!validContext()) return;
 
                     // 6. Persistencia del Lote mediante RPC transaccional
+                    let persisted;
                     try {
-                        await persistenceService.persistImportBatch({
+                        persisted = await persistenceService.persistImportBatch({
                             importId: importInfo.import_id,
                             fileInfo: {
                                 original_name: rawFile.name,
@@ -1127,13 +1141,14 @@ function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
                         if (!validContext()) return;
                     } catch (persistErr) {
                         // Cleanup compensatorio de storage en caso de fallo
-                        await persistenceService.cleanupStorageFile(uploadResult.path);
+                        if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
                         if (!validContext()) return;
                         throw persistErr;
                     }
 
                     closeAndRemove();
-                    onConfirm(toImport);
+                    assertImportResult(persisted);
+                    await appStore.refreshOperationalData('tab-conciliador');
 
                 } catch (err) {
                     console.error("Error durante la persistencia de la importación:", err);
@@ -1435,7 +1450,7 @@ export class UIManager {
                             const checkResult = await persistenceService.checkFileImportable(hashHex);
                             if (!validContext()) return;
                             if (checkResult && checkResult.importable === false) {
-                                alert("Este archivo de percepciones ya fue importado anteriormente.");
+                                await showExistingImport(checkResult, 'percepcion', validContext);
                                 return;
                             }
                             
@@ -1447,9 +1462,10 @@ export class UIManager {
                                 importInfo = await persistenceService.createImport(sourceType, 'PERCEPCION');
                                 if (!validContext()) return;
                             }
+                            validateImportEnvelope(importInfo, appStore.activeOrganizationId);
                             const safeFilename = persistenceService.getSafeFilename(file.name);
                             
-                            const uploadResult = await persistenceService.uploadSourceFile({
+                            const uploadResult = await persistenceService.uploadImportSource(importInfo, {
                                 file: file,
                                 storagePrefix: importInfo.storage_prefix,
                                 safeFilename: safeFilename,
@@ -1457,8 +1473,9 @@ export class UIManager {
                             });
                             if (!validContext()) return;
                             
+                            let persisted;
                             try {
-                                await persistenceService.persistPerceptionsBatch({
+                                persisted = await persistenceService.persistPerceptionsBatch({
                                     importId: importInfo.import_id,
                                     fileInfo: {
                                         original_name: file.name,
@@ -1471,12 +1488,13 @@ export class UIManager {
                                 });
                                 if (!validContext()) return;
                             } catch (persistErr) {
-                                await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
                                 if (!validContext()) return;
                                 throw persistErr;
                             }
                             
-                            appStore.addPerceptions(acceptedItems);
+                            assertImportResult(persisted);
+                            await appStore.refreshOperationalData('tab-percepciones');
                             Reconciler.runCrossMatching();
                             UIManager.render();
                         } catch (err) {
@@ -1513,7 +1531,7 @@ export class UIManager {
                             const checkResult = await persistenceService.checkFileImportable(hashHex);
                             if (!validContext()) return;
                             if (checkResult && checkResult.importable === false) {
-                                alert("Este archivo bancario ya fue importado anteriormente.");
+                                await showExistingImport(checkResult, 'banco', validContext);
                                 return;
                             }
                             
@@ -1525,9 +1543,10 @@ export class UIManager {
                                 importInfo = await persistenceService.createImport('BANK_STATEMENT_BBVA', 'BANCO');
                                 if (!validContext()) return;
                             }
+                            validateImportEnvelope(importInfo, appStore.activeOrganizationId);
                             const safeFilename = persistenceService.getSafeFilename(file.name);
                             
-                            const uploadResult = await persistenceService.uploadSourceFile({
+                            const uploadResult = await persistenceService.uploadImportSource(importInfo, {
                                 file: file,
                                 storagePrefix: importInfo.storage_prefix,
                                 safeFilename: safeFilename,
@@ -1535,8 +1554,9 @@ export class UIManager {
                             });
                             if (!validContext()) return;
                             
+                            let persisted;
                             try {
-                                await persistenceService.persistFinancialMovementsBatch({
+                                persisted = await persistenceService.persistFinancialMovementsBatch({
                                     importId: importInfo.import_id,
                                     fileInfo: {
                                         original_name: file.name,
@@ -1549,12 +1569,13 @@ export class UIManager {
                                 });
                                 if (!validContext()) return;
                             } catch (persistErr) {
-                                await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
                                 if (!validContext()) return;
                                 throw persistErr;
                             }
                             
-                            appStore.addBankTransactions(accepted);
+                            assertImportResult(persisted);
+                            await appStore.refreshOperationalData('tab-bancos');
                             UIManager.render();
                         } catch (err) {
                             console.error("Error durante la persistencia bancaria:", err);
@@ -1581,7 +1602,7 @@ export class UIManager {
                         const checkResult = await persistenceService.checkFileImportable(hashHex);
                         if (!validContext()) return;
                         if (checkResult && checkResult.importable === false) {
-                            alert("Este archivo de sueldos ya fue importado anteriormente.");
+                            await showExistingImport(checkResult, 'sueldo', validContext);
                             return;
                         }
                         
@@ -1593,9 +1614,10 @@ export class UIManager {
                             importInfo = await persistenceService.createImport('PAYROLL_ACONPY', 'SUELDO');
                             if (!validContext()) return;
                         }
+                        validateImportEnvelope(importInfo, appStore.activeOrganizationId);
                         const safeFilename = persistenceService.getSafeFilename(file.name);
                         
-                        const uploadResult = await persistenceService.uploadSourceFile({
+                        const uploadResult = await persistenceService.uploadImportSource(importInfo, {
                             file: file,
                             storagePrefix: importInfo.storage_prefix,
                             safeFilename: safeFilename,
@@ -1603,8 +1625,9 @@ export class UIManager {
                         });
                         if (!validContext()) return;
                         
+                        let persisted;
                         try {
-                            await persistenceService.persistFinancialMovementsBatch({
+                            persisted = await persistenceService.persistFinancialMovementsBatch({
                                 importId: importInfo.import_id,
                                 fileInfo: {
                                     original_name: file.name,
@@ -1617,12 +1640,13 @@ export class UIManager {
                             });
                             if (!validContext()) return;
                         } catch (persistErr) {
-                            await persistenceService.cleanupStorageFile(uploadResult.path);
+                            if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
                             if (!validContext()) return;
                             throw persistErr;
                         }
                         
-                        appStore.addSalary(firstRes.normalizedData);
+                        assertImportResult(persisted);
+                        await appStore.refreshOperationalData('tab-sueldos');
                         if (typeof updateSalaryFormFields === 'function') updateSalaryFormFields();
                         alert(`Sueldos Acompy importados correctamente (Período: ${firstRes.normalizedData.periodo || 'N/D'}).`);
                     } catch (err) {
@@ -3083,11 +3107,17 @@ appStore.tenantResetListeners.push(() => {
         else el.value = '';
     });
     document.querySelectorAll('form[data-editing-id]').forEach(el => delete el.dataset.editingId);
+    for (const id of ['form-purchase-reginfo','form-internal-movement']) document.getElementById(id)?.reset?.();
+    const today = new Date().toISOString().slice(0,10);
+    const manualDate = document.getElementById('internal-date'), manualPeriod = document.getElementById('internal-imputacion');
+    if (manualDate) manualDate.value = today;
+    if (manualPeriod) manualPeriod.value = today.slice(0,7);
     document.getElementById('bulk-actions-bar')?.classList.add('hidden');
     parsedArcaCatalogState = null;
 });
 
 // Suscribirse a los eventos del store para reactividad
+let manualContextRendered = -1;
 appStore.subscribe(() => {
     renderModuleAccess(appStore, document, switchTab);
     renderOperationalHeader(appStore, document);
@@ -3097,6 +3127,9 @@ appStore.subscribe(() => {
     });
     if (!['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState)) return;
     UIManager.render();
+    if (document.querySelector('.tab-content:not(.hidden)')?.id === 'tab-movimientos-manuales' && manualContextRendered !== appStore.contextGeneration) {
+        manualContextRendered = appStore.contextGeneration; renderManualRecords();
+    }
     requestOperationalData(appStore, document, document.querySelector('.tab-content:not(.hidden)')?.id);
     updateSalaryFormFields();
     if (appStore.canVisitModule('tab-client-dashboard')) renderClientDashboard();
@@ -3150,7 +3183,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Listener del Formulario de Movimiento Interno
     const formInternal = document.getElementById('form-internal-movement');
     if (formInternal) {
-        formInternal.addEventListener('submit', (e) => {
+        formInternal.addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(formInternal);
             const data = {
@@ -3161,7 +3194,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 descripcion: formData.get('descripcion')
             };
 
-            const res = ManualMovements.saveInternalMovement(data);
+            const submit = formInternal.querySelector('[type=submit]'); if (submit.disabled) return; submit.disabled=true;
+            const res = await ManualMovements.saveInternalMovement(data); submit.disabled=false;
             if (res.success) {
                 alert("Movimiento interno guardado con éxito.");
                 formInternal.reset();
@@ -3175,15 +3209,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Listener del Formulario de Compra Manual REGINFO
     const formReginfo = document.getElementById('form-purchase-reginfo');
     if (formReginfo) {
-        formReginfo.addEventListener('submit', (e) => {
+        formReginfo.addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(formReginfo);
             const data = {};
             formData.forEach((val, key) => { data[key] = val; });
 
-            const res = ManualMovements.saveReginfoPurchase(data);
+            const submit = formReginfo.querySelector('[type=submit]'); if (submit.disabled) return; submit.disabled=true;
+            const res = await ManualMovements.saveReginfoPurchase(data); submit.disabled=false;
             if (res.success) {
-                alert("Compra manual registrada e incorporada al listado de compras.");
+                alert("Comprobante guardado en el registro manual de esta organización.");
                 formReginfo.reset();
             } else {
                 alert(res.error);
@@ -3240,3 +3275,11 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 });
+
+async function showExistingImport(check, type, isCurrent) {
+    const message = await refreshDuplicateImport({ check, type, service: persistenceService, store: appStore, isCurrent });
+    if (!message || !isCurrent()) return;
+    const grid = {recibido:comprobantesGrid,emitido:comprobantesGrid,percepcion:percepcionesGrid,banco:bancosGrid}[type];
+    grid?.resetTenantState();
+    UIManager.render(); updateSalaryFormFields(); alert(message);
+}

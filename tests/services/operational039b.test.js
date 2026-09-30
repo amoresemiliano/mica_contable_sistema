@@ -1,3 +1,4 @@
+import { MICA_PERMISSION_CATALOG_039B as historical } from '../../src/js/core/micaPermissionContract.js';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { MICA_TENANT_PRESETS, MICA_ACCOUNTING_PLATFORM } from '../../src/js/core/micaPresets.js';
@@ -12,7 +13,7 @@ test('039b changes none of the previous migrations', () => {
 });
 test('SQL seed and JS proposal contain identical exact MICA capability lists', () => {
     for (const [code, caps] of Object.entries(MICA_TENANT_PRESETS)) {
-        expect(up).toContain(`('${code}',ARRAY[${caps.map(c=>`'${c}'`).join(',')}]::TEXT[],`);
+        expect(up).toContain(`('${code}',ARRAY[${caps.filter(c=>c!=='FISCAL_DOCUMENT_IMPORT').map(c=>`'${c}'`).join(',')}]::TEXT[],`);
         expect(new Set(caps).size).toBe(caps.length);
         for (const c of caps) expect(isMicaCapability(c,'ORGANIZATION')).toBe(true);
     }
@@ -25,7 +26,7 @@ test('SQL seed and JS proposal contain identical exact MICA capability lists', (
 });
 test('read and writes both recognize delegable administration without rewriting the permission evaluator', () => {
     const pairs=[...body('private.mica_capability_allowed').matchAll(/\('([A-Z_]+)','(PLATFORM|ORGANIZATION)'\)/g)].map(m=>[m[1],m[2]]);
-    expect(pairs).toEqual([...MICA_PLATFORM_CAPABILITIES.map(c=>[c,'PLATFORM']),...MICA_ORGANIZATION_CAPABILITIES.map(c=>[c,'ORGANIZATION'])]);
+    expect(pairs).toEqual([...historical.filter(c=>c.scope==='PLATFORM'&&c.status!=='PROPOSED').map(c=>[c.code,c.scope]),...historical.filter(c=>c.scope==='ORGANIZATION'&&c.status!=='PROPOSED').map(c=>[c.code,c.scope])]);
     expect(body('public.mica_admin_read')).toContain('global_users BOOLEAN:=COALESCE(private.admin_039b_users(),FALSE)');
     expect(body('public.mica_admin_read')).toContain('private.admin_039b_presets()');
     expect(body('public.mica_admin_read')).toContain("'contexts',COALESCE");

@@ -115,12 +115,22 @@ function entry(row, scope, status, index) {
         order: index, defaultPresets: Object.freeze(defaultPresets),
         delegationTargets: Object.freeze(code === 'RECORD_RESTORE' ? ['PLATFORM_BRIDGE'] : ['STANDARD','PLATFORM_BRIDGE']) });
 }
-export const MICA_PERMISSION_CATALOG = Object.freeze([
+export const MICA_PERMISSION_CATALOG_039B = Object.freeze([
     ...platform.map((r,i)=>entry(r,'PLATFORM',['MICA_ADMIN_MANAGE','DATA_RESTORE_ANY_ORG'].includes(r[0])?'PREPARED_039B':'CURRENT',i)),
     ...organization.map((r,i)=>entry(r,'ORGANIZATION','CURRENT',100+i)),
     ...approved039b.map((r,i)=>entry(r,'ORGANIZATION','PREPARED_039B',150+i)),
     ...proposed.map((r,i)=>entry(r,'ORGANIZATION','PROPOSED',200+i))
 ]);
+// Frozen 039b projection keeps applied migration artifacts reproducible.
+export const MICA_PERMISSION_CATALOG = Object.freeze(MICA_PERMISSION_CATALOG_039B.map(c => {
+    if (c.code === 'FISCAL_DOCUMENT_IMPORT') return Object.freeze({ ...c,
+        description: 'Importar comprobantes ARCA emitidos y recibidos con el pipeline fiscal.',
+        status: 'PREPARED_039C', runtimeStatus: 'ACTIVE', assignable: true, visibleInEditor: true,
+        defaultPresets: Object.freeze([root,mica,...operators]) });
+    if (c.code.startsWith('MANUAL_MOVEMENT_')) return Object.freeze({ ...c,
+        description: 'Carga manual persistente en la organización activa.', runtimeStatus: 'ACTIVE' });
+    return c;
+}));
 export const permissionByCode = code => MICA_PERMISSION_CATALOG.find(c=>c.code===code);
 // Several business functions share a legacy approved capability. These are explanations,
 // not extra grants or independently assignable capabilities.
@@ -141,7 +151,7 @@ export const MICA_MODULE_CONTRACT = Object.freeze({
     'tab-percepciones': {label:'Percepciones',any:['RECORD_VIEW'],datasets:['records']},
     'tab-bancos': {label:'Bancos',any:['RECORD_VIEW'],datasets:['financials']},
     'tab-sueldos': {label:'Sueldos',any:['RECORD_VIEW'],datasets:['financials']},
-    'tab-movimientos-manuales': {label:'Carga manual y OCR',any:['RECORD_VIEW','DOCUMENTS_UPLOAD','DOCUMENTS_OCR_PROCESS','DOCUMENTS_OCR_VERIFY'],datasets:['records','financials']},
+    'tab-movimientos-manuales': {label:'Carga manual y OCR',any:['MANUAL_MOVEMENT_VIEW','RECORD_VIEW','DOCUMENTS_UPLOAD','DOCUMENTS_OCR_PROCESS','DOCUMENTS_OCR_VERIFY'],datasets:['records','financials']},
     'tab-client-dashboard': {label:'Reportes',any:['REPORT_VIEW'],datasets:['records','financials']},
     'tab-categorizacion': {label:'Categorización impositiva',any:['ORG_VIEW','CATALOG_ORG_VIEW']}
 });
@@ -149,8 +159,8 @@ export const MICA_IMPORT_CONTRACT = Object.freeze({
     percepcion: {all:['RECORD_VIEW','IMPORT_VIEW','IMPORT_CREATE','PERCEPTION_IMPORT'],enabled:true},
     banco: {all:['RECORD_VIEW','IMPORT_VIEW','IMPORT_CREATE','BANK_IMPORT'],enabled:true},
     sueldo: {all:['RECORD_VIEW','IMPORT_VIEW','IMPORT_CREATE','PAYROLL_IMPORT'],enabled:true},
-    recibido: {all:['RECORD_VIEW','IMPORT_VIEW','IMPORT_CREATE','FISCAL_DOCUMENT_IMPORT'],enabled:false},
-    emitido: {all:['RECORD_VIEW','IMPORT_VIEW','IMPORT_CREATE','FISCAL_DOCUMENT_IMPORT'],enabled:false}
+    recibido: {all:['RECORD_VIEW','IMPORT_VIEW','IMPORT_CREATE','FISCAL_DOCUMENT_IMPORT'],enabled:true},
+    emitido: {all:['RECORD_VIEW','IMPORT_VIEW','IMPORT_CREATE','FISCAL_DOCUMENT_IMPORT'],enabled:true}
 });
 export const MICA_OCR_ACTIONS = Object.freeze({upload:'DOCUMENTS_UPLOAD',process:'DOCUMENTS_OCR_PROCESS',verify:'DOCUMENTS_OCR_VERIFY'});
 export const MICA_ACTION_CONTRACT = Object.freeze({
@@ -158,9 +168,9 @@ export const MICA_ACTION_CONTRACT = Object.freeze({
     softDelete: {all:['RECORD_VIEW','RECORD_SOFT_DELETE'],enabled:true},
     restore: {all:['RECORD_VIEW','RECORD_RESTORE'],platformAll:['DATA_RESTORE_ANY_ORG'],enabled:true},
     export: {all:['RECORD_VIEW','REPORT_EXPORT'],enabled:true},
-    manualCreate: {all:['MANUAL_MOVEMENT_VIEW','MANUAL_MOVEMENT_CREATE'],enabled:false},
-    manualEdit: {all:['MANUAL_MOVEMENT_VIEW','MANUAL_MOVEMENT_EDIT'],enabled:false},
-    manualSoftDelete: {all:['MANUAL_MOVEMENT_VIEW','MANUAL_MOVEMENT_SOFT_DELETE'],enabled:false}
+    manualCreate: {all:['MANUAL_MOVEMENT_VIEW','MANUAL_MOVEMENT_CREATE'],enabled:true},
+    manualEdit: {all:['MANUAL_MOVEMENT_VIEW','MANUAL_MOVEMENT_EDIT'],enabled:true},
+    manualSoftDelete: {all:['MANUAL_MOVEMENT_VIEW','MANUAL_MOVEMENT_SOFT_DELETE'],enabled:true}
 });
 export const MICA_METHOD_ACTIONS = Object.freeze({confirmItem:'classify',promptBulkClassification:'classify',
     promptBankBulkClassification:'classify',bulkSoftDeleteSelected:'softDelete',

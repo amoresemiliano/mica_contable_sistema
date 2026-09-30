@@ -13,6 +13,9 @@ export function createAdministrationView(root, store, service = administrationSe
     };
     const context = () => [store.sessionUserId, store.contextGeneration, store.contextState, store.activeOrganizationId].join('|');
     const ready = () => ['TENANT_READY', 'PLATFORM_READY'].includes(store.contextState);
+    const mayInvite = rights => rights.global_users || (store.activeOrganizationId &&
+        ['ORG_MEMBER_INVITE','ORG_MEMBER_MANAGE','ORG_MEMBER_PERMISSION_MANAGE'].every(code=>
+            store.hasCapability?.(code,{scope:'ORGANIZATION',orgId:store.activeOrganizationId})));
     function clear(message) { root.replaceChildren(el('p', message, { role: 'status' })); }
     function field(form, name, title, value = '', options = null) {
         const label = el('label', title + ' ');
@@ -136,6 +139,31 @@ export function createAdministrationView(root, store, service = administrationSe
             sf.append(el('button', 'Buscar', { type: 'submit' }));
             sf.onsubmit = e => { e.preventDefault(); search = q.value; load(); }; s.append(sf);
             const editor = el('div'); s.append(editor);
+            if (service.invitation && mayInvite(r)) {
+                const invite = el('button','+ Invitar usuario',{type:'button'});
+                invite.onclick = () => {
+                    openEditor(editor);
+                    const f = form(editor,'Invitar usuario',fd => service.invitation('create',
+                        fd.get('scope') === 'PLATFORM' ? null : store.activeOrganizationId,
+                        {email:fd.get('email'),role_template_id:fd.get('preset')}));
+                    const email = field(f,'email','Email'); email.type='email'; email.required=true;
+                    const scope=field(f,'scope','Tipo',store.activeOrganizationId?'ORGANIZATION':'PLATFORM',[
+                        ...(store.activeOrganizationId ? [['ORGANIZATION',SCOPE_LABELS.ORGANIZATION]] : []),...(r.global_users ? [['PLATFORM',SCOPE_LABELS.PLATFORM]] : [])]);
+                    const preset=field(f,'preset','Preset','',[]);
+                    const draw=()=>{preset.replaceChildren(...presets.filter(p=>p.is_active&&p.scope===scope.value&&
+                        (!p.organization_id||p.organization_id===store.activeOrganizationId)).map(p=>el('option',p.name,{value:p.id})));};
+                    scope.onchange=draw; draw();
+                    f.append(el('p','Organización: '+(organizations.find(o=>o.id===store.activeOrganizationId)?.name||'Seleccioná una empresa en el selector superior')+'. Para otra empresa, cambiá el contexto antes de invitar.'));
+                    f.append(el('p','Estado inicial: pendiente de autenticación. Se registra una preautorización; no se envía email. Compartí el acceso habitual de MICA. Después de autenticarse, confirmá la asignación y activá la cuenta por separado.'));
+                }; s.append(invite);
+                list(s,data.invitations||[],i=>i.email+' · '+(i.assigned_at?'Asignada · activar desde Usuarios':i.user_profile_id?'Pendiente de confirmación':'Pendiente de autenticación'),i=>{
+                    openEditor(editor);
+                    if (!i.user_profile_id || i.assigned_at) { editor.append(el('p','La cuenta debe autenticarse antes de confirmar. Las asignaciones ya confirmadas se administran desde Usuarios y Asignaciones.')); return; }
+                    form(editor,'Confirmar preset y organización para '+i.email,()=>service.invitation('assign',i.organization_id,
+                        {id:i.id,user_profile_id:i.user_profile_id}));
+                    editor.append(el('p','Esta confirmación asigna el preset; la cuenta continúa inactiva hasta que la actives en Usuarios.'));
+                });
+            }
             list(s, users, u => u.email + ' · ' + (u.protected ? 'Root protegido' : u.pending ? 'Pendiente' : u.is_active ? 'Activo' : 'Inactivo'),
                 r.global_users ? user => {
                     if (user.protected) return;
@@ -307,6 +335,9 @@ export function createAdministrationView(root, store, service = administrationSe
         if (!ready()) { clear('Esperá a que el contexto esté confirmado.'); return; }
         try {
             const data = await service.read(store.activeOrganizationId, search);
+            if (service.invitation && mayInvite(data.rights)) {
+                data.invitations = (await Promise.all([...(data.rights.global_users?[null]:[]),...(store.activeOrganizationId?[store.activeOrganizationId]:[])].map(org=>service.invitation('list',org)))).flat();
+            }
             if (token !== epoch || contextKey !== context()) return;
             snapshot = data; render(data);
         } catch (error) { if (token === epoch) clear(error.message); }

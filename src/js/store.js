@@ -344,6 +344,26 @@ export class AppStore {
         this.operationalDataErrors = new Map();
     }
 
+    async refreshOperationalData(moduleId) {
+        const generation = this.contextGeneration, org = this.activeOrganizationId;
+        const groups = MICA_MODULE_CONTRACT[moduleId]?.datasets || [];
+        await Promise.all(groups.map(g => this.operationalDataRequests.get(g)));
+        if (generation !== this.contextGeneration || org !== this.activeOrganizationId) return;
+        for (const group of groups) {
+            this.operationalDatasetsLoaded.delete(group);
+            this.operationalDataErrors.delete(group);
+        }
+        if (this.deferOperationalData) await this.ensureOperationalData(moduleId, { retry: true });
+        else {
+            const data = await persistenceService.loadOperationalSnapshot(org, { capabilities: this.permissions.organization.codes });
+            if (generation !== this.contextGeneration || org !== this.activeOrganizationId) return;
+            Object.assign(this, data); this.salaries = this.salariesList[0] || null; this.notify();
+        }
+        if (generation !== this.contextGeneration || org !== this.activeOrganizationId) return;
+        const error = this.operationalDataStatus(moduleId).error;
+        if (error) throw new Error(error);
+    }
+
     operationalDataStatus(moduleId) {
         const groups = MICA_MODULE_CONTRACT[moduleId]?.datasets || [];
         return { loading: groups.some(g => this.operationalDataRequests.has(g)),

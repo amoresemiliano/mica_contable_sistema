@@ -21,6 +21,27 @@ jest.unstable_mockModule('../../src/js/core/services/supabaseClient.js', () => (
 const { persistenceService } = await import('../../src/js/core/services/persistenceService.js');
 const { supabase } = await import('../../src/js/core/services/supabaseClient.js');
 
+test.each(['old-org','new-org'])('039c new import uploads the server envelope for %s',async org=>{
+    mockUpload.mockReset().mockResolvedValue({data:{path:org+'/id/test.csv'}});
+    mockRpc.mockResolvedValueOnce({data:{import_id:'id',organization_id:org,storage_prefix:org+'/id'}});
+    const envelope=await persistenceService.createImport('BANK_STATEMENT_BBVA','BANCO');
+    await persistenceService.uploadImportSource(envelope,{file:{name:'test.csv',type:'text/csv'},safeFilename:'test.csv'});
+    expect(mockUpload.mock.calls[0][0]).toBe(org+'/id/test.csv');
+});
+test('039c retry reuses original source and does not upload or remove it',async()=>{
+    mockUpload.mockClear();mockRemove.mockClear();
+    mockRpc.mockResolvedValueOnce({data:{new_import_id:'retry',organization_id:'org',storage_prefix:'org/retry',source_file_reused:true,storage_path:'org/original/source.csv'}});
+    const envelope=await persistenceService.requestFailedImportRetry('original');
+    const uploaded=await persistenceService.uploadImportSource(envelope,{file:{name:'source.csv'},safeFilename:'source.csv'});
+    expect(uploaded).toEqual({path:'org/original/source.csv',mimeType:'text/csv',reused:true});
+    expect(mockUpload).not.toHaveBeenCalled();expect(mockRemove).not.toHaveBeenCalled();
+});
+test('039c invalid retry response fails before storage',async()=>{
+    mockUpload.mockClear();mockRpc.mockResolvedValueOnce({data:{new_import_id:'retry'}});
+    await expect(persistenceService.requestFailedImportRetry('original')).rejects.toThrow('storage_prefix');
+    expect(mockUpload).not.toHaveBeenCalled();
+});
+
 describe('PersistenceService Unit Tests', () => {
 
     beforeEach(() => {

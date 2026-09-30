@@ -72,15 +72,15 @@ export function renderOperationalImportControls(store, document) {
     // Phase 1: local-only manual/OCR simulators have no safe rehydration contract.
     for (const id of ['form-internal-movement', 'form-purchase-reginfo']) {
         const control = document.getElementById(id);
-        if (control) { control.inert = true; control.hidden = true; }
+        if (control) { const allowed = !!store.canOperationalAction?.('manualCreate'); control.inert = !allowed; control.hidden = !allowed; }
     }
     const ocr = document.getElementById('ocr-dropzone');
     const ocrPanel = document.getElementById('manual-ocr-panel');
     if (ocrPanel) ocrPanel.hidden = !['upload','process','verify'].some(action => store.canOcrAction(action));
     const ocrInput = document.getElementById('ocr-input');
-    if (ocr) { ocr.hidden = !store.canOcrAction('upload'); ocr.inert = true; }
+    if (ocr) { ocr.hidden = !store.canOcrAction('upload'); ocr.inert = !store.canOcrAction('upload'); }
     // No real OCR backend exists. Capability never enables the old fabricated-invoice simulator.
-    if (ocrInput) ocrInput.disabled = true;
+    if (ocrInput) ocrInput.disabled = !store.canOcrAction('upload');
 }
 
 export function renderOperationalHeader(store, document) {

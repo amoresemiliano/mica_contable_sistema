@@ -36,6 +36,17 @@
 #mica-administration .mica-admin-form > [role=status] { order:11; }
 .operational-data-status { padding:.75rem 1rem; border:1px solid var(--border-color,#dde3eb); border-radius:8px; margin:.75rem 0; display:flex; gap:1rem; align-items:center; }
 .operational-data-status[hidden] { display:none; }
+.grid-pagination { justify-content:flex-end; padding:.6rem .8rem; border:1px solid var(--border-color,#dde3eb); border-radius:12px; background:var(--bg-card,#fff); }
+.grid-pagination button, .grid-pagination select { font:inherit; font-size:.85rem; border:1px solid var(--border-color,#dde3eb); border-radius:8px; padding:.45rem .7rem; background:transparent; color:var(--text-main,#334155); }
+.grid-pagination button:not(:disabled):hover { background:var(--accent,#245ac2); color:#fff; cursor:pointer; }
+.grid-pagination button:disabled { opacity:.4; cursor:default; }
+.grid-pagination span { font-size:.85rem; font-weight:600; color:var(--text-main,#334155); }
+.grid-pagination :focus-visible { outline:2px solid var(--accent,#245ac2); outline-offset:2px; }
+.manual-record-row { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; padding:.6rem; border-bottom:1px solid var(--border-color,#dde3eb); }
+.manual-record-row span { flex:1; }
+.manual-record-row form { flex-basis:100%; display:grid; gap:.5rem; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+.manual-record-row label { display:flex; flex-direction:column; }
+@media(max-width:640px) { .grid-pagination { justify-content:center; gap:.4rem; } .grid-pagination span { flex-basis:100%; text-align:center; order:-1; } }
 #mica-administration fieldset { border:1px solid var(--admin-border); border-radius:10px; max-height:28rem; padding:.6rem; margin:.6rem 0; }
 #mica-administration legend { font-size:.85rem; font-weight:700; padding:0 .35rem; }
 #mica-administration .mica-permission-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:.5rem; }

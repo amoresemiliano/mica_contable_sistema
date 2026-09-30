@@ -40,6 +40,17 @@ beforeEach(() => {
     store = new AppStore();
 });
 
+test('039c duplicate salary refresh reloads persisted rows even when financial dataset was cached', async () => {
+    store = new AppStore({deferOperationalData:true});
+    await store.initializeSession({id:'owner'}); await store.switchOrganizationContext('NORTE');
+    await store.ensureOperationalData('tab-sueldos');
+    store.salariesList=[]; store.salaries=null;
+    const { refreshDuplicateImport } = await import('../../src/js/core/importEnvelope.js');
+    await refreshDuplicateImport({type:'sueldo',check:{existing_file_id:'file'},store,isCurrent:()=>true,
+        service:{inspectImportedFile:async()=>({organization_id:'NORTE',active_rows:2,total_rows:2})}});
+    expect(store.salariesList).toHaveLength(2); expect(store.salaries.id).toMatch(/^NORTE-/);
+});
+
 test('production demand mode loads no business rows for Configuration and caches only requested families', async () => {
     store = new AppStore({deferOperationalData:true});
     await store.initializeSession({id:'owner'}); await store.switchOrganizationContext('NORTE');
@@ -270,8 +281,8 @@ test('scope alone cannot import; owner and tenant follow effective capability co
     expect(nodes.get('file-bancos').disabled).toBe(false);
     store.permissions.organization.codes.push('DOCUMENTS_UPLOAD','DOCUMENTS_OCR_PROCESS','DOCUMENTS_OCR_VERIFY');
     renderOperationalImportControls(store, document);
-    expect(nodes.get('ocr-input').disabled).toBe(true);
-    expect(nodes.get('ocr-dropzone').inert).toBe(true);
+    expect(nodes.get('ocr-input').disabled).toBe(false);
+    expect(nodes.get('ocr-dropzone').inert).toBe(false);
 });
 
 test('real header uses session email, confirmed organization and actual platform preset', async () => {
