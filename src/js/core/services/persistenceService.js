@@ -691,13 +691,15 @@ export class PersistenceService {
         return data;
     }
 
-    async loadOperationalPages(rpcName, orgId) {
+    async loadOperationalPages(rpcName, orgId, isCurrent = () => true) {
         const rows = [];
         let afterId = null;
         for (;;) {
+            if (!isCurrent()) throw new Error('Context data load superseded');
             const { data, error } = await supabase.rpc(rpcName, {
                 p_org_id: orgId, p_after_id: afterId, p_limit: 500
             });
+            if (!isCurrent()) throw new Error('Context data load superseded');
             if (error) throw new Error(error.message);
             if (!Array.isArray(data) || data.length > 500 || data.some((r, i) =>
                 r.organization_id !== orgId || typeof r.id !== 'string' || !r.id ||
@@ -711,9 +713,9 @@ export class PersistenceService {
         }
     }
 
-    async loadOperationalSnapshot(orgId, { catalogOnly = false, capabilities = [] } = {}) {
+    async loadOperationalSnapshot(orgId, { catalogOnly = false, capabilities = [], datasets = ['records','financials'], skipCatalog = false, isCurrent = () => true } = {}) {
         const readCatalog = capabilities.includes('ORG_VIEW'), readRates = capabilities.includes('CATALOG_ORG_VIEW');
-        const { data, error } = readCatalog || readRates
+        const { data, error } = !skipCatalog && (readCatalog || readRates)
             ? await supabase.rpc('get_operational_snapshot', { p_org_id: orgId })
             : { data: { organization_id: orgId, categories: [], activities: [], rates: [] } };
         if (error) throw new Error(error.message);
@@ -732,8 +734,8 @@ export class PersistenceService {
         };
         if (catalogOnly) return catalogs;
         const [recordRows, financialRows] = await Promise.all([
-            capabilities.includes('RECORD_VIEW') ? this.loadOperationalPages('get_operational_records_page', orgId) : [],
-            capabilities.includes('RECORD_VIEW') ? this.loadOperationalPages('get_operational_financials_page', orgId) : []
+            capabilities.includes('RECORD_VIEW') && datasets.includes('records') ? this.loadOperationalPages('get_operational_records_page', orgId, isCurrent) : [],
+            capabilities.includes('RECORD_VIEW') && datasets.includes('financials') ? this.loadOperationalPages('get_operational_financials_page', orgId, isCurrent) : []
         ]);
         // UUID cursors bound server responses; preserve newest-first presentation after loading.
         const newestFirst = (a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')) || b.id.localeCompare(a.id);

@@ -40,6 +40,48 @@ beforeEach(() => {
     store = new AppStore();
 });
 
+test('production demand mode loads no business rows for Configuration and caches only requested families', async () => {
+    store = new AppStore({deferOperationalData:true});
+    await store.initializeSession({id:'owner'}); await store.switchOrganizationContext('NORTE');
+    expect(store.items).toEqual([]); expect(store.bankTransactions).toEqual([]);
+    const pageCalls=()=>rpc.mock.calls.filter(([name])=>name==='get_operational_records_page'||name==='get_operational_financials_page');
+    expect(pageCalls()).toHaveLength(0);
+    await store.ensureOperationalData('tab-configuracion'); expect(pageCalls()).toHaveLength(0);
+    await store.ensureOperationalData('tab-bancos');
+    expect(store.bankTransactions).toHaveLength(1); expect(store.items).toEqual([]);
+    expect(pageCalls().every(([name])=>name==='get_operational_financials_page')).toBe(true);
+    const count=pageCalls().length;
+    await store.ensureOperationalData('tab-sueldos'); expect(pageCalls()).toHaveLength(count);
+    await store.ensureOperationalData('tab-conciliador'); expect(store.items).toHaveLength(1);
+    await store.switchOrganizationContext('SUR'); expect(store.items).toEqual([]); expect(store.operationalDatasetsLoaded.size).toBe(0);
+});
+
+test('demand mode discards stale read responses and stops paging after tenant switch', async () => {
+    store = new AppStore({deferOperationalData:true});
+    await store.initializeSession({id:'owner'}); await store.switchOrganizationContext('NORTE');
+    let resolvePage;
+    rpc.mockImplementation((name,args)=>name==='get_operational_records_page'&&args.p_org_id==='NORTE'
+        ? new Promise(resolve=>{resolvePage=resolve;}) : server(name,args));
+    const pending=store.ensureOperationalData('tab-conciliador'); await Promise.resolve(); await Promise.resolve();
+    await store.switchOrganizationContext('SUR');
+    resolvePage({data:snapshot('NORTE').records}); await pending;
+    expect(store.items).toEqual([]); expect(store.activeOrganizationId).toBe('SUR');
+    expect(rpc.mock.calls.filter(([n,a])=>n==='get_operational_records_page'&&a.p_org_id==='NORTE')).toHaveLength(1);
+    await store.ensureOperationalData('tab-conciliador'); expect(store.items[0].id).toBe('SUR-invoice');
+});
+
+test('demand read failure is visible and retries only when requested', async () => {
+    store = new AppStore({deferOperationalData:true});
+    await store.initializeSession({id:'owner'}); await store.switchOrganizationContext('NORTE');
+    rpc.mockImplementation((name,args)=>name==='get_operational_financials_page'?Promise.resolve({error:{message:'Read failed'}}):server(name,args));
+    await store.ensureOperationalData('tab-bancos');
+    expect(store.operationalDataStatus('tab-bancos')).toEqual({loading:false,error:'Read failed'});
+    const count=rpc.mock.calls.length; await store.ensureOperationalData('tab-bancos'); expect(rpc.mock.calls.length).toBe(count);
+    rpc.mockImplementation(server); await store.ensureOperationalData('tab-bancos',{retry:true});
+    expect(store.operationalDataStatus('tab-bancos')).toEqual({loading:false,error:''});
+    expect(store.bankTransactions).toHaveLength(1);
+});
+
 test('037 scoped platform profile switches without ACCESS_ANY_ORG or invented tenant role', async () => {
     rpc.mockImplementation((name, args) => {
         if (name === 'get_my_operational_context') return Promise.resolve({ data: {
@@ -214,7 +256,7 @@ test('scope alone cannot import; owner and tenant follow effective capability co
     expect(store.canImportOperational('recibido')).toBe(false);
     store.permissions.platform.codes = [];
     store.currentUserRole = 'SUPERADMIN'; // Compatibility text must not authorize anything.
-    store.permissions.organization = { loaded: true, orgId: 'NORTE', codes: ['RECORD_VIEW', 'IMPORT_CREATE', 'BANK_IMPORT'] };
+    store.permissions.organization = { loaded: true, orgId: 'NORTE', codes: ['RECORD_VIEW', 'IMPORT_VIEW', 'IMPORT_CREATE', 'BANK_IMPORT'] };
     expect(store.canImportOperational('recibido')).toBe(false);
     expect(store.canImportOperational('banco')).toBe(true);
     expect(store.canImportOperational('sueldo')).toBe(false);

@@ -23,12 +23,18 @@ export class OperationalGrid {
         this.selectedRowIds = new Set();
 
         this.displayLimit = 10;
+        this.pageSize = 50;
+        this.page = 1;
+        this.pageFilterKey = null;
         this.filterStatus = 'all'; // 'all', 'assigned', 'unassigned'
 
         this.visibleColumns = this.loadColumnPreferences();
     }
 
     resetTenantState() {
+        this.page = 1;
+        this.pageSize = 50;
+        this.pageFilterKey = null;
         this.searchQuery = '';
         this.dateMode = 'month';
         this.periodFilter = this.startDate = this.endDate = '';
@@ -41,6 +47,26 @@ export class OperationalGrid {
     }
 
     // --- Persistencia de Columnas ---
+    setPageSize(size) {
+        if (![25, 50, 100].includes(Number(size))) return;
+        this.pageSize = Number(size); this.page = 1; this.clearSelection();
+    }
+
+    setPage(page) {
+        this.page = Math.max(1, Math.trunc(Number(page)) || 1);
+        this.clearSelection();
+    }
+
+    paginate(filteredRows) {
+        const key = JSON.stringify([this.searchQuery,this.dateMode,this.periodFilter,this.startDate,this.endDate,
+            this.primaryFilter,this.filterStatus,this.sortColumn,this.sortDirection]);
+        if (key !== this.pageFilterKey) { this.page = 1; this.clearSelection(); this.pageFilterKey = key; }
+        const pages = Math.max(1, Math.ceil(filteredRows.length / this.pageSize));
+        this.page = Math.min(this.page, pages);
+        return { rows: filteredRows.slice((this.page - 1) * this.pageSize, this.page * this.pageSize),
+            page: this.page, pages, total: filteredRows.length, pageSize: this.pageSize };
+    }
+
     loadColumnPreferences() {
         try {
             if (typeof localStorage !== 'undefined') {

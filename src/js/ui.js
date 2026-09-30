@@ -1,3 +1,6 @@
+import { renderGridPagination } from './components/gridPagination.js';
+import { requestOperationalData } from './components/operationalDataStatus.js';
+import { MICA_MODULE_CONTRACT } from './core/micaPermissionContract.js';
 import { mountOperationalOrgSelectors, renderOperationalImportControls, renderOperationalHeader } from './components/operationalOrgSelector.js';
 import { supabase } from './core/services/supabaseClient.js';
 import { openAdministration } from './components/administration.js';
@@ -449,6 +452,7 @@ export function switchTab(tabId) {
     if (!appStore.canVisitModule(tabId)) return false;
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.getElementById(tabId)?.classList.remove('hidden');
+    requestOperationalData(appStore, document, tabId);
 
     document.querySelectorAll('.sidebar-nav a').forEach(el => el.classList.remove('active-nav'));
     const activeLink = document.querySelector(`.sidebar-nav [onclick="switchTab('${tabId}')"]`);
@@ -460,30 +464,25 @@ export function switchTab(tabId) {
     if (activeMobileNav) activeMobileNav.classList.add('active-mobile-nav');
 
     const titleElement = document.getElementById('page-title');
+    if (MICA_MODULE_CONTRACT[tabId]) titleElement.innerText = MICA_MODULE_CONTRACT[tabId].label;
     if (tabId === 'tab-conciliador') {
-        titleElement.innerText = "Comprobantes (Compras y Ventas)";
         // Issues are cleared on context changes; phase 1 does not query unscoped issue rows.
         if (appStore.taxCategories.length === 0 && appStore.loadTaxCategories) appStore.loadTaxCategories();
         if (appStore.economicActivities.length === 0 && appStore.loadEconomicActivities) appStore.loadEconomicActivities();
     }
     else if (tabId === 'tab-percepciones') {
-        titleElement.innerText = "Percepciones (Retenciones)";
     }
     else if (tabId === 'tab-bancos') {
-        titleElement.innerText = "Extractos Bancarios";
         if (appStore.taxCategories.length === 0 && appStore.loadTaxCategories) appStore.loadTaxCategories();
         if (appStore.economicActivities.length === 0 && appStore.loadEconomicActivities) appStore.loadEconomicActivities();
         UIManager.renderBancosGrid();
     }
     else if (tabId === 'tab-sueldos') {
-        titleElement.innerText = "Liquidación de Sueldos";
         updateSalaryFormFields();
     }
     else if (tabId === 'tab-movimientos-manuales') {
-        titleElement.innerText = "Registrar Movimientos Manuales";
     }
     else if (tabId === 'tab-categorizacion') {
-        titleElement.innerText = "Categorización (Catálogos y Tasas)";
         if (appStore.loadTaxCategories) appStore.loadTaxCategories();
         if (appStore.loadEconomicActivities) appStore.loadEconomicActivities();
         if (appStore.loadIibbRates) appStore.loadIibbRates();
@@ -493,10 +492,8 @@ export function switchTab(tabId) {
         openAdministration(appStore);
     }
     else if (tabId === 'tab-client-dashboard') {
-        titleElement.innerText = "Panel Gerencial (Dashboard)";
         renderClientDashboard();
     }
-    else if (tabId === 'tab-client-ocr') titleElement.innerText = "Lector de Documentos (OCR)";
     else if (tabId === 'tab-access') titleElement.innerText = "Acceso MICA";
     return true;
 }
@@ -1764,6 +1761,8 @@ export class UIManager {
 
         if (!tbody) return;
 
+        const pageRows = renderGridPagination(percepcionesGrid, list, tbody, () => UIManager.renderPerceptionsTable());
+
         if (list.length === 0) {
             tbody.innerHTML = `
                 <tr>
@@ -1774,7 +1773,7 @@ export class UIManager {
             return;
         }
 
-        tbody.innerHTML = list.map(p => {
+        tbody.innerHTML = pageRows.map(p => {
             const fuenteText = p.fuente || p.jurisdiction || 'ARBA';
             const montoVal = (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)).toLocaleString('es-AR', {minimumFractionDigits: 2});
             return `
@@ -1812,6 +1811,8 @@ export class UIManager {
             summaryBar.innerText = `${transactions.length} movimientos · Débitos: $ ${debits.toLocaleString('es-AR', {minimumFractionDigits: 2})} · Créditos: $ ${credits.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
         }
 
+        const pageRows = renderGridPagination(bancosGrid, transactions, tbody, () => UIManager.renderBankTable());
+
         if (transactions.length === 0) {
             tbody.innerHTML = `
                 <tr>
@@ -1829,7 +1830,7 @@ export class UIManager {
             `).join('')}
         `;
 
-        tbody.innerHTML = transactions.map(t => {
+        tbody.innerHTML = pageRows.map(t => {
             const isDebit = (t.monto || 0) < 0 || t.tipo === 'debit' || t.tipo === 'DEBITO';
             const badgeClass = isDebit ? 'badge-emitido' : 'badge-recibido';
             const badgeText = isDebit ? 'DÉBITO' : 'CRÉDITO';
@@ -1843,7 +1844,7 @@ export class UIManager {
                     <td data-label="Importe" class="${bancosGrid.isColumnVisible('monto') ? '' : 'hidden'}" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
                     <td data-label="Tipo" class="${bancosGrid.isColumnVisible('tipo') ? '' : 'hidden'}"><span class="badge ${badgeClass}">${badgeText}</span></td>
                     <td data-label="Clasificación / Categoría" class="${bancosGrid.isColumnVisible('cuenta') ? '' : 'hidden'}">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankCategory('${t.id}', this.value)" ${t.confirmada ? 'disabled' : ''}>
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankCategory('${t.id}', this.value)" ${t.confirmada || !appStore.canOperationalAction('classify') ? 'disabled' : ''}>
                             ${taxCategoriesHTML.replace(`value="${t.category_id || ''}"`, `value="${t.category_id || ''}" selected`)}
                         </select>
                     </td>
@@ -1875,6 +1876,8 @@ export class UIManager {
             summaryBar.innerText = `${items.length} comprobantes · $ ${totalMonto.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
         }
 
+        const pageRows = renderGridPagination(comprobantesGrid, items, tbody, () => UIManager.renderMainTable());
+
         if (items.length === 0) {
             tbody.innerHTML = `
                 <tr>
@@ -1901,7 +1904,7 @@ export class UIManager {
 
         const formatMoney = (val) => `$ ${(val || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
 
-        tbody.innerHTML = items.map(item => {
+        tbody.innerHTML = pageRows.map(item => {
             const isRecibido = item.tipo === 'recibido';
             const badgeClass = isRecibido ? 'badge-recibido' : 'badge-emitido';
             const badgeText = isRecibido ? 'Compra' : 'Venta';
@@ -1922,12 +1925,12 @@ export class UIManager {
                     <td data-label="Perc. IIBB" class="${comprobantesGrid.isColumnVisible('percIibb') ? '' : 'hidden'}">${formatMoney(item.percepcionIibb || 0)}</td>
                     <td data-label="Total" class="${comprobantesGrid.isColumnVisible('total') ? '' : 'hidden'}" style="font-weight: 700;">${formatMoney(item.total)}</td>
                     <td data-label="Categoría Tributaria" class="${comprobantesGrid.isColumnVisible('categoria') ? '' : 'hidden'}">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada || !appStore.canOperationalAction('classify') ? 'disabled' : ''}>
                             ${taxCategoriesHTML.replace(`value="${item.category_id || ''}"`, `value="${item.category_id || ''}" selected`)}
                         </select>
                     </td>
                     <td data-label="Actividad" class="${comprobantesGrid.isColumnVisible('actividad') ? '' : 'hidden'}">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateActivity('${item.id}', this.value)" ${item.confirmada ? 'disabled' : ''}>
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateActivity('${item.id}', this.value)" ${item.confirmada || !appStore.canOperationalAction('classify') ? 'disabled' : ''}>
                             ${activitiesHTML.replace(`value="${item.activity_id || ''}"`, `value="${item.activity_id || ''}" selected`)}
                         </select>
                     </td>
@@ -3094,9 +3097,10 @@ appStore.subscribe(() => {
     });
     if (!['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState)) return;
     UIManager.render();
+    requestOperationalData(appStore, document, document.querySelector('.tab-content:not(.hidden)')?.id);
     updateSalaryFormFields();
     if (appStore.canVisitModule('tab-client-dashboard')) renderClientDashboard();
-    if (appStore.canVisitModule('tab-client-ocr')) renderOcrHistory();
+    if (appStore.canVisitModule('tab-movimientos-manuales')) renderOcrHistory();
     if (appStore.canVisitModule('tab-movimientos-manuales')) renderResolucionManual();
     if (appStore.canVisitModule('tab-categorizacion')) UIManager.renderCategorization();
     if (appStore.hasCapability('IMPORT_VIEW', { scope: 'ORGANIZATION', orgId: appStore.activeOrganizationId })) UIManager.renderImportIssues();

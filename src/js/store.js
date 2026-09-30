@@ -1,10 +1,13 @@
 import { categorizer } from './categorizer.js';
-import { canVisitModule, canImport, canOcr, tenantCan, pruneDeniedDatasets } from './core/moduleAccess.js';
+import { canVisitModule, canImport, canOcr, tenantCan, pruneDeniedDatasets, canOperationalAction } from './core/moduleAccess.js';
 import { persistenceService } from './core/services/persistenceService.js';
+import { MICA_MODULE_CONTRACT, MICA_METHOD_ACTIONS } from './core/micaPermissionContract.js';
 
 // 3. STORE GLOBAL DE LA APP (SOLID: Single Responsibility / Decoupled via Observer Pattern)
 export class AppStore {
-    constructor() {
+    constructor({ deferOperationalData = false } = {}) {
+        this.deferOperationalData = deferOperationalData;
+        this.clearOperationalDataCache();
         this.items = []; // Comprobantes ARCA (Compras y Ventas)
         this.perceptions = []; // Tabla_Percepciones_Provinciales (CUIT, Fecha/Periodo, Monto, Jurisdiccion)
         this.bankTransactions = []; // Extracto bancario normalizado (Fecha, Descripcion, Monto, CuentaSugerida, Estado)
@@ -73,10 +76,7 @@ export class AppStore {
             'bulkToggleIibbRates', 'bulkDeleteIibbRates']) {
             const operation = this[name];
             this[name] = async (...args) => {
-                const actions = { confirmItem: 'RECORD_CLASSIFY', bulkSoftDeleteSelected: 'RECORD_SOFT_DELETE',
-                    promptBulkClassification: 'RECORD_CLASSIFY', bulkSoftDeleteSelectedPercepciones: 'RECORD_SOFT_DELETE',
-                    bulkSoftDeleteBankMovements: 'RECORD_SOFT_DELETE', promptBankBulkClassification: 'RECORD_CLASSIFY' };
-                if (actions[name] && (!tenantCan(this, 'RECORD_VIEW') || !tenantCan(this, actions[name]))) {
+                if (MICA_METHOD_ACTIONS[name] && !this.canOperationalAction(MICA_METHOD_ACTIONS[name])) {
                     throw new Error('No tenés permisos para esta acción en el contexto actual.');
                 }
                 if (this.sessionUserId && !['TENANT_READY', 'PLATFORM_READY'].includes(this.contextState)) {
@@ -217,6 +217,7 @@ export class AppStore {
     }
 
     clearTenantState() {
+        this.clearOperationalDataCache();
         for (const key of ['items', 'perceptions', 'bankTransactions', 'salariesList', 'manualMovements',
             'ocrHistory', 'importIssues', 'taxCategories', 'economicActivities', 'displayedEconomicActivities',
             'globalEconomicActivities', 'iibbRates']) this[key] = [];
@@ -293,7 +294,7 @@ export class AppStore {
         this.operationalOrgTargets = targets;
         if (context.organization_id) {
             Object.assign(draft, await persistenceService.loadOperationalSnapshot(context.organization_id,
-                { capabilities: draft.permissions.organization.codes }));
+                { capabilities: draft.permissions.organization.codes, catalogOnly: this.deferOperationalData }));
             draft.salaries = draft.salariesList[0] || null;
         } else {
             await draft.loadTaxCategories();
@@ -335,6 +336,53 @@ export class AppStore {
 
     canVisitModule(id) { return canVisitModule(this, id); }
     canOcrAction(action) { return canOcr(this, action); }
+    canOperationalAction(action) { return canOperationalAction(this, action); }
+
+    clearOperationalDataCache() {
+        this.operationalDatasetsLoaded = new Set();
+        this.operationalDataRequests = new Map();
+        this.operationalDataErrors = new Map();
+    }
+
+    operationalDataStatus(moduleId) {
+        const groups = MICA_MODULE_CONTRACT[moduleId]?.datasets || [];
+        return { loading: groups.some(g => this.operationalDataRequests.has(g)),
+            error: groups.map(g => this.operationalDataErrors.get(g)).find(Boolean) || '' };
+    }
+
+    async ensureOperationalData(moduleId, { retry = false } = {}) {
+        if (!this.deferOperationalData || !this.canVisitModule(moduleId) || !tenantCan(this,'RECORD_VIEW')) return;
+        const groups = MICA_MODULE_CONTRACT[moduleId]?.datasets || [];
+        if (retry) for (const group of groups) this.operationalDataErrors.delete(group);
+        const missing = groups.filter(g => !this.operationalDatasetsLoaded.has(g) && !this.operationalDataRequests.has(g) && !this.operationalDataErrors.has(g));
+        if (!missing.length) return Promise.all(groups.map(g => this.operationalDataRequests.get(g)));
+        const generation = this.contextGeneration, org = this.activeOrganizationId, permissions = this.permissions;
+        const requests = this.operationalDataRequests;
+        const isCurrent = () => generation === this.contextGeneration && org === this.activeOrganizationId &&
+            permissions === this.permissions && requests === this.operationalDataRequests && tenantCan(this,'RECORD_VIEW');
+        const pending = Promise.resolve().then(async () => {
+            try {
+                const data = await persistenceService.loadOperationalSnapshot(org, {capabilities:permissions.organization.codes,
+                    datasets:missing,skipCatalog:true,isCurrent});
+                if (!isCurrent()) return;
+                const context = await persistenceService.getOperationalContext();
+                if (!isCurrent()) return;
+                if (context.organization_id !== org) throw new Error('El contexto cambió en otra sesión. Volvé a cargarlo.');
+                if (missing.includes('records')) { this.items = data.items; this.perceptions = data.perceptions; }
+                if (missing.includes('financials')) { this.bankTransactions = data.bankTransactions;
+                    this.salariesList = data.salariesList; this.salaries = this.salariesList[0] || null; }
+                for (const group of missing) this.operationalDatasetsLoaded.add(group);
+            } catch (error) {
+                if (isCurrent()) for (const group of missing) this.operationalDataErrors.set(group,error.message);
+            } finally {
+                if (requests === this.operationalDataRequests) { for (const group of missing) requests.delete(group); this.notify(); }
+            }
+        });
+        for (const group of missing) requests.set(group,pending);
+        this.notify();
+        await pending;
+        return Promise.all(groups.map(g => requests.get(g)));
+    }
 
     async refreshOperationalCatalogs() {
         const generation = this.contextGeneration;
@@ -652,6 +700,7 @@ export class AppStore {
     }
 
     updateCategory(id, categoryVal) {
+        if (!this.canOperationalAction('classify')) throw new Error('No tenés permiso para clasificar registros.');
         const item = this.items.find(i => i.id === id);
         if (item) {
             item.category_id = categoryVal; // Now stores the UUID
@@ -661,6 +710,7 @@ export class AppStore {
     }
 
     updateActivity(id, activityVal) {
+        if (!this.canOperationalAction('classify')) throw new Error('No tenés permiso para clasificar registros.');
         const item = this.items.find(i => i.id === id);
         if (item) {
             item.activity_id = activityVal; // UUID
@@ -670,6 +720,7 @@ export class AppStore {
     }
 
     updateBankCategory(id, categoryVal) {
+        if (!this.canOperationalAction('classify')) throw new Error('No tenés permiso para clasificar registros.');
         const item = this.bankTransactions.find(i => i.id === id);
         if (item) {
             item.category_id = categoryVal; // UUID
@@ -950,6 +1001,7 @@ export class AppStore {
     }
 
     exportBankMovements() {
+        if (!this.canOperationalAction('export')) throw new Error('No tenés permiso para exportar registros.');
         // Implementación básica de exportación a XLSX usando SheetJS
         if (!window.XLSX) {
             alert("Librería XLSX no cargada.");
@@ -1354,4 +1406,5 @@ export class AppStore {
     }
 }
 
-export const appStore = new AppStore();
+// Load operational datasets on demand; opening Configuration never fetches business rows.
+export const appStore = new AppStore({ deferOperationalData: true });

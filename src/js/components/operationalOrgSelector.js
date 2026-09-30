@@ -57,6 +57,10 @@ export function mountOperationalOrgSelectors(store, document) {
 }
 
 export function renderOperationalImportControls(store, document) {
+    for (const control of document.querySelectorAll?.('[data-mica-action]') || []) {
+        const allowed = !!store.canOperationalAction?.(control.dataset.micaAction);
+        control.disabled = !allowed; control.hidden = !allowed;
+    }
     const types = { recibidos: 'recibido', emitidos: 'emitido', percepciones: 'percepcion', bancos: 'banco', sueldos: 'sueldo' };
     for (const [name, type] of Object.entries(types)) {
         const allowed = store.canImportOperational(type);
@@ -71,6 +75,8 @@ export function renderOperationalImportControls(store, document) {
         if (control) { control.inert = true; control.hidden = true; }
     }
     const ocr = document.getElementById('ocr-dropzone');
+    const ocrPanel = document.getElementById('manual-ocr-panel');
+    if (ocrPanel) ocrPanel.hidden = !['upload','process','verify'].some(action => store.canOcrAction(action));
     const ocrInput = document.getElementById('ocr-input');
     if (ocr) { ocr.hidden = !store.canOcrAction('upload'); ocr.inert = true; }
     // No real OCR backend exists. Capability never enables the old fabricated-invoice simulator.

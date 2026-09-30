@@ -1,3 +1,4 @@
+import { permissionByCode } from '../../src/js/core/micaPermissionContract.js';
 // Static SQL contracts, not PostgreSQL execution evidence.
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -33,11 +34,12 @@ test('server and client share a closed product contract, including OCR but exclu
     const allowed = body('private.mica_capability_allowed');
     const pairs = [...allowed.matchAll(/\('([A-Z_]+)','(PLATFORM|ORGANIZATION)'\)/g)].map(m => [m[1], m[2]]);
     expect(pairs).toEqual([
-        ...MICA_PLATFORM_CAPABILITIES.map(c => [c, 'PLATFORM']),
-        ...MICA_ORGANIZATION_CAPABILITIES.map(c => [c, 'ORGANIZATION'])
+        // 037 is immutable; 039b adds explicitly prepared capabilities.
+        ...MICA_PLATFORM_CAPABILITIES.filter(c => permissionByCode(c).status === 'CURRENT').map(c => [c, 'PLATFORM']),
+        ...MICA_ORGANIZATION_CAPABILITIES.filter(c => permissionByCode(c).status === 'CURRENT').map(c => [c, 'ORGANIZATION'])
     ]);
     for (const code of ['DOCUMENTS_UPLOAD', 'DOCUMENTS_OCR_PROCESS', 'DOCUMENTS_OCR_VERIFY']) expect(isMicaCapability(code, 'ORGANIZATION')).toBe(true);
-    for (const code of ['RECIPES_VIEW', 'SUPPLIERS_MANAGE', 'SALES_VIEW', 'UNKNOWN_CAPABILITY']) expect(isMicaCapability(code, 'ORGANIZATION')).toBe(false);
+    for (const code of ['RECIPES_VIEW', 'INVENTORY_VIEW', 'UNKNOWN_CAPABILITY']) expect(isMicaCapability(code, 'ORGANIZATION')).toBe(false);
     expect(isMicaCapability('ACCESS_ANY_ORG', 'ORGANIZATION')).toBe(false);
     expect(body('public.get_my_effective_capabilities')).toContain('private.can_operate_mica_org');
     expect(body('public.get_capability_delegation_contract')).toContain('private.mica_capability_allowed');

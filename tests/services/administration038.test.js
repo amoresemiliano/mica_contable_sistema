@@ -78,7 +78,7 @@ test('DB harness covers actual registration, deny/allow, delegated staff, tenant
 test('editor rejects reserved and foreign capabilities while preserving OCR', () => {
     const rows = ['ACCESS_ANY_ORG', 'GLOBAL_USER_MANAGE', 'GLOBAL_CATALOG_VIEW'].map(code => ({ code, scope: 'PLATFORM' }));
     expect(editableCapabilities(rows, 'PLATFORM').map(c => c.code)).toEqual(['GLOBAL_CATALOG_VIEW']);
-    expect(editableCapabilities(['DOCUMENTS_UPLOAD', 'DOCUMENTS_OCR_PROCESS', 'DOCUMENTS_OCR_VERIFY', 'RECIPES_VIEW', 'SUPPLIERS_MANAGE']
+    expect(editableCapabilities(['DOCUMENTS_UPLOAD', 'DOCUMENTS_OCR_PROCESS', 'DOCUMENTS_OCR_VERIFY', 'RECIPES_VIEW', 'INVENTORY_VIEW']
         .map(code => ({ code, scope: 'ORGANIZATION' })), 'ORGANIZATION').map(c => c.code))
         .toEqual(['DOCUMENTS_UPLOAD', 'DOCUMENTS_OCR_PROCESS', 'DOCUMENTS_OCR_VERIFY']);
 });
