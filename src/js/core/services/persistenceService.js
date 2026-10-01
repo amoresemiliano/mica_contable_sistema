@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient.js';
 import { isMicaCapability } from '../micaCapabilities.js';
 import { validateImportEnvelope } from '../importEnvelope.js';
+import { persistedClassification } from '../classification.js';
 
 /**
  * Servicio de Persistencia para MICA (Fase 2 - Supabase Staging)
@@ -346,6 +347,7 @@ export class PersistenceService {
                 saldo: r.saldo,
                 identityKey: r.identity_key,
                 financialFingerprint: r.financial_fingerprint,
+                ...persistedClassification(r),
                 rawRecord: d
             };
         });
@@ -401,9 +403,7 @@ export class PersistenceService {
                     noGravado: d.netoNoGravado || 0,
                     netoGravado: d.netoGravado || 0,
                     alicuotas: d.alicuotas || [],
-                    categoria: r.categoria || null,
-                    sugerida: false,
-                    confirmada: r.confirmada || false,
+                    ...persistedClassification(r),
                     rawRecord: d
                 };
             });
@@ -445,6 +445,7 @@ export class PersistenceService {
                     jurisdiction: d.jurisdiction || (String(r.record_type).includes('ARBA') || r.record_type === 'ARBA' ? 'ARBA' : 'NACIONAL (IVA)'),
                     fuente: d.fuente || (String(r.record_type).includes('ARBA') || r.record_type === 'ARBA' ? 'ARBA' : 'IVA'),
                     tipo: 'percepcion',
+                    ...persistedClassification(r),
                     rawRecord: d
                 };
             });
@@ -507,14 +508,22 @@ export class PersistenceService {
     /**
      * Clasificación masiva
      */
-    async bulkUpdateRecordClassification(recordIds, cuit, categoryId, activityId = null) {
+    async bulkUpdateRecordClassification(recordIds, cuit, categoryId, activityId = null, isCurrent = () => true) {
         if (!recordIds || recordIds.length === 0) return;
         for (const id of recordIds) {
-            const { error } = await supabase.rpc('update_record_classification', {
-                p_record_id: id, p_category_id: categoryId, p_activity_id: activityId
-            });
-            if (error) throw new Error(`Error update_record_classification: ${error.message}`);
+            if (!isCurrent()) throw new Error('El contexto cambió durante la clasificación.');
+            await this.updateClassification('records', id, categoryId, activityId);
         }
+    }
+
+    async updateClassification(family, id, categoryId, activityId) {
+        if (!['records', 'financials'].includes(family)) throw new Error('Familia de clasificación inválida.');
+        const record = family === 'records';
+        const { error } = await supabase.rpc(record ? 'update_record_classification' : 'update_movement_classification', {
+            [record ? 'p_record_id' : 'p_movement_id']: id,
+            p_category_id: categoryId || null, p_activity_id: activityId || null
+        });
+        if (error) throw new Error(error.message);
     }
 
     /**
@@ -757,7 +766,7 @@ export class PersistenceService {
             this.loadActiveFiscalRecords(recordRows), this.loadActivePerceptions(recordRows),
             this.loadActiveFinancialMovements(financialRows)
         ]);
-        const financialRecord = f => ({ ...f.rawRecord, id: f.id, organization_id: orgId,
+        const financialRecord = f => ({ ...f.rawRecord, ...persistedClassification(f), id: f.id, organization_id: orgId,
             periodo: f.periodo || f.rawRecord.periodo, fecha: f.rawRecord.fecha || f.fecha });
         return {
             items, perceptions,

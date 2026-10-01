@@ -1,3 +1,5 @@
+import { unresolvedPurchases, purchaseCategoryTotals } from './core/classification.js';
+import { saveClassificationControl } from './components/classificationControl.js';
 import { initializeWithSessionRecovery } from './core/sessionRecovery.js';
 import { validateImportEnvelope, refreshDuplicateImport, assertImportResult } from './core/importEnvelope.js';
 import { renderGridPagination } from './components/gridPagination.js';
@@ -486,7 +488,7 @@ export function switchTab(tabId) {
     else if (tabId === 'tab-bancos') {
         if (appStore.taxCategories.length === 0 && appStore.loadTaxCategories) appStore.loadTaxCategories();
         if (appStore.economicActivities.length === 0 && appStore.loadEconomicActivities) appStore.loadEconomicActivities();
-        UIManager.renderBancosGrid();
+        UIManager.renderBankTable();
     }
     else if (tabId === 'tab-sueldos') {
         updateSalaryFormFields();
@@ -592,7 +594,7 @@ export function renderClientDashboard() {
     const alertUnresolved = document.getElementById('alert-unresolved-taxes');
     const alertNoIssues = document.getElementById('alert-no-issues');
     if (alertUnresolved) {
-        const pendingCount = items.filter(i => (i.tipo === 'recibido' || i.type === 'recibido') && (i.saldoAExplicar > 0 || !i.confirmada)).length;
+        const pendingCount = unresolvedPurchases(items);
         if (pendingCount > 0) {
             alertUnresolved.innerHTML = `⚠️ <strong>Atención:</strong> Tenés ${pendingCount} comprobantes de compras sin categorizar o con saldo pendiente por explicar.`;
             alertUnresolved.classList.remove('hidden');
@@ -615,17 +617,14 @@ export function renderClientDashboard() {
         return;
     }
 
-    const catTotals = {};
-    purchaseItems.forEach(i => {
-        const cat = i.categoria || "Sin Categorizar";
-        catTotals[cat] = (catTotals[cat] || 0) + i.total;
-    });
+    const catTotals = purchaseCategoryTotals(purchaseItems, appStore.taxCategories);
     if (purchasesManual > 0) {
-        catTotals["Gastos Caja Chica (Manual)"] = (catTotals["Gastos Caja Chica (Manual)"] || 0) + purchasesManual;
+        catTotals.push({label:'Gastos Caja Chica (Manual)',amount:purchasesManual});
     }
 
-    const sortedCategories = Object.entries(catTotals).sort((a,b) => b[1] - a[1]);
-    categoryChartContainer.innerHTML = sortedCategories.map(([category, amount]) => {
+    const sortedCategories = catTotals.sort((a,b) => b.amount - a.amount);
+    categoryChartContainer.innerHTML = sortedCategories.map(({label, amount}) => {
+        const category = String(label).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         const pct = Math.round((amount / (purchases || 1)) * 100);
         return `
             <li class="progress-item">
@@ -642,61 +641,12 @@ export function renderClientDashboard() {
 }
 
 // BÚSQUEDA DE COMISIONES Y TRANSACCIONES BANCARIAS
-export function renderBancosGrid() {
-    const tbody = document.getElementById('table-bancos-body');
-    if (!tbody) return;
+export function renderBancosGrid() { UIManager.renderBankTable(); }
 
-    const txs = appStore.bankTransactions;
-    if (txs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">No hay extractos bancarios cargados.</td></tr>`;
-        return;
-    }
-
-    tbody.innerHTML = txs.map((tx, idx) => {
-        const rowClass = tx.confirmada ? 'tr-matched' : 'tr-pending';
-        const buttonHTML = tx.confirmada 
-            ? `<button class="btn-confirm confirmed" disabled>✓ Confirmado</button>`
-            : `<button class="btn-confirm" onclick="confirmBankTx(${idx})">Aprobar</button>`;
-
-        return `
-            <tr class="${rowClass}">
-                <td>${tx.fecha}</td>
-                <td><strong>${tx.descripcion}</strong></td>
-                <td style="font-weight: 600; color: ${tx.tipo === 'debit' ? 'var(--warning)' : 'var(--success)'};">
-                    ${tx.tipo === 'debit' ? '-' : '+'}$ ${tx.monto.toLocaleString('es-AR', {minimumFractionDigits: 2})}
-                </td>
-                <td><span class="badge ${tx.tipo === 'debit' ? 'badge-recibido' : 'badge-emitido'}">${tx.tipo === 'debit' ? 'Débito' : 'Crédito'}</span></td>
-                <td>
-                    <select class="select-category" onchange="updateBankTxCategory(${idx}, this.value)" ${tx.confirmada ? 'disabled' : ''}>
-                        <option value="Pago Proveedor" ${tx.cuentaSugerida === 'Pago Proveedor' ? 'selected' : ''}>Pago Proveedor</option>
-                        <option value="Ingreso por Ventas" ${tx.cuentaSugerida === 'Ingreso por Ventas' ? 'selected' : ''}>Ingreso por Ventas</option>
-                        <option value="Gasto Bancario" ${tx.cuentaSugerida === 'Gasto Bancario' ? 'selected' : ''}>Gasto Bancario</option>
-                        <option value="Percepción IVA" ${tx.cuentaSugerida === 'Percepción IVA' ? 'selected' : ''}>Percepción IVA</option>
-                        <option value="Percepción IIBB (SIRCREB)" ${(tx.cuentaSugerida || '').includes('SIRCREB') || (tx.cuentaSugerida || '').includes('IIBB') ? 'selected' : ''}>Percepción IIBB (SIRCREB)</option>
-                        <option value="Impuesto Débito/Crédito" ${tx.cuentaSugerida === 'Impuesto Débito/Crédito' ? 'selected' : ''}>Impuesto Débito/Crédito</option>
-                        <option value="Pago de Impuestos" ${tx.cuentaSugerida === 'Pago de Impuestos' ? 'selected' : ''}>Pago de Impuestos</option>
-                    </select>
-                </td>
-                <td>${buttonHTML}</td>
-            </tr>
-        `;
-    }).join('');
-}
-
-window.confirmBankTx = function(idx) {
-    const tx = appStore.bankTransactions[idx];
-    if (tx) {
-        tx.confirmada = true;
-        appStore.notify();
-    }
-};
-
-window.updateBankTxCategory = function(idx, category) {
-    const tx = appStore.bankTransactions[idx];
-    if (tx) {
-        tx.cuentaSugerida = category;
-        appStore.notify();
-    }
+window.saveMicaClassification = (control, method, id) => {
+    if (!['updateCategory', 'updateActivity', 'updateBankCategory', 'updateBankActivity'].includes(method)) return;
+    return saveClassificationControl(appStore, control, method, id, () => UIManager.render(),
+        message => alert('No se pudo confirmar la clasificación: ' + message));
 };
 
 // RENDERIZADO DE RESOLUCIÓN MANUAL ("OTROS TRIBUTOS" CON DESCUADRE)
@@ -1405,7 +1355,7 @@ export class UIManager {
                 showStagingPreviewModal(staged, file.name, context, (acceptedItems) => {
                     if (!validContext()) return;
                     appStore.addItems(acceptedItems);
-                    if (type === 'emitido') checkMultiActivityQueue();
+                    // Imported sales keep canonical classification; no local demo activity assignment.
                     UIManager.render();
                 });
             } else if (type === 'percepcion') {
@@ -1868,8 +1818,12 @@ export class UIManager {
                     <td data-label="Importe" class="${bancosGrid.isColumnVisible('monto') ? '' : 'hidden'}" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
                     <td data-label="Tipo" class="${bancosGrid.isColumnVisible('tipo') ? '' : 'hidden'}"><span class="badge ${badgeClass}">${badgeText}</span></td>
                     <td data-label="Clasificación / Categoría" class="${bancosGrid.isColumnVisible('cuenta') ? '' : 'hidden'}">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateBankCategory('${t.id}', this.value)" ${t.confirmada || !appStore.canOperationalAction('classify') ? 'disabled' : ''}>
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="saveMicaClassification(this, 'updateBankCategory', '${t.id}')" ${!appStore.canOperationalAction('classify') ? 'disabled' : ''}>
                             ${taxCategoriesHTML.replace(`value="${t.category_id || ''}"`, `value="${t.category_id || ''}" selected`)}
+                        </select>
+                        <select aria-label="Actividad del movimiento" class="select-category form-control" onchange="saveMicaClassification(this, 'updateBankActivity', '${t.id}')" ${!appStore.canOperationalAction('classify') ? 'disabled' : ''}>
+                            <option value="">-- Seleccionar Actividad --</option>
+                            ${(appStore.economicActivities || []).filter(a => a.is_active).map(a => `<option value="${a.id}" ${a.id === t.activity_id ? 'selected' : ''}>${a.name}</option>`).join('')}
                         </select>
                     </td>
                     <td data-label="Estado" class="${bancosGrid.isColumnVisible('estado') ? '' : 'hidden'}">${t.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
@@ -1949,12 +1903,12 @@ export class UIManager {
                     <td data-label="Perc. IIBB" class="${comprobantesGrid.isColumnVisible('percIibb') ? '' : 'hidden'}">${formatMoney(item.percepcionIibb || 0)}</td>
                     <td data-label="Total" class="${comprobantesGrid.isColumnVisible('total') ? '' : 'hidden'}" style="font-weight: 700;">${formatMoney(item.total)}</td>
                     <td data-label="Categoría Tributaria" class="${comprobantesGrid.isColumnVisible('categoria') ? '' : 'hidden'}">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateCategory('${item.id}', this.value)" ${item.confirmada || !appStore.canOperationalAction('classify') ? 'disabled' : ''}>
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="saveMicaClassification(this, 'updateCategory', '${item.id}')" ${!appStore.canOperationalAction('classify') ? 'disabled' : ''}>
                             ${taxCategoriesHTML.replace(`value="${item.category_id || ''}"`, `value="${item.category_id || ''}" selected`)}
                         </select>
                     </td>
                     <td data-label="Actividad" class="${comprobantesGrid.isColumnVisible('actividad') ? '' : 'hidden'}">
-                        <select class="select-category form-control" style="font-size: 11px;" onchange="appStore.updateActivity('${item.id}', this.value)" ${item.confirmada || !appStore.canOperationalAction('classify') ? 'disabled' : ''}>
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="saveMicaClassification(this, 'updateActivity', '${item.id}')" ${!appStore.canOperationalAction('classify') ? 'disabled' : ''}>
                             ${activitiesHTML.replace(`value="${item.activity_id || ''}"`, `value="${item.activity_id || ''}" selected`)}
                         </select>
                     </td>

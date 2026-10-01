@@ -23,6 +23,7 @@ test('039c invitation UI filters preset scope and keeps activation separate',asy
         const invitation=jest.fn(async(action)=>action==='list'?[]:{status:'PENDING_AUTHENTICATION'}),apply=jest.fn();
         const store={sessionUserId:'actor',contextState:'TENANT_READY',activeOrganizationId:'NORTE',contextGeneration:1,pendingOperations:0,subscribe(){}};
         await createAdministrationView(root,store,{read:async()=>data,invitation,apply}).load();
+        all(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios').onclick();
         all(root).find(n=>n.textContent==='+ Invitar usuario').onclick();
         const f=all(root).find(n=>n.tag==='form'&&all(n).some(c=>c.textContent==='Invitar usuario'));
         const scope=all(f).find(n=>n.name==='scope'),preset=all(f).find(n=>n.name==='preset');
@@ -116,23 +117,26 @@ test('administration has one visible tab, compact editors, filtered capabilities
         expect(panels().filter(n=>!n.hidden)).toHaveLength(1);
         const tabs=all(root).filter(n=>n.role==='tab');
         expect(tabs.map(t=>t.textContent)).toEqual(['Organizaciones','Usuarios','Roles y permisos','Asignaciones']);
-        tabs[2].onclick(); expect(panels().filter(n=>!n.hidden)[0].children[0].textContent).toBe('Roles y permisos');
-        all(panels()[2]).find(n=>n.textContent==='Nuevo preset').onclick();
-        const boxes=all(panels()[2]).filter(n=>n.type==='checkbox');
+        tabs[2].onclick(); expect(all(panels()[0]).some(n=>n.tag==='h3'&&n.textContent==='Roles y permisos')).toBe(true);
+        all(panels()[0]).find(n=>n.textContent==='Nuevo preset').onclick();
+        const boxes=all(panels()[0]).filter(n=>n.type==='checkbox');
         expect(boxes.map(n=>n.value)).toContain('BANK_IMPORT'); expect(boxes.map(n=>n.value)).not.toContain('ACCESS_ANY_ORG');
-        expect(all(panels()[2]).find(n=>n.className==='mica-permission-count').textContent).toBe('0 de 1 seleccionados');
+        expect(all(panels()[0]).find(n=>n.className==='mica-permission-count').textContent).toBe('0 de 1 seleccionados');
         boxes[0].checked=true; boxes[0].onchange();
-        expect(all(panels()[2]).find(n=>n.className==='mica-permission-count').textContent).toBe('1 de 1 seleccionados');
-        expect(all(panels()[2]).find(n=>n.tag==='strong').textContent).toBe('Importar extractos');
-        all(panels()[2]).find(n=>n.textContent==='Expandir grupos').onclick();
-        expect(all(panels()[2]).filter(n=>n.tag==='details').every(n=>n.open)).toBe(true);
-        all(panels()[2]).find(n=>n.textContent==='Contraer grupos').onclick();
-        expect(all(panels()[2]).filter(n=>n.tag==='details').every(n=>!n.open)).toBe(true);
-        const search=all(panels()[2]).find(n=>n.type==='search'); search.value='unmatched'; search.oninput();
-        expect(all(panels()[2]).filter(n=>n.tag==='details').every(n=>n.hidden)).toBe(true);
+        expect(all(panels()[0]).find(n=>n.className==='mica-permission-count').textContent).toBe('1 de 1 seleccionados');
+        expect(all(panels()[0]).find(n=>n.tag==='strong').textContent).toBe('Importar extractos');
+        all(panels()[0]).find(n=>n.textContent==='Expandir grupos').onclick();
+        expect(all(panels()[0]).filter(n=>n.tag==='details').every(n=>n.open)).toBe(true);
+        all(panels()[0]).find(n=>n.textContent==='Contraer grupos').onclick();
+        expect(all(panels()[0]).filter(n=>n.tag==='details').every(n=>!n.open)).toBe(true);
+        const search=all(panels()[0]).find(n=>n.type==='search'); search.value='unmatched'; search.oninput();
+        expect(all(panels()[0]).filter(n=>n.tag==='details').every(n=>n.hidden)).toBe(true);
         tabs[3].onclick(); expect(panels().filter(n=>!n.hidden)).toHaveLength(1);
-        expect(all(panels()[3]).some(n=>n.textContent?.includes('Contabilidad'))).toBe(true);
-        expect(all(panels()[3]).filter(n=>n.tag==='form').every(f=>all(panels()[3]).some(n=>n.tag==='details'&&all(n).includes(f)))).toBe(true);
+        expect(panels()).toHaveLength(1);
+        all(panels()[0]).find(n=>n.textContent==='Ver detalle').onclick();
+        const drawer=all(root).find(n=>n.tag==='dialog');
+        expect(all(drawer).some(n=>n.textContent?.includes('Contabilidad'))).toBe(true);
+        expect(all(drawer).filter(n=>n.tag==='form').every(f=>all(drawer).some(n=>n.tag==='details'&&all(n).includes(f)))).toBe(true);
     } finally {global.document=old;}
 });
 

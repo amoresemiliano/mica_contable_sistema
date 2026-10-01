@@ -298,6 +298,8 @@ describe('PersistenceService Unit Tests', () => {
                 total: 5000,
                 tipo_operacion: 'VENTA',
                 confirmada: true,
+                category_id: 'persisted-category',
+                activity_id: 'persisted-activity',
                 normalized_payload: { fecha: '2026-05-16', cuit: '20333333339', razonSocial: 'Cliente Receptor S.R.L.' }
             },
             {

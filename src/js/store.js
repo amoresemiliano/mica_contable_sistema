@@ -719,72 +719,54 @@ export class AppStore {
         }
     }
 
-    updateCategory(id, categoryVal) {
-        if (!this.canOperationalAction('classify')) throw new Error('No tenés permiso para clasificar registros.');
-        const item = this.items.find(i => i.id === id);
-        if (item) {
-            item.category_id = categoryVal; // Now stores the UUID
-            item.sugerida = false;
-            this.notify();
-        }
-    }
+    updateCategory(id, value) { return this.saveClassification('records', [id], { category_id: value || null }); }
+    updateActivity(id, value) { return this.saveClassification('records', [id], { activity_id: value || null }); }
+    updateBankCategory(id, value) { return this.saveClassification('financials', [id], { category_id: value || null }); }
+    updateBankActivity(id, value) { return this.saveClassification('financials', [id], { activity_id: value || null }); }
 
-    updateActivity(id, activityVal) {
-        if (!this.canOperationalAction('classify')) throw new Error('No tenés permiso para clasificar registros.');
-        const item = this.items.find(i => i.id === id);
-        if (item) {
-            item.activity_id = activityVal; // UUID
-            item.sugerida = false;
-            this.notify();
-        }
-    }
-
-    updateBankCategory(id, categoryVal) {
-        if (!this.canOperationalAction('classify')) throw new Error('No tenés permiso para clasificar registros.');
-        const item = this.bankTransactions.find(i => i.id === id);
-        if (item) {
-            item.category_id = categoryVal; // UUID
-            item.sugerida = false;
-            this.notify();
-        }
-    }
-
-    updateBankActivity(id, activityVal) {
-        const item = this.bankTransactions.find(i => i.id === id);
-        if (item) {
-            item.activity_id = activityVal; // UUID
-            item.sugerida = false;
-            this.notify();
-        }
-    }
-
-    async confirmItem(id) {
-        const generation = this.contextGeneration;
-        const item = this.items.find(i => i.id === id);
-        if (item && item.category_id) {
-            item.confirmada = true;
-            try {
-                await persistenceService.bulkUpdateRecordClassification([item.id], item.cuit, item.category_id, item.activity_id);
-                if (generation !== this.contextGeneration) return;
-            } catch (e) {
-                console.error("Failed to persist classification", e);
-                item.confirmada = false;
-                alert("Error al guardar la clasificación: " + e.message);
-                return;
-            }
-            
-            // Inteligencia en tiempo real (in-memory)
-            this.items.forEach(other => {
-                if (other.cuit === item.cuit && !other.confirmada) {
-                    other.category_id = item.category_id;
-                    other.activity_id = item.activity_id;
-                    other.sugerida = true;
-                }
+    async saveClassification(family, ids, patch = {}) {
+        const generation = this.contextGeneration, org = this.activeOrganizationId;
+        const current = () => generation === this.contextGeneration && org === this.activeOrganizationId &&
+            this.canOperationalAction('classify');
+        if (!current()) throw new Error('No tenés permiso para clasificar registros.');
+        if (!['records', 'financials'].includes(family)) throw new Error('Familia inválida.');
+        const moduleId = family === 'records' ? 'tab-conciliador' : 'tab-bancos';
+        const rows = () => family === 'records' ? this.items : this.bankTransactions;
+        // Serialize edits so category + activity changes cannot overwrite each other.
+        ++this.pendingOperations;
+        const previous = this.classificationQueue || Promise.resolve();
+        const task = previous.catch(() => {}).then(async () => {
+            if (!current()) throw new Error('El contexto cambió. Volvé a cargar los registros.');
+            const changes = ids.map(id => {
+                const row = rows().find(r => r.id === id);
+                if (!row || row.organization_id !== org) throw new Error('Registro fuera del contexto actual.');
+                return { id, category_id: row.category_id || null, activity_id: row.activity_id || null, ...patch };
             });
-
-            this.notify();
-        }
+            let writeError;
+            try {
+                for (const row of changes) {
+                    if (!current()) throw new Error('El contexto cambió durante la clasificación.');
+                    await persistenceService.updateClassification(family, row.id, row.category_id, row.activity_id);
+                }
+            } catch (error) { writeError = error; }
+            // Includes partial bulk failures: report only the rows actually persisted.
+            if (current()) {
+                try { await this.refreshOperationalData(moduleId); }
+                catch (error) { throw new Error((writeError ? writeError.message + '. ' : '') +
+                    'No se pudo verificar la clasificación guardada: ' + error.message); }
+            }
+            if (writeError) throw writeError;
+            if (!current()) throw new Error('El contexto cambió. Revisá la clasificación en la organización original.');
+            if (changes.some(change => {
+                const row = rows().find(r => r.id === change.id);
+                return !row || row.category_id !== change.category_id || row.activity_id !== change.activity_id;
+            })) throw new Error('La lectura del servidor no confirma la clasificación. Volvé a cargar los registros.');
+        });
+        this.classificationQueue = task;
+        try { await task; } finally { --this.pendingOperations; }
     }
+
+    async confirmItem(id) { return this.saveClassification('records', [id]); }
 
     // Bulk actions
     updateBulkSelectionBar() {
@@ -854,16 +836,8 @@ export class AppStore {
 
         if (confirm(`¿Clasificar los ${ids.length} registros seleccionados del proveedor CUIT ${cuit} con la categoría actual?`)) {
             try {
-                await persistenceService.bulkUpdateRecordClassification(ids, cuit, firstItem.category_id, firstItem.activity_id);
+                await this.saveClassification('records', ids, { category_id: firstItem.category_id, activity_id: firstItem.activity_id || null });
                 if (generation !== this.contextGeneration) return;
-                ids.forEach(id => {
-                    const it = this.items.find(i => i.id === id);
-                    if (it) {
-                        it.confirmada = true;
-                        it.category_id = firstItem.category_id;
-                        it.activity_id = firstItem.activity_id;
-                    }
-                });
                 
                 // Uncheck all
                 document.querySelectorAll('.comprobante-checkbox').forEach(cb => cb.checked = false);
@@ -992,21 +966,8 @@ export class AppStore {
 
         if (confirm(`¿Clasificar los ${ids.length} movimientos seleccionados con la categoría actual?`)) {
             try {
-                for (const id of ids) {
-                    const { error } = await persistenceService.supabase.rpc('update_movement_classification', {
-                        p_movement_id: id, p_category_id: firstItem.category_id, p_activity_id: firstItem.activity_id
-                    });
-                    if (error) throw error;
-                    if (generation !== this.contextGeneration) return;
-                }
-                ids.forEach(id => {
-                    const it = this.bankTransactions.find(i => i.id === id);
-                    if (it) {
-                        it.category_id = firstItem.category_id;
-                        it.activity_id = firstItem.activity_id;
-                        it.confirmada = true;
-                    }
-                });
+                await this.saveClassification('financials', ids, { category_id: firstItem.category_id, activity_id: firstItem.activity_id || null });
+                if (generation !== this.contextGeneration) return;
                 
                 document.querySelectorAll('.banco-checkbox').forEach(cb => cb.checked = false);
                 const allCb = document.getElementById('check-all-bancos');
