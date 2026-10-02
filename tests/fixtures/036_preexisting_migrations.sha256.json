@@ -1,0 +1,12 @@
+{
+  "sql/031_platform_owner_access_any_org.sql": "44075e96fed79ae5f92fa6ced723dac2217ff0bba1838d4399d0ac3cd2b11569",
+  "sql/031_platform_owner_access_any_org_down.sql": "5ab61dcdb878103dccddc933f0ac694efbc9a26772a32b772757e0714d46347a",
+  "sql/032_accounting_catalog_preset.sql": "7debd8ff7e02fbdbd3b09c1e79459996aa78bd39a14b49ce38c0238ccf868a56",
+  "sql/032_accounting_catalog_preset_down.sql": "b8588b079a6c3098cd8a6de6db4c2bd03d435010cfba56615a45dd998ded336e",
+  "sql/033_catalog_capability_core.sql": "e48d9ea7a9acacfc543d561d7cba591f13032b2e6c71ff68ad975cda1dd5a266",
+  "sql/033_catalog_capability_core_down.sql": "d035320a284e80fffa74c002c046dcae7683087e0b8e4dddf4a4e9579cf9746e",
+  "sql/034_normalize_consultant_scope_and_catalog_grants.sql": "3467a659d57df186e096ae2b66ff83f899f3335cb5af60cd8f19bb807ed3728e",
+  "sql/034_normalize_consultant_scope_and_catalog_grants_down.sql": "3e34b798c706128c92c8a3dde21c7f5d4ff47492ea96465f3bcedd913c4ff014",
+  "sql/035_owner_operational_context.sql": "c9a5c95be674fc5307617d9698123d58e1e6153177837db817a75e54bce5d585",
+  "sql/035_owner_operational_context_down.sql": "e24aaef58b9499eea454dc68cd9f5e4062666f4a1fde810302a1d6708f45daee"
+}

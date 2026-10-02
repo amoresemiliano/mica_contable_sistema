@@ -1,0 +1,71 @@
+{
+  "DATA_RESTORE_ANY_ORG": null,
+  "MICA_ADMIN_MANAGE": null,
+  "PURCHASES_INVOICES_MANAGE": {
+    "id": "270d5828-d17e-48a7-b21a-a880747dfb21",
+    "code": "PURCHASES_INVOICES_MANAGE",
+    "scope": "ORGANIZATION",
+    "is_active": true,
+    "created_at": "2026-09-15T20:04:40.479794+00:00",
+    "description": "Register and match supplier invoices",
+    "delegation_class": "ORGANIZATION_DELEGABLE"
+  },
+  "SUPPLIERS_VIEW": {
+    "id": "50058bd3-8718-4721-a97d-79a0b4456236",
+    "code": "SUPPLIERS_VIEW",
+    "scope": "ORGANIZATION",
+    "is_active": true,
+    "created_at": "2026-09-15T20:04:40.479794+00:00",
+    "description": "View supplier directory",
+    "delegation_class": "ORGANIZATION_DELEGABLE"
+  },
+  "SUPPLIERS_MANAGE": {
+    "id": "6adf675e-cc3c-4b18-a074-572495f48ac7",
+    "code": "SUPPLIERS_MANAGE",
+    "scope": "ORGANIZATION",
+    "is_active": true,
+    "created_at": "2026-09-15T20:04:40.479794+00:00",
+    "description": "Create and edit supplier profiles",
+    "delegation_class": "ORGANIZATION_DELEGABLE"
+  },
+  "SALES_VIEW": {
+    "id": "6012bcd5-8268-40b8-8e29-849623403198",
+    "code": "SALES_VIEW",
+    "scope": "ORGANIZATION",
+    "is_active": true,
+    "created_at": "2026-09-15T20:04:40.479794+00:00",
+    "description": "View sales overview and dashboards",
+    "delegation_class": "ORGANIZATION_DELEGABLE"
+  },
+  "PERSONNEL_EMPLOYEES_MANAGE": {
+    "id": "642cb49c-1b99-4f09-a56d-2f86e1c7b3ac",
+    "code": "PERSONNEL_EMPLOYEES_MANAGE",
+    "scope": "ORGANIZATION",
+    "is_active": true,
+    "created_at": "2026-09-15T20:04:40.479794+00:00",
+    "description": "Manage staff records and contracts",
+    "delegation_class": "ORGANIZATION_DELEGABLE"
+  },
+  "INTEGRATIONS_CONFIG_MANAGE": {
+    "id": "c2159755-beeb-4f22-9584-359956a410c5",
+    "code": "INTEGRATIONS_CONFIG_MANAGE",
+    "scope": "ORGANIZATION",
+    "is_active": true,
+    "created_at": "2026-09-15T20:04:40.479794+00:00",
+    "description": "Configure POS and accounting integrations",
+    "delegation_class": "ORGANIZATION_DELEGABLE"
+  },
+  "INTEGRATIONS_SYNC_TRIGGER": {
+    "id": "ccee9aa3-f941-4c92-9e95-fbe4bb38a17c",
+    "code": "INTEGRATIONS_SYNC_TRIGGER",
+    "scope": "ORGANIZATION",
+    "is_active": true,
+    "created_at": "2026-09-15T20:04:40.479794+00:00",
+    "description": "Trigger on-demand data synchronizations",
+    "delegation_class": "ORGANIZATION_DELEGABLE"
+  },
+  "MANUAL_MOVEMENT_VIEW": null,
+  "MANUAL_MOVEMENT_CREATE": null,
+  "MANUAL_MOVEMENT_EDIT": null,
+  "MANUAL_MOVEMENT_SOFT_DELETE": null
+}

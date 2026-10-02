@@ -1,0 +1,26 @@
+{
+  "eco_role_templates": [
+    {
+      "name": "authenticated_read_role_templates",
+      "check": null,
+      "roles": ["authenticated"],
+      "using": "(is_active = true)",
+      "command": "r",
+      "permissive": true
+    }
+  ],
+  "eco_role_template_capabilities": [
+    {
+      "name": "authenticated_read_role_template_capabilities",
+      "check": null,
+      "roles": ["authenticated"],
+      "using": "(EXISTS ( SELECT 1\n   FROM eco_role_templates t\n  WHERE ((t.id = eco_role_template_capabilities.role_template_id) AND (t.is_active = true))))",
+      "command": "r",
+      "permissive": true
+    }
+  ],
+  "eco_platform_role_org_capabilities": [],
+  "eco_user_platform_role": [],
+  "eco_user_platform_capability_overrides": [],
+  "eco_membership_capability_overrides": []
+}

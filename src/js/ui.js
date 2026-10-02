@@ -1,0 +1,3239 @@
+import { unresolvedPurchases, purchaseCategoryTotals } from './core/classification.js';
+import { saveClassificationControl } from './components/classificationControl.js';
+import { initializeWithSessionRecovery } from './core/sessionRecovery.js';
+import { validateImportEnvelope, refreshDuplicateImport, assertImportResult } from './core/importEnvelope.js';
+import { renderGridPagination } from './components/gridPagination.js';
+import { requestOperationalData } from './components/operationalDataStatus.js';
+import { MICA_MODULE_CONTRACT } from './core/micaPermissionContract.js';
+import { mountOperationalOrgSelectors, renderOperationalImportControls, renderOperationalHeader } from './components/operationalOrgSelector.js';
+import { supabase } from './core/services/supabaseClient.js';
+import { openAdministration } from './components/administration.js';
+import { renderModuleAccess } from './core/moduleAccess.js';
+import { appStore } from './store.js';
+import { setupOCR, renderOcrHistory } from './ocr.js';
+import { Reconciler } from './reconciler.js';
+import { ManualMovements, renderManualRecords } from './manualMovements.js';
+import { Activities } from './activities.js';
+import { readFileAsArrayBuffer, readFileAsText, detectFileFormat } from './core/adapters/fileAdapter.js';
+import { createSheetJsAdapter } from './core/adapters/sheetJsAdapter.js';
+import { parseDelimitedText } from './adapters/textAdapter.js';
+import { createBrowserFingerprintProvider } from './adapters/browserFingerprintProvider.js';
+import { parseArcaRows } from './core/parsers/arcaParser.js';
+import { parseArbaText } from './core/parsers/arbaParser.js';
+import { parseIvaPerceptions } from './core/parsers/ivaPerceptionParser.js';
+import { parseBankRows } from './core/parsers/bankParser.js';
+import { parseSalaryRows } from './core/parsers/salaryParser.js';
+import { stageImport } from './core/services/importService.js';
+import { persistenceService } from './core/services/persistenceService.js';
+import { parseF883ActivitiesTxt } from './core/parsers/activitiesParser.js';
+import { OperationalGrid } from './core/operationalGrid.js';
+
+export const comprobantesGrid = new OperationalGrid({
+    moduleId: 'comprobantes',
+    defaultColumns: ['fecha', 'comprobante', 'cuit', 'razonSocial', 'iva', 'total', 'categoria', 'estado'],
+    searchFields: ['razonSocial', 'cuit', 'comprobante', 'categoria'],
+    dateField: 'fecha',
+    amountField: 'total'
+});
+
+export const percepcionesGrid = new OperationalGrid({
+    moduleId: 'percepciones',
+    defaultColumns: ['fuente', 'fecha', 'periodo', 'cuit', 'agente', 'comprobante', 'monto'],
+    searchFields: ['agente', 'cuit', 'comprobante', 'fuente', 'jurisdiction'],
+    dateField: 'fecha',
+    amountField: 'monto'
+});
+
+export const bancosGrid = new OperationalGrid({
+    moduleId: 'extractos',
+    defaultColumns: ['fecha', 'descripcion', 'monto', 'tipo', 'cuenta', 'estado'],
+    searchFields: ['descripcion', 'cuenta', 'categoria', 'tipo'],
+    dateField: 'fecha',
+    amountField: 'monto'
+});
+
+export const taxCategoriesGrid = new OperationalGrid({
+    moduleId: 'tax-categories',
+    defaultColumns: ['checkbox', 'name', 'description', 'estado', 'actions'],
+    searchFields: ['name', 'description']
+});
+
+export const economicActivitiesGrid = new OperationalGrid({
+    moduleId: 'economic-activities',
+    defaultColumns: ['checkbox', 'arca_code', 'name', 'estado', 'actions'],
+    searchFields: ['arca_code', 'name']
+});
+
+export const iibbRatesGrid = new OperationalGrid({
+    moduleId: 'iibb-rates',
+    defaultColumns: ['checkbox', 'activity', 'jurisdiction', 'rate', 'valid_from', 'valid_to', 'estado', 'actions'],
+    searchFields: ['jurisdiction', 'activity_name']
+});
+
+// Event handlers globales para las toolbars operacionales
+
+// --- Comprobantes ---
+window.setComprobantesFilter = function(filterVal) {
+    comprobantesGrid.setPrimaryFilter(filterVal);
+    document.querySelectorAll('#comprobantes-filter-group .btn-filter').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filterVal);
+    });
+    UIManager.renderMainTable();
+};
+
+window.handleComprobantesPeriodChange = function(e) {
+    comprobantesGrid.setPeriod(e.target.value);
+    UIManager.renderMainTable();
+};
+
+window.handleComprobantesSearchInput = function(e) {
+    const val = e.target.value;
+    comprobantesGrid.setSearch(val);
+    const clearBtn = document.getElementById('comprobantes-search-clear');
+    if (clearBtn) clearBtn.style.display = val.trim() ? 'block' : 'none';
+    UIManager.renderMainTable();
+};
+
+window.clearComprobantesSearch = function() {
+    comprobantesGrid.clearSearch();
+    const input = document.getElementById('comprobantes-search-input');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    const clearBtn = document.getElementById('comprobantes-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    UIManager.renderMainTable();
+};
+
+window.toggleComprobantesColDropdown = function(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('comprobantes-col-menu');
+    if (menu) {
+        const isHidden = menu.style.display === 'none' || !menu.style.display;
+        menu.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) renderComprobantesColumnCheckboxes();
+    }
+};
+
+function renderComprobantesColumnCheckboxes() {
+    const container = document.getElementById('comprobantes-col-checkboxes');
+    if (!container) return;
+    const allCols = [
+        { key: 'origen', label: 'Origen' },
+        { key: 'fecha', label: 'Fecha' },
+        { key: 'comprobante', label: 'Comprobante' },
+        { key: 'cuit', label: 'CUIT' },
+        { key: 'razonSocial', label: 'Razón Social' },
+        { key: 'neto', label: 'Neto Gravado' },
+        { key: 'exentas', label: 'Exentas' },
+        { key: 'otrosTributos', label: 'Otros Tributos' },
+        { key: 'iva', label: 'IVA' },
+        { key: 'percIva', label: 'Perc. IVA' },
+        { key: 'percIibb', label: 'Perc. IIBB' },
+        { key: 'total', label: 'Total' },
+        { key: 'categoria', label: 'Categoría' },
+        { key: 'actividad', label: 'Actividad' },
+        { key: 'estado', label: 'Estado' }
+    ];
+    container.innerHTML = allCols.map(col => `
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+            <input type="checkbox" ${comprobantesGrid.isColumnVisible(col.key) ? 'checked' : ''} onchange="toggleComprobantesColumn('${col.key}')">
+            ${col.label}
+        </label>
+    `).join('');
+}
+
+window.toggleComprobantesColumn = function(colKey) {
+    comprobantesGrid.toggleColumnVisibility(colKey);
+    renderComprobantesColumnCheckboxes();
+    UIManager.renderMainTable();
+};
+
+window.resetComprobantesColumns = function() {
+    comprobantesGrid.resetColumns();
+    renderComprobantesColumnCheckboxes();
+    UIManager.renderMainTable();
+};
+
+window.handleComprobantesSort = function(colKey, dataType = 'text') {
+    comprobantesGrid.toggleSort(colKey, dataType);
+    const icon = document.getElementById(`sort-icon-${colKey}`);
+    if (icon) {
+        icon.innerText = comprobantesGrid.sortDirection === 'asc' ? '▲' : (comprobantesGrid.sortDirection === 'desc' ? '▼' : '↕');
+    }
+    UIManager.renderMainTable();
+};
+
+// --- Percepciones ---
+window.handlePercepcionesJurisdictionChange = function(e) {
+    percepcionesGrid.setPrimaryFilter(e.target.value);
+    UIManager.renderPerceptionsTable();
+};
+
+window.handlePercepcionesPeriodChange = function(e) {
+    percepcionesGrid.setPeriod(e.target.value);
+    UIManager.renderPerceptionsTable();
+};
+
+window.handlePercepcionesSearchInput = function(e) {
+    const val = e.target.value;
+    percepcionesGrid.setSearch(val);
+    const clearBtn = document.getElementById('percepciones-search-clear');
+    if (clearBtn) clearBtn.style.display = val.trim() ? 'block' : 'none';
+    UIManager.renderPerceptionsTable();
+};
+
+window.clearPercepcionesSearch = function() {
+    percepcionesGrid.clearSearch();
+    const input = document.getElementById('percepciones-search-input');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    const clearBtn = document.getElementById('percepciones-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    UIManager.renderPerceptionsTable();
+};
+
+window.togglePercepcionesColDropdown = function(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('percepciones-col-menu');
+    if (menu) {
+        const isHidden = menu.style.display === 'none' || !menu.style.display;
+        menu.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) renderPercepcionesColumnCheckboxes();
+    }
+};
+
+function renderPercepcionesColumnCheckboxes() {
+    const container = document.getElementById('percepciones-col-checkboxes');
+    if (!container) return;
+    const allCols = [
+        { key: 'fuente', label: 'Fuente / Origen' },
+        { key: 'fecha', label: 'Fecha' },
+        { key: 'periodo', label: 'Período' },
+        { key: 'cuit', label: 'CUIT Agente' },
+        { key: 'agente', label: 'Agente / Razón Social' },
+        { key: 'comprobante', label: 'Comprobante' },
+        { key: 'monto', label: 'Importe' }
+    ];
+    container.innerHTML = allCols.map(col => `
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+            <input type="checkbox" ${percepcionesGrid.isColumnVisible(col.key) ? 'checked' : ''} onchange="togglePercepcionesColumn('${col.key}')">
+            ${col.label}
+        </label>
+    `).join('');
+}
+
+window.togglePercepcionesColumn = function(colKey) {
+    percepcionesGrid.toggleColumnVisibility(colKey);
+    renderPercepcionesColumnCheckboxes();
+    UIManager.renderPerceptionsTable();
+};
+
+window.resetPercepcionesColumns = function() {
+    percepcionesGrid.resetColumns();
+    renderPercepcionesColumnCheckboxes();
+    UIManager.renderPerceptionsTable();
+};
+
+window.handlePercepcionesSort = function(colKey, dataType = 'text') {
+    percepcionesGrid.toggleSort(colKey, dataType);
+    const icon = document.getElementById(`sort-icon-percep-${colKey}`);
+    if (icon) {
+        icon.innerText = percepcionesGrid.sortDirection === 'asc' ? '▲' : (percepcionesGrid.sortDirection === 'desc' ? '▼' : '↕');
+    }
+    UIManager.renderPerceptionsTable();
+};
+
+// --- Extractos (Bancos) ---
+window.setBancosFilter = function(filterVal) {
+    bancosGrid.setPrimaryFilter(filterVal);
+    document.querySelectorAll('#bancos-filter-group .btn-filter').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filterVal);
+    });
+    UIManager.renderBankTable();
+};
+
+window.handleBancosPeriodChange = function(e) {
+    bancosGrid.setPeriod(e.target.value);
+    UIManager.renderBankTable();
+};
+
+window.handleBancosSearchInput = function(e) {
+    const val = e.target.value;
+    bancosGrid.setSearch(val);
+    const clearBtn = document.getElementById('bancos-search-clear');
+    if (clearBtn) clearBtn.style.display = val.trim() ? 'block' : 'none';
+    UIManager.renderBankTable();
+};
+
+window.clearBancosSearch = function() {
+    bancosGrid.clearSearch();
+    const input = document.getElementById('bancos-search-input');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+    const clearBtn = document.getElementById('bancos-search-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    UIManager.renderBankTable();
+};
+
+window.toggleBancosColDropdown = function(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('bancos-col-menu');
+    if (menu) {
+        const isHidden = menu.style.display === 'none' || !menu.style.display;
+        menu.style.display = isHidden ? 'block' : 'none';
+        if (isHidden) renderBancosColumnCheckboxes();
+    }
+};
+
+function renderBancosColumnCheckboxes() {
+    const container = document.getElementById('bancos-col-checkboxes');
+    if (!container) return;
+    const allCols = [
+        { key: 'fecha', label: 'Fecha' },
+        { key: 'descripcion', label: 'Descripción' },
+        { key: 'monto', label: 'Importe' },
+        { key: 'tipo', label: 'Tipo' },
+        { key: 'cuenta', label: 'Cuenta / Categoría' },
+        { key: 'estado', label: 'Estado' }
+    ];
+    container.innerHTML = allCols.map(col => `
+        <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+            <input type="checkbox" ${bancosGrid.isColumnVisible(col.key) ? 'checked' : ''} onchange="toggleBancosColumn('${col.key}')">
+            ${col.label}
+        </label>
+    `).join('');
+}
+
+window.toggleBancosColumn = function(colKey) {
+    bancosGrid.toggleColumnVisibility(colKey);
+    renderBancosColumnCheckboxes();
+    UIManager.renderBankTable();
+};
+
+window.resetBancosColumns = function() {
+    bancosGrid.resetColumns();
+    renderBancosColumnCheckboxes();
+    UIManager.renderBankTable();
+};
+
+window.handleBancosSort = function(colKey, dataType = 'text') {
+    bancosGrid.toggleSort(colKey, dataType);
+    const icon = document.getElementById(`sort-icon-bank-${colKey}`);
+    if (icon) {
+        icon.innerText = bancosGrid.sortDirection === 'asc' ? '▲' : (bancosGrid.sortDirection === 'desc' ? '▼' : '↕');
+    }
+    UIManager.renderBankTable();
+};
+
+async function loginWithGoogle() {
+  const redirectUrl = window.location.origin + window.location.pathname;
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: redirectUrl,
+      queryParams: {
+        prompt: 'select_account'
+      }
+    }
+  });
+
+  if (error) {
+    alert('Error al iniciar sesión: ' + error.message);
+  }
+}
+
+async function logout() {
+  ++authCheckGeneration;
+  appStore.endSession();
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    alert('Error al cerrar sesión: ' + error.message);
+  }
+}
+
+document.getElementById('google-login-btn')?.addEventListener('click', loginWithGoogle);
+document.getElementById('logout-btn')?.addEventListener('click', logout);
+
+const appContainer = document.getElementById('app-container');
+const loginContainer = document.getElementById('login-container');
+const authStatusMsg = document.getElementById('auth-status-message');
+const loginBtn = document.getElementById('google-login-btn');
+
+let authCheckGeneration = 0;
+async function checkUserProfile(session) {
+  const check = ++authCheckGeneration;
+  document.getElementById('retry-session-context')?.remove?.();
+  document.getElementById('fallback-logout-btn')?.remove?.();
+  if (!session) {
+    appStore.endSession();
+    appContainer.classList.add('hidden');
+    loginContainer.style.display = 'flex';
+    authStatusMsg.style.display = 'none';
+    loginBtn.style.display = 'flex';
+    return;
+  }
+  loginBtn.style.display = 'none';
+  authStatusMsg.style.display = 'block';
+  authStatusMsg.innerText = 'Verificando acceso…';
+  try {
+    await initializeWithSessionRecovery({ session, auth: supabase.auth,
+      initialize: user => appStore.initializeSession(user), isCurrent: () => check === authCheckGeneration });
+    if (check !== authCheckGeneration) return;
+    window.currentSessionUserIdentity = session.user.email || 'Email no disponible';
+    loginContainer.style.display = 'none';
+    appContainer.classList.remove('hidden');
+    window.updateUserHeaderDisplay();
+  } catch (error) {
+    if (check !== authCheckGeneration) return;
+    appContainer.classList.add('hidden');
+    loginContainer.style.display = 'flex';
+    authStatusMsg.innerText = 'No se pudo cargar el acceso: ' + error.message;
+    let retry = document.getElementById('retry-session-context');
+    if (!retry) {
+      retry = document.createElement('button');
+      retry.id = 'retry-session-context';
+      retry.textContent = 'Reintentar';
+      authStatusMsg.after(retry);
+    }
+    retry.onclick = () => checkUserProfile(session);
+    let logoutButton = document.getElementById('fallback-logout-btn');
+    if (!logoutButton) {
+      logoutButton = document.createElement('button');
+      logoutButton.id = 'fallback-logout-btn';
+      logoutButton.textContent = 'Cerrar sesión';
+      logoutButton.onclick = logout;
+      authStatusMsg.after(logoutButton);
+    }
+  }
+}
+
+let authEventVersion = 0;
+supabase.auth.getSession().then(({ data: { session }, error }) => {
+  if (authEventVersion) return;
+  if (error) { authStatusMsg.textContent=error.message; authStatusMsg.style.display='block'; return; }
+  checkUserProfile(session);
+});
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+    const version = ++authEventVersion;
+    ++authCheckGeneration;
+    // Leave the auth callback before RPCs or refreshSession acquire the auth lock.
+    setTimeout(() => { if (version === authEventVersion) checkUserProfile(session); }, 0);
+  }
+});
+
+const CATEGORIES_RECIBIDOS = [
+    "Mercaderías / Insumos",
+    "Servicios Públicos (Luz, Agua, Gas)",
+    "Telefonía e Internet",
+    "Honorarios Profesionales",
+    "Alquileres Comerciales",
+    "Seguros",
+    "Movilidad y Viáticos",
+    "Gastos de Oficina y Limpieza",
+    "Medicina Prepaga",
+    "Impuestos y Tasas",
+    "Sueldos y Cargas Sociales",
+    "Otros Gastos No Deducibles"
+];
+
+const CATEGORIES_EMITIDOS = [
+    "Venta de Servicios locales",
+    "Venta de Bienes",
+    "Exportación de Servicios",
+    "Honorarios de Asesoría",
+    "Otros Ingresos Financieros"
+];
+
+// OBTENER CUIT EMPRESA ACTIVA
+function getActiveCompanyCuit() {
+    const label = document.getElementById('current-entity-label');
+    if (!label) return '30710536461'; // Quinto Elemento S.A por defecto
+    const match = label.innerText.match(/\d+/);
+    return match ? match[0] : '30710536461';
+}
+
+// 5. CONTROLADOR NAVEGACIÓN SPA E INTERFAZ (SOLID: Single Responsibility)
+export function switchTab(tabId) {
+    if (!appStore.canVisitModule(tabId)) return false;
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    document.getElementById(tabId)?.classList.remove('hidden');
+    requestOperationalData(appStore, document, tabId);
+
+    document.querySelectorAll('.sidebar-nav a').forEach(el => el.classList.remove('active-nav'));
+    const activeLink = document.querySelector(`.sidebar-nav [onclick="switchTab('${tabId}')"]`);
+    if (activeLink) activeLink.classList.add('active-nav');
+
+    // Resaltado de la barra mobile inferior
+    document.querySelectorAll('.mobile-nav-item').forEach(el => el.classList.remove('active-mobile-nav'));
+    const activeMobileNav = document.querySelector(`.mobile-nav-item[data-tab="${tabId}"]`);
+    if (activeMobileNav) activeMobileNav.classList.add('active-mobile-nav');
+
+    const titleElement = document.getElementById('page-title');
+    if (MICA_MODULE_CONTRACT[tabId]) titleElement.innerText = MICA_MODULE_CONTRACT[tabId].label;
+    if (tabId === 'tab-conciliador') {
+        // Issues are cleared on context changes; phase 1 does not query unscoped issue rows.
+        if (appStore.taxCategories.length === 0 && appStore.loadTaxCategories) appStore.loadTaxCategories();
+        if (appStore.economicActivities.length === 0 && appStore.loadEconomicActivities) appStore.loadEconomicActivities();
+    }
+    else if (tabId === 'tab-percepciones') {
+    }
+    else if (tabId === 'tab-bancos') {
+        if (appStore.taxCategories.length === 0 && appStore.loadTaxCategories) appStore.loadTaxCategories();
+        if (appStore.economicActivities.length === 0 && appStore.loadEconomicActivities) appStore.loadEconomicActivities();
+        UIManager.renderBankTable();
+    }
+    else if (tabId === 'tab-sueldos') {
+        updateSalaryFormFields();
+    }
+    else if (tabId === 'tab-movimientos-manuales') {
+        renderManualRecords();
+    }
+    else if (tabId === 'tab-categorizacion') {
+        if (appStore.loadTaxCategories) appStore.loadTaxCategories();
+        if (appStore.loadEconomicActivities) appStore.loadEconomicActivities();
+        if (appStore.loadIibbRates) appStore.loadIibbRates();
+    }
+    else if (tabId === 'tab-configuracion') {
+        titleElement.innerText = "Administración MICA";
+        openAdministration(appStore);
+    }
+    else if (tabId === 'tab-client-dashboard') {
+        renderClientDashboard();
+    }
+    else if (tabId === 'tab-access') titleElement.innerText = "Acceso MICA";
+    return true;
+}
+
+export function toggleMobileMoreSheet(show) {
+    const sheet = document.getElementById('mobile-more-sheet');
+    if (!sheet) return;
+    if (show === undefined) {
+        sheet.classList.toggle('hidden');
+    } else if (show) {
+        sheet.classList.remove('hidden');
+    } else {
+        sheet.classList.add('hidden');
+    }
+}
+
+// CONTROLADOR DE MÉTRICAS OPERATIVAS PARA EL GERENTE (DASHBOARD)
+export function renderClientDashboard() {
+    const items = appStore.items;
+    const manualMovs = appStore.manualMovements.filter(m => m.origen === 'manual-interno');
+
+    // Ventas Brutas (Emitidos + Ingresos manuales internos)
+    const salesARCA = items.filter(i => i.tipo === 'emitido').reduce((sum, i) => sum + i.total, 0);
+    const salesManual = manualMovs.filter(m => m.tipo === 'Ingreso').reduce((sum, m) => sum + m.importe, 0);
+    const sales = salesARCA + salesManual;
+
+    // Compras (Recibidos + Egresos manuales internos)
+    const purchasesARCA = items.filter(i => i.tipo === 'recibido').reduce((sum, i) => sum + i.total, 0);
+    const purchasesManual = manualMovs.filter(m => m.tipo === 'Gasto').reduce((sum, m) => sum + m.importe, 0);
+    const purchases = purchasesARCA + purchasesManual;
+
+    const netBalance = sales - purchases;
+
+    // Actualización de valores principales
+    const salesValEl = document.getElementById('client-sales-val');
+    const purchasesValEl = document.getElementById('client-purchases-val');
+    const netEl = document.getElementById('client-net-val');
+    const ivaValEl = document.getElementById('client-iva-val');
+    const iibbValEl = document.getElementById('client-iibb-val');
+    const laborValEl = document.getElementById('client-labor-val');
+
+    if (salesValEl) salesValEl.innerText = `$ ${sales.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    if (purchasesValEl) purchasesValEl.innerText = `$ ${purchases.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    
+    if (netEl) {
+        netEl.innerText = `$ ${netBalance.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        netEl.style.color = netBalance >= 0 ? 'var(--success)' : 'var(--warning)';
+    }
+
+    // IVA: Utilizar únicamente valores fiscales reales importados (Débito - Crédito)
+    const emittedItems = items.filter(i => i.tipo === 'emitido' || i.type === 'emitido');
+    const receivedItems = items.filter(i => i.tipo === 'recibido' || i.type === 'recibido');
+
+    const hasRealIvaEmitted = emittedItems.some(i => parseFloat(i.iva || i.importeIva || i.imp_iva) > 0);
+    const hasRealIvaReceived = receivedItems.some(i => parseFloat(i.iva || i.importeIva || i.imp_iva) > 0);
+
+    if (ivaValEl) {
+        if (hasRealIvaEmitted || hasRealIvaReceived) {
+            const totalIvaDebito = emittedItems.reduce((sum, i) => sum + (parseFloat(i.iva || i.importeIva || i.imp_iva) || 0), 0);
+            const totalIvaCredito = receivedItems.reduce((sum, i) => sum + (parseFloat(i.iva || i.importeIva || i.imp_iva) || 0), 0);
+            const netIva = totalIvaDebito - totalIvaCredito;
+            ivaValEl.innerText = `$ ${Math.max(0, netIva).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        } else {
+            ivaValEl.innerText = "Pendiente de determinación";
+        }
+    }
+
+    // IIBB: Sin tasa hardcoded 3%. Estado neutro hasta motor de determinación
+    if (iibbValEl) {
+        iibbValEl.innerText = "Pendiente de determinación";
+    }
+
+    // Costo Laboral del Mes (usa modelo validado de Sueldos sin DOM form inputs ni anticipos desajustados)
+    let costLabor = 0;
+    if (appStore.salaries) {
+        const sal = appStore.salaries;
+        costLabor = sal.costoLaboralReal !== undefined 
+            ? sal.costoLaboralReal 
+            : ((sal.sueldoBrutoCalculado || sal.sueldoBruto || sal.remunerativo || 0) + (sal.noRemunerativo || 0));
+    }
+    if (laborValEl) laborValEl.innerText = `$ ${costLabor.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+    // Alertas de comprobantes sin categorizar / saldo pendiente por explicar
+    const alertUnresolved = document.getElementById('alert-unresolved-taxes');
+    const alertNoIssues = document.getElementById('alert-no-issues');
+    if (alertUnresolved) {
+        const pendingCount = unresolvedPurchases(items);
+        if (pendingCount > 0) {
+            alertUnresolved.innerHTML = `⚠️ <strong>Atención:</strong> Tenés ${pendingCount} comprobantes de compras sin categorizar o con saldo pendiente por explicar.`;
+            alertUnresolved.classList.remove('hidden');
+            alertUnresolved.style.display = 'block';
+            if (alertNoIssues) alertNoIssues.style.display = 'none';
+        } else {
+            alertUnresolved.classList.add('hidden');
+            alertUnresolved.style.display = 'none';
+            if (alertNoIssues) alertNoIssues.style.display = 'block';
+        }
+    }
+
+    // Desglose de Gastos
+    const categoryChartContainer = document.getElementById('client-category-chart');
+    if (!categoryChartContainer) return;
+
+    const purchaseItems = items.filter(i => i.tipo === 'recibido');
+    if (purchaseItems.length === 0 && purchasesManual === 0) {
+        categoryChartContainer.innerHTML = `<li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">No hay datos de compras disponibles.</li>`;
+        return;
+    }
+
+    const catTotals = purchaseCategoryTotals(purchaseItems, appStore.taxCategories);
+    if (purchasesManual > 0) {
+        catTotals.push({label:'Gastos Caja Chica (Manual)',amount:purchasesManual});
+    }
+
+    const sortedCategories = catTotals.sort((a,b) => b.amount - a.amount);
+    categoryChartContainer.innerHTML = sortedCategories.map(({label, amount}) => {
+        const category = String(label).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const pct = Math.round((amount / (purchases || 1)) * 100);
+        return `
+            <li class="progress-item">
+                <div class="progress-item-labels">
+                    <span>${category}</span>
+                    <span>$ ${amount.toLocaleString('es-AR', {maximumFractionDigits: 0})} (${pct}%)</span>
+                </div>
+                <div class="progress-track">
+                    <div class="progress-bar" style="width: ${pct}%;"></div>
+                </div>
+            </li>
+        `;
+    }).join('');
+}
+
+// BÚSQUEDA DE COMISIONES Y TRANSACCIONES BANCARIAS
+export function renderBancosGrid() { UIManager.renderBankTable(); }
+
+window.saveMicaClassification = (control, method, id) => {
+    if (!['updateCategory', 'updateActivity', 'updateBankCategory', 'updateBankActivity'].includes(method)) return;
+    return saveClassificationControl(appStore, control, method, id, () => UIManager.render(),
+        message => alert('No se pudo confirmar la clasificación: ' + message));
+};
+
+// RENDERIZADO DE RESOLUCIÓN MANUAL ("OTROS TRIBUTOS" CON DESCUADRE)
+export function renderResolucionManual() {
+    const container = document.getElementById('card-resolucion-manual');
+    const tbody = document.getElementById('table-resolucion-manual-body');
+    if (!container || !tbody) return;
+
+    const pendingItems = appStore.items.filter(i => i.tipo === 'recibido' && i.saldoAExplicar > 0);
+    if (pendingItems.length === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    container.classList.remove('hidden');
+    tbody.innerHTML = pendingItems.map(item => `
+        <tr>
+            <td>${item.fecha}</td>
+            <td>${item.comprobante}</td>
+            <td><strong>${item.razonSocial}</strong> (${item.cuit})</td>
+            <td>$ ${item.otrosTributos.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+            <td style="color: var(--danger); font-weight: bold;">$ ${item.saldoAExplicar.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+            <td>
+                <div style="display: flex; gap: 6px;">
+                    <select class="select-category" id="select-res-${item.id}">
+                        <option value="exento">Imputar a EXENTO</option>
+                        <option value="ARBA">Percepciones IIBB ARBA</option>
+                        <option value="AGIP">Percepciones IIBB AGIP</option>
+                        <option value="IVA">Percepciones IVA Nacional</option>
+                    </select>
+                    <button class="btn-primary" style="padding: 4px 8px; font-size: 11px;" onclick="resolveOtrosTributos('${item.id}')">✓ Guardar</button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+window.resolveOtrosTributos = function(itemId) {
+    const select = document.getElementById(`select-res-${itemId}`);
+    if (select) {
+        const type = select.value;
+        if (type === 'exento') {
+            Reconciler.manualResolve(itemId, 'exento');
+        } else {
+            Reconciler.manualResolve(itemId, 'custom', `Percepciones IIBB ${type}`);
+        }
+    }
+};
+
+// ACTUALIZACIÓN DE SUELDOS EN PANTALLA
+function updateSalaryFormFields() {
+    const sal = appStore.salaries;
+    const lblBruto = document.getElementById('lbl-sueldo-bruto');
+    const lblAnticipos = document.getElementById('lbl-anticipos');
+    const lblSindicato = document.getElementById('lbl-sindicato-aporte');
+    const lblNeto = document.getElementById('lbl-sueldo-neto');
+    const lblTotalPagar = document.getElementById('lbl-total-a-pagar');
+    const lblCostoLaboral = document.getElementById('lbl-costo-laboral');
+
+    if (!sal) {
+        if (lblBruto) lblBruto.innerText = "$ 0,00";
+        if (lblAnticipos) lblAnticipos.innerText = "$ 0,00";
+        if (lblSindicato) lblSindicato.innerText = "$ 0,00";
+        if (lblNeto) lblNeto.innerText = "$ 0,00";
+        if (lblTotalPagar) lblTotalPagar.innerText = "$ 0,00";
+        if (lblCostoLaboral) lblCostoLaboral.innerText = "$ 0,00";
+        return;
+    }
+
+    if (lblBruto) lblBruto.innerText = `$ ${sal.sueldoBruto.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    if (lblAnticipos) lblAnticipos.innerText = `$ ${sal.anticipos.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    if (lblSindicato) lblSindicato.innerText = `$ ${sal.sindicatoAporte.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    if (lblNeto) lblNeto.innerText = `$ ${sal.sueldoNeto.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+    // Calcular fórmulas en base a inputs manuales
+    const f931 = parseFloat(document.getElementById('input-f931').value) || 0;
+    const sindContrib = parseFloat(document.getElementById('input-sindicato-contrib').value) || 0;
+
+    const totalAPagar = sal.sueldoNeto + f931 + sal.sindicatoAporte + sindContrib;
+    const costoLaboral = totalAPagar + sal.anticipos - (sal.sueldoBruto - sal.sueldoNeto);
+
+    if (lblTotalPagar) lblTotalPagar.innerText = `$ ${totalAPagar.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    if (lblCostoLaboral) lblCostoLaboral.innerText = `$ ${costoLaboral.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+}
+
+// BUCLES DE COLA DE SELECCIÓN MULTI-ACTIVIDAD
+function checkMultiActivityQueue() {
+    const activeCuit = getActiveCompanyCuit();
+    // Buscar la primera venta sin asignar actividad
+    const unassignedVenta = appStore.items.find(i => i.tipo === 'emitido' && !i.actividad && !i.confirmada);
+    
+    if (unassignedVenta) {
+        const result = Activities.processVentaComprobante(unassignedVenta, activeCuit);
+        if (result.requiredAction === 'modal_required') {
+            showMultiActivityModal(unassignedVenta, result.activities);
+        } else {
+            // Asignación automática ejecutada, notificar cambios
+            appStore.notify();
+        }
+    }
+}
+
+// MOSTRAR MODAL DE ASIGNACIÓN MULTI-ACTIVIDAD
+function showMultiActivityModal(item, activities) {
+    const modal = document.getElementById('modal-multi-actividad');
+    if (!modal) return;
+
+    document.getElementById('modal-act-comprobante').innerText = item.comprobante;
+    document.getElementById('modal-act-cliente').innerText = item.razonSocial;
+    document.getElementById('modal-act-neto').innerText = `$ ${item.netoGravado.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    document.getElementById('modal-act-exento').innerText = `$ ${item.exento.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+    // Selector de Actividad Única
+    const selectSingle = document.getElementById('select-modal-act-single');
+    selectSingle.innerHTML = activities.map(a => `<option value="${a.id}">${a.nombre} (${a.codigo})</option>`).join('');
+
+    // Campos de Itemizado (Split)
+    const splitContainer = document.getElementById('container-modal-split-fields');
+    splitContainer.innerHTML = activities.map((a, idx) => `
+        <div style="border: 1px solid var(--border-color); padding: 8px; border-radius: 6px; background-color: #ffffff;">
+            <strong>${a.nombre}</strong>
+            <div style="display: flex; gap: 8px; margin-top: 6px;">
+                <div style="flex: 1;">
+                    <label style="font-size: 10px; color: var(--text-muted);">Neto Gravado ($)</label>
+                    <input type="number" id="split-neto-${a.id}" class="form-control split-neto-input" placeholder="0.00" step="0.01" value="${idx === 0 ? item.netoGravado : 0}">
+                </div>
+                <div style="flex: 1;">
+                    <label style="font-size: 10px; color: var(--text-muted);">Exento ($)</label>
+                    <input type="number" id="split-exento-${a.id}" class="form-control split-exento-input" placeholder="0.00" step="0.01" value="${idx === 0 ? item.exento : 0}">
+                </div>
+            </div>
+            <input type="hidden" id="split-code-${a.id}" value="${a.codigo}">
+            <input type="hidden" id="split-name-${a.id}" value="${a.nombre}">
+        </div>
+    `).join('');
+
+    // Listener de Confirmar
+    const btnSubmit = document.getElementById('btn-modal-act-submit');
+    btnSubmit.onclick = () => {
+        const activeOption = document.querySelector('input[name="modal-act-opt"]:checked').value;
+        const activeCuit = getActiveCompanyCuit();
+
+        if (activeOption === 'all') {
+            Activities.assignAllToActivity(item.id, selectSingle.value, activeCuit);
+            modal.classList.add('hidden');
+            checkMultiActivityQueue(); // Revisar si hay otra pendiente
+        } else {
+            // Reconstruir splits
+            const splits = activities.map(a => {
+                const netoVal = parseFloat(document.getElementById(`split-neto-${a.id}`).value) || 0;
+                const exentoVal = parseFloat(document.getElementById(`split-exento-${a.id}`).value) || 0;
+                return {
+                    actividadId: a.id,
+                    actividadNombre: document.getElementById(`split-name-${a.id}`).value,
+                    codigoNaes: document.getElementById(`split-code-${a.id}`).value,
+                    netoGravado: netoVal,
+                    noGravado: 0,
+                    exento: exentoVal,
+                    iva: 0 // Simplificado
+                };
+            });
+
+            const res = Activities.assignSplitToActivities(item.id, splits);
+            if (res && !res.success) {
+                alert(res.error);
+            } else {
+                modal.classList.add('hidden');
+                checkMultiActivityQueue(); // Probar siguiente en cola
+            }
+        }
+    };
+
+    modal.classList.remove('hidden');
+}
+
+// MOSTRAR CONFIGURADOR DE COLUMNAS FALLBACK
+function showColumnMapperModal(headers, title, onApply) {
+    const modal = document.getElementById('modal-column-mapper');
+    if (!modal) return;
+
+    document.getElementById('modal-mapper-title').innerText = title;
+    
+    // Inyectamos selects dinámicos para Fecha, Descripción, etc.
+    const selectsContainer = document.getElementById('container-mapper-selects');
+    
+    let isSueldos = title.toLowerCase().includes('sueldos');
+    let selectFields = isSueldos 
+        ? [
+            { id: 'sueldoBruto', label: 'Sueldo Bruto (Remunerativo)' },
+            { id: 'sueldoNeto', label: 'Sueldo Neto a pagar' },
+            { id: 'anticipos', label: 'Anticipos (Opcional)' },
+            { id: 'sindicatoAporte', label: 'Aporte Sindicato (Opcional)' }
+          ]
+        : [
+            { id: 'fecha', label: 'Columna de Fecha' },
+            { id: 'descripcion', label: 'Columna de Descripción' },
+            { id: 'importe', label: 'Columna de Importe' }
+          ];
+
+    selectsContainer.innerHTML = selectFields.map(f => `
+        <div class="form-group">
+            <label>${f.label}</label>
+            <select id="map-select-${f.id}" class="form-control">
+                <option value="">-- Seleccionar Columna --</option>
+                ${headers.map((h, idx) => `<option value="${idx}">${h} (Columna ${idx+1})</option>`).join('')}
+            </select>
+        </div>
+    `).join('');
+
+    const btnSubmit = document.getElementById('btn-modal-mapper-submit');
+    btnSubmit.onclick = () => {
+        const mapping = {};
+        selectFields.forEach(f => {
+            const val = document.getElementById(`map-select-${f.id}`).value;
+            if (val !== "") {
+                mapping[f.id] = parseInt(val);
+            }
+        });
+
+        // Validar requeridos
+        if (isSueldos && (mapping.sueldoBruto === undefined || mapping.sueldoNeto === undefined)) {
+            alert("Las columnas de Sueldo Bruto y Sueldo Neto son obligatorias.");
+            return;
+        }
+        if (!isSueldos && (mapping.fecha === undefined || mapping.descripcion === undefined || mapping.importe === undefined)) {
+            alert("Las columnas de Fecha, Descripción e Importe son obligatorias.");
+            return;
+        }
+
+        modal.classList.add('hidden');
+        onApply(mapping);
+    };
+
+    modal.classList.remove('hidden');
+}// MOSTRAR VISTA PREVIA (STAGING)
+function showStagingPreviewModal(stagedRows, fileName, context, onConfirm) {
+    const generation = appStore.contextGeneration;
+    const validContext = () => generation === appStore.contextGeneration && appStore.canImportOperational(context?.tipoOperacion === 'COMPRA' ? 'recibido' : 'emitido');
+
+    if (typeof context === 'function') {
+        onConfirm = context;
+        context = { tenant: getActiveCompanyCuit(), tipoOperacion: 'COMPRA' };
+    }
+
+    const validRows = stagedRows.filter(r => r.status === 'ACCEPTED' || r.status === 'POSSIBLE_AMENDMENT');
+    const duplicateRows = stagedRows.filter(r => r.status === 'EXACT_DUPLICATE');
+    const invalidRows = stagedRows.filter(r => r.status === 'INVALID');
+    
+    // Crear el overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    
+    overlay.innerHTML = `
+        <div class="modal-card" style="width: 80%; max-width: 800px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3 style="font-size: 16px; font-weight: bold; color: var(--primary);">Vista Previa de Importación</h3>
+                <button class="btn-close-modal" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                <p><strong>Archivo:</strong> ${fileName}</p>
+                <div style="display: flex; gap: 15px; margin: 15px 0;">
+                    <div style="background: #e6f4ea; color: #137333; padding: 10px; border-radius: 4px; flex: 1; text-align: center;">
+                        <strong>${validRows.length}</strong><br>Válidas / Modificadas
+                    </div>
+                    <div style="background: #fef7e0; color: #b06000; padding: 10px; border-radius: 4px; flex: 1; text-align: center;">
+                        <strong>${duplicateRows.length}</strong><br>Duplicadas Exactas (Ignoradas)
+                    </div>
+                    <div style="background: #fce8e6; color: #c5221f; padding: 10px; border-radius: 4px; flex: 1; text-align: center;">
+                        <strong>${invalidRows.length}</strong><br>Inválidas
+                    </div>
+                </div>
+                
+                ${invalidRows.length > 0 ? `
+                <div style="background: #fce8e6; color: #c5221f; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 12px;">
+                    <strong>Errores encontrados:</strong>
+                    <ul style="margin: 5px 0 0 20px;">
+                        ${invalidRows.slice(0, 5).map(r => `<li>Fila ${r.sourceRowNumber || '?'}: ${r.errors?.join(', ') || 'Error de parseo'}</li>`).join('')}
+                        ${invalidRows.length > 5 ? `<li>...y ${invalidRows.length - 5} más</li>` : ''}
+                    </ul>
+                </div>
+                ` : ''}
+                
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 5px;">Muestra de datos válidos (máximo 5):</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 15px;">
+                    <thead>
+                        <tr style="background: var(--bg-hover); text-align: left;">
+                            <th style="padding: 6px; border: 1px solid var(--border-color);">Fecha</th>
+                            <th style="padding: 6px; border: 1px solid var(--border-color);">Comprobante</th>
+                            <th style="padding: 6px; border: 1px solid var(--border-color);">Total</th>
+                            <th style="padding: 6px; border: 1px solid var(--border-color);">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${validRows.slice(0, 5).map(r => {
+                            const d = r.normalizedData;
+                            const cbte = `${d.tipo_cbte}-${d.pdv}-${d.nroDesde}`;
+                            const isAmended = r.status === 'POSSIBLE_AMENDMENT';
+                            const totalFormatted = (d.total || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+                            return `
+                            <tr>
+                                <td style="padding: 6px; border: 1px solid var(--border-color);">${d.fecha}</td>
+                                <td style="padding: 6px; border: 1px solid var(--border-color);">${cbte}</td>
+                                <td style="padding: 6px; border: 1px solid var(--border-color);">$ ${totalFormatted}</td>
+                                <td style="padding: 6px; border: 1px solid var(--border-color); font-weight: bold; color: ${isAmended ? '#b06000' : '#137333'};">
+                                    ${isAmended ? 'Modificado' : 'Nuevo'}
+                                </td>
+                            </tr>
+                            `;
+                        }).join('')}
+                        ${validRows.length === 0 ? '<tr><td colspan="4" style="text-align: center; padding: 10px;">No hay filas válidas</td></tr>' : ''}
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer" style="margin-top: auto;">
+                <button class="btn-secondary btn-cancel-modal">Cancelar</button>
+                <button class="btn-primary btn-confirm-modal" ${validRows.length === 0 ? 'disabled' : ''}>Confirmar Importación (${validRows.length})</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    const closeAndRemove = () => {
+        if (overlay.parentNode) {
+            overlay.parentNode.removeChild(overlay);
+        }
+    };
+    
+    overlay.querySelector('.btn-close-modal').onclick = closeAndRemove;
+    overlay.querySelector('.btn-cancel-modal').onclick = closeAndRemove;
+    
+    const confirmBtn = overlay.querySelector('.btn-confirm-modal');
+    if (confirmBtn) {
+        confirmBtn.onclick = async () => {
+            if (!validContext()) return;
+            const isCompra = (context && context.tipoOperacion === 'COMPRA') || (validRows.length > 0 && validRows[0].tipoOperacion === 'COMPRA');
+            const isVenta = (context && context.tipoOperacion === 'VENTA') || (validRows.length > 0 && validRows[0].tipoOperacion === 'VENTA');
+            const isArca = isCompra || isVenta;
+            const rawFile = context && context.rawFile;
+
+            // Transformar las filas staged al modelo de la UI garantizando el contrato de identidad fiscal
+            const toImport = validRows.map(r => {
+                const item = r.normalizedData;
+                const netoGravadoVal = item.netoGravado !== undefined 
+                    ? item.netoGravado 
+                    : (item.alicuotas && item.alicuotas.length > 0 
+                        ? item.alicuotas.reduce((sum, a) => sum + (a.baseImponible || 0), 0) 
+                        : Math.max(0, (item.total || 0) - (item.totalIva || 0) - (item.exento || 0) - (item.netoNoGravado || 0) - (item.otrosTributos || 0)));
+
+                return {
+                    id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substr(2, 9),
+                    fecha: item.fecha,
+                    tipo: isCompra ? 'recibido' : 'emitido',
+                    tipoOperacion: isCompra ? 'COMPRA' : 'VENTA',
+                    tenant: context ? context.tenant : getActiveCompanyCuit(),
+                    cuit: item.cuit,
+                    razonSocial: item.razonSocial || '',
+                    proveedor: isCompra ? ("CUIT " + item.cuit) : (item.razonSocial || ("CUIT " + item.cuit)),
+                    comprobante: `${item.tipo_cbte}-${item.pdv}-${item.nroDesde}`,
+                    tipo_cbte: item.tipo_cbte,
+                    pdv: item.pdv,
+                    nroDesde: item.nroDesde,
+                    nroHasta: item.nroHasta || item.nroDesde,
+                    moneda: item.moneda || 'PES',
+                    tipoCambio: item.tipoCambio || 1,
+                    total: item.total || 0,
+                    importe: item.total || 0,
+                    importeTotal: item.total || 0,
+                    totalIva: item.totalIva || 0,
+                    iva: item.totalIva || 0,
+                    otrosTributos: item.otrosTributos || 0,
+                    exento: item.exento || 0,
+                    netoNoGravado: item.netoNoGravado || 0,
+                    noGravado: item.netoNoGravado || 0,
+                    netoGravado: netoGravadoVal,
+                    alicuotas: item.alicuotas || [],
+                    categoria: null,
+                    sugerida: false,
+                    confirmada: false,
+                    rawRecord: item
+                };
+            });
+
+            // SI ES ARCA RECIBIDOS (COMPRA) O ARCA EMITIDOS (VENTA) Y TENEMOS UN ARCHIVO REAL -> APLICAR PERSISTENCIA SUPABASE
+            if (isArca && rawFile) {
+                confirmBtn.disabled = true;
+                confirmBtn.innerText = "Guardando importación...";
+
+                try {
+                    // 1. Hash SHA-256
+                    const hashHex = await persistenceService.sha256File(rawFile);
+                    if (!validContext()) return;
+
+                    // 2. Pre-check de idempotencia
+                    const checkResult = await persistenceService.checkFileImportable(hashHex);
+                    if (!validContext()) return;
+                    if (checkResult && checkResult.importable === false) {
+                        await showExistingImport(checkResult, isCompra ? 'recibido' : 'emitido', validContext);
+                        closeAndRemove();
+                        return;
+                    }
+
+                    // 3. Crear importación en DB o reintentar importación fallida
+                    const sourceType = isCompra ? 'ARCA_RECIBIDOS' : 'ARCA_EMITIDOS';
+                    const operationType = isCompra ? 'COMPRA' : 'VENTA';
+                    let importInfo;
+                    if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                        importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                        if (!validContext()) return;
+                    } else {
+                        importInfo = await persistenceService.createImport(sourceType, operationType);
+                        if (!validContext()) return;
+                    }
+
+                    // 4. Safe filename y MIME fallback
+                    validateImportEnvelope(importInfo, appStore.activeOrganizationId);
+                    const safeFilename = persistenceService.getSafeFilename(rawFile.name);
+
+                    // 5. Upload a Storage privado
+                    const uploadResult = await persistenceService.uploadImportSource(importInfo, {
+                        file: rawFile,
+                        storagePrefix: importInfo.storage_prefix,
+                        safeFilename: safeFilename,
+                        mimeType: rawFile.type
+                    });
+                    if (!validContext()) return;
+
+                    // 6. Persistencia del Lote mediante RPC transaccional
+                    let persisted;
+                    try {
+                        persisted = await persistenceService.persistImportBatch({
+                            importId: importInfo.import_id,
+                            fileInfo: {
+                                original_name: rawFile.name,
+                                storage_path: uploadResult.path,
+                                mime_type: uploadResult.mimeType,
+                                size_bytes: rawFile.size,
+                                sha256_hash: hashHex
+                            },
+                            stagedRows: stagedRows
+                        });
+                        if (!validContext()) return;
+                    } catch (persistErr) {
+                        // Cleanup compensatorio de storage en caso de fallo
+                        if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
+                        if (!validContext()) return;
+                        throw persistErr;
+                    }
+
+                    closeAndRemove();
+                    assertImportResult(persisted);
+                    await appStore.refreshOperationalData('tab-conciliador');
+
+                } catch (err) {
+                    console.error("Error durante la persistencia de la importación:", err);
+                    alert(`Error al guardar importación: ${err.message || 'Error desconocido'}`);
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerText = `Confirmar Importación (${validRows.length})`;
+                }
+                return;
+            }
+
+            closeAndRemove();
+            onConfirm(toImport);
+        };
+    }
+}
+
+function showPerceptionsPreviewModal(validItems, invalidCount, fileName, onConfirm) {
+    const totalAmount = validItems.reduce((sum, item) => sum + (item.amount || item.monto || 0), 0);
+    const samplePeriod = validItems.length > 0 ? (validItems[0].period || validItems[0].periodo || 'N/D') : 'N/D';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    
+    overlay.innerHTML = `
+        <div class="modal-card" style="width: 85%; max-width: 850px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3 style="font-size: 16px; font-weight: bold; color: var(--primary);">Vista Previa de Percepciones</h3>
+                <button class="btn-close-modal" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                <p style="font-size: 13px;"><strong>Archivo:</strong> ${fileName}</p>
+                <div style="display: flex; gap: 12px; margin: 12px 0;">
+                    <div style="background: #e6f4ea; color: #137333; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 18px;">${validItems.length}</strong><br><span style="font-size: 11px;">Registros Válidos</span>
+                    </div>
+                    <div style="background: #fce8e6; color: #c5221f; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 18px;">${invalidCount}</strong><br><span style="font-size: 11px;">Omitidas / Error</span>
+                    </div>
+                    <div style="background: #e0f2fe; color: #0369a1; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 14px;">${samplePeriod}</strong><br><span style="font-size: 11px;">Período</span>
+                    </div>
+                    <div style="background: #f0fdf4; color: #15803d; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 14px;">$ ${totalAmount.toLocaleString('es-AR', {minimumFractionDigits: 2})}</strong><br><span style="font-size: 11px;">Total Importe</span>
+                    </div>
+                </div>
+                
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">Detalle de percepciones a incorporar:</p>
+                <div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="background: var(--bg-hover); text-align: left; position: sticky; top: 0; z-index: 1;">
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Fuente</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Fecha</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">CUIT Agente</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Comprobante</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color); text-align: right;">Importe</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${validItems.map(item => `
+                                <tr>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color); font-weight: 600; color: var(--primary);">${item.fuente || item.jurisdiction || 'ARBA'}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${item.fecha}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${item.cuit}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${item.comprobante || 'N/D'}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color); text-align: right; font-weight: 600;">$ ${(item.amount || item.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
+                <button class="btn-secondary btn-cancel-modal">Cancelar</button>
+                <button class="btn-primary btn-confirm-modal" ${validItems.length === 0 ? 'disabled' : ''}>Confirmar Importación (${validItems.length})</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    const closeAndRemove = () => {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    
+    overlay.querySelector('.btn-close-modal').onclick = closeAndRemove;
+    overlay.querySelector('.btn-cancel-modal').onclick = closeAndRemove;
+    
+    const confirmBtn = overlay.querySelector('.btn-confirm-modal');
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            closeAndRemove();
+            onConfirm(validItems);
+        };
+    }
+}
+
+function showBankPreviewModal(transactions, fileName, onConfirm) {
+    const debits = transactions.filter(t => t.tipo === 'debit');
+    const credits = transactions.filter(t => t.tipo === 'credit');
+    const totalDebits = debits.reduce((sum, t) => sum + (t.monto || 0), 0);
+    const totalCredits = credits.reduce((sum, t) => sum + (t.monto || 0), 0);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    
+    overlay.innerHTML = `
+        <div class="modal-card" style="width: 85%; max-width: 850px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3 style="font-size: 16px; font-weight: bold; color: var(--primary);">Vista Previa de Extracto Bancario</h3>
+                <button class="btn-close-modal" style="background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                <p style="font-size: 13px;"><strong>Archivo:</strong> ${fileName}</p>
+                <div style="display: flex; gap: 12px; margin: 12px 0;">
+                    <div style="background: #e6f4ea; color: #137333; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 18px;">${transactions.length}</strong><br><span style="font-size: 11px;">Movimientos Totales</span>
+                    </div>
+                    <div style="background: #fce8e6; color: #c5221f; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 14px;">$ ${totalDebits.toLocaleString('es-AR', {minimumFractionDigits: 2})}</strong><br><span style="font-size: 11px;">${debits.length} Débitos (Egresos)</span>
+                    </div>
+                    <div style="background: #f0fdf4; color: #15803d; padding: 10px; border-radius: 6px; flex: 1; text-align: center;">
+                        <strong style="font-size: 14px;">$ ${totalCredits.toLocaleString('es-AR', {minimumFractionDigits: 2})}</strong><br><span style="font-size: 11px;">${credits.length} Créditos (Ingresos)</span>
+                    </div>
+                </div>
+                
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">Detalle de movimientos a incorporar:</p>
+                <div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                        <thead>
+                            <tr style="background: var(--bg-hover); text-align: left; position: sticky; top: 0; z-index: 1;">
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Fecha</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Descripción</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color);">Tipo</th>
+                                <th style="padding: 6px; border-bottom: 1px solid var(--border-color); text-align: right;">Importe</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${transactions.map(t => `
+                                <tr>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${t.fecha}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">${t.descripcion}</td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color);">
+                                        <span style="font-weight: 600; color: ${t.tipo === 'debit' ? '#c5221f' : '#15803d'};">
+                                            ${t.tipo === 'debit' ? 'DÉBITO (-)' : 'CRÉDITO (+)'}
+                                        </span>
+                                    </td>
+                                    <td style="padding: 6px; border-bottom: 1px solid var(--border-color); text-align: right; font-weight: 600;">$ ${t.monto.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
+                <button class="btn-secondary btn-cancel-modal">Cancelar</button>
+                <button class="btn-primary btn-confirm-modal" ${transactions.length === 0 ? 'disabled' : ''}>Confirmar Importación (${transactions.length})</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    const closeAndRemove = () => {
+        if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    };
+    
+    overlay.querySelector('.btn-close-modal').onclick = closeAndRemove;
+    overlay.querySelector('.btn-cancel-modal').onclick = closeAndRemove;
+    
+    const confirmBtn = overlay.querySelector('.btn-confirm-modal');
+    if (confirmBtn) {
+        confirmBtn.onclick = () => {
+            closeAndRemove();
+            onConfirm(transactions);
+        };
+    }
+}
+
+// CONTROLADOR DE RENDERIZADO DEL CONCILIADOR ARCA (NÚCLEO EXISTENTE ADAPTADO)
+export class UIManager {
+    static init() {
+        this.setupDragAndDrop('zone-recibidos', 'file-recibidos', 'recibido');
+        this.setupDragAndDrop('zone-emitidos', 'file-emitidos', 'emitido');
+        this.setupDragAndDrop('zone-percepciones', 'file-percepciones', 'percepcion');
+        this.setupDragAndDrop('zone-bancos', 'file-bancos', 'banco');
+        this.setupDragAndDrop('zone-sueldos', 'file-sueldos', 'sueldo');
+    }
+
+    static setupDragAndDrop(zoneId, inputId, type) {
+        const zone = document.getElementById(zoneId);
+        const input = document.getElementById(inputId);
+
+        if (!zone || !input) return;
+
+        input.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) this.processFile(file, type);
+        });
+
+        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.style.borderColor = 'var(--accent)'; });
+        zone.addEventListener('dragleave', () => { zone.style.borderColor = 'var(--border-color)'; });
+        zone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            zone.style.borderColor = 'var(--border-color)';
+            const file = e.dataTransfer.files[0];
+            if (file) this.processFile(file, type);
+        });
+    }
+
+    static async processFile(file, type) {
+        if (!appStore.canImportOperational(type)) return;
+        const generation = appStore.contextGeneration;
+        const validContext = () => generation === appStore.contextGeneration && appStore.canImportOperational(type);
+        try {
+            const buffer = await readFileAsArrayBuffer(file);
+            if (!validContext()) return;
+            const text = await readFileAsText(file).catch(() => '');
+            if (!validContext()) return;
+            const formatInfo = detectFileFormat({ arrayBuffer: buffer, text, fileName: file.name, mimeType: file.type });
+            
+            const isExcelFormat = formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF' || file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx');
+
+            let rows = [];
+            if (isExcelFormat) {
+                if (typeof window === 'undefined' || !window.XLSX) throw new Error("Librería SheetJS no cargada en el navegador.");
+                const sheetAdapter = createSheetJsAdapter(window.XLSX);
+                rows = sheetAdapter.workbookToRows(buffer, { sheetName: null });
+            } else if (formatInfo === 'TEXT_DELIMITED') {
+                rows = parseDelimitedText(text);
+            } else if (formatInfo === 'TEXT_FIXED_WIDTH') {
+                rows = parseDelimitedText(text, { delimiter: 'NONE' });
+            } else {
+                throw new Error("Formato no soportado o desconocido.");
+            }
+
+            const fingerprintProvider = createBrowserFingerprintProvider();
+            const tenant = getActiveCompanyCuit();
+            let parsedItems = [];
+            let context = { batchId: Date.now(), tenant, rawFile: file };
+
+            if (type === 'recibido' || type === 'emitido') {
+                context.tipoOperacion = type === 'recibido' ? 'COMPRA' : 'VENTA';
+                parsedItems = parseArcaRows(rows, context);
+                
+                const staged = await stageImport({ 
+                    incomingRows: parsedItems, 
+                    existingRecords: appStore.items || [], 
+                    context, 
+                    fingerprintProvider 
+                });
+                if (!validContext()) return;
+                
+                showStagingPreviewModal(staged, file.name, context, (acceptedItems) => {
+                    if (!validContext()) return;
+                    appStore.addItems(acceptedItems);
+                    // Imported sales keep canonical classification; no local demo activity assignment.
+                    UIManager.render();
+                });
+            } else if (type === 'percepcion') {
+                const ext = file.name.split('.').pop().toLowerCase();
+                let sourceType = null;
+
+                if (isExcelFormat) {
+                    if (!['xls', 'xlsx', 'csv'].includes(ext)) {
+                        alert(`Contradicción detectada: El contenido parece Excel/CSV pero la extensión es .${ext}. Importación rechazada.`);
+                        return;
+                    }
+                    context.jurisdiccion = 'IVA';
+                    parsedItems = parseIvaPerceptions(rows, context);
+                    sourceType = 'PERCEPCIONES_IVA';
+                } else {
+                    if (ext !== 'txt') {
+                        alert(`Contradicción detectada: El contenido parece ARBA TXT pero la extensión es .${ext}. Importación rechazada.`);
+                        return;
+                    }
+                    context.jurisdiccion = 'ARBA';
+                    parsedItems = parseArbaText(text, context);
+                    sourceType = 'PERCEPCIONES_ARBA';
+                }
+                
+                const validPerceptions = parsedItems.filter(r => r.normalizedData !== null).map(r => r.normalizedData);
+                const invalidRows = parsedItems.filter(r => r.normalizedData === null);
+                
+                if (validPerceptions.length === 0) {
+                    alert("No se encontraron percepciones válidas en el archivo.");
+                } else {
+                    showPerceptionsPreviewModal(validPerceptions, invalidRows.length, file.name, async (acceptedItems) => {
+                        if (!validContext()) return;
+                        const btnConfirm = document.querySelector('.btn-confirm-modal');
+                        if (btnConfirm) {
+                            btnConfirm.disabled = true;
+                            btnConfirm.innerText = "Guardando importación...";
+                        }
+                        try {
+                            const hashHex = await persistenceService.sha256File(file);
+                            if (!validContext()) return;
+                            
+                            const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            if (!validContext()) return;
+                            if (checkResult && checkResult.importable === false) {
+                                await showExistingImport(checkResult, 'percepcion', validContext);
+                                return;
+                            }
+                            
+                            let importInfo;
+                            if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                                importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                                if (!validContext()) return;
+                            } else {
+                                importInfo = await persistenceService.createImport(sourceType, 'PERCEPCION');
+                                if (!validContext()) return;
+                            }
+                            validateImportEnvelope(importInfo, appStore.activeOrganizationId);
+                            const safeFilename = persistenceService.getSafeFilename(file.name);
+                            
+                            const uploadResult = await persistenceService.uploadImportSource(importInfo, {
+                                file: file,
+                                storagePrefix: importInfo.storage_prefix,
+                                safeFilename: safeFilename,
+                                mimeType: file.type || 'text/plain'
+                            });
+                            if (!validContext()) return;
+                            
+                            let persisted;
+                            try {
+                                persisted = await persistenceService.persistPerceptionsBatch({
+                                    importId: importInfo.import_id,
+                                    fileInfo: {
+                                        original_name: file.name,
+                                        storage_path: uploadResult.path,
+                                        mime_type: uploadResult.mimeType,
+                                        size_bytes: file.size,
+                                        sha256_hash: hashHex
+                                    },
+                                    stagedRows: parsedItems
+                                });
+                                if (!validContext()) return;
+                            } catch (persistErr) {
+                                if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!validContext()) return;
+                                throw persistErr;
+                            }
+                            
+                            assertImportResult(persisted);
+                            await appStore.refreshOperationalData('tab-percepciones');
+                            Reconciler.runCrossMatching();
+                            UIManager.render();
+                        } catch (err) {
+                            console.error("Error durante la persistencia de percepciones:", err);
+                            alert("Error al guardar percepciones: " + (err.message || 'Error desconocido'));
+                        } finally {
+                            if (btnConfirm) {
+                                btnConfirm.disabled = false;
+                                btnConfirm.innerText = "Confirmar Importación";
+                            }
+                        }
+                    });
+                }
+            } else if (type === 'banco') {
+                const bankName = document.getElementById('bank-name')?.value || 'Generico';
+                context.banco = bankName;
+                const result = parseBankRows(rows, context);
+                const validTransactions = result.filter(r => r.errors.length === 0).map(r => r.normalizedData);
+                const invalidRows = result.filter(r => r.errors.length > 0);
+
+                if (validTransactions.length === 0) {
+                    alert("No se encontraron movimientos bancarios válidos en el archivo.");
+                } else {
+                    showBankPreviewModal(validTransactions, file.name, async (accepted) => {
+                        const btnConfirm = document.querySelector('.btn-confirm-modal');
+                        if (btnConfirm) {
+                            btnConfirm.disabled = true;
+                            btnConfirm.innerText = "Guardando importación...";
+                        }
+                        try {
+                            const hashHex = await persistenceService.sha256File(file);
+                            if (!validContext()) return;
+                            
+                            const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            if (!validContext()) return;
+                            if (checkResult && checkResult.importable === false) {
+                                await showExistingImport(checkResult, 'banco', validContext);
+                                return;
+                            }
+                            
+                            let importInfo;
+                            if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                                importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                                if (!validContext()) return;
+                            } else {
+                                importInfo = await persistenceService.createImport('BANK_STATEMENT_BBVA', 'BANCO');
+                                if (!validContext()) return;
+                            }
+                            validateImportEnvelope(importInfo, appStore.activeOrganizationId);
+                            const safeFilename = persistenceService.getSafeFilename(file.name);
+                            
+                            const uploadResult = await persistenceService.uploadImportSource(importInfo, {
+                                file: file,
+                                storagePrefix: importInfo.storage_prefix,
+                                safeFilename: safeFilename,
+                                mimeType: file.type || 'text/csv'
+                            });
+                            if (!validContext()) return;
+                            
+                            let persisted;
+                            try {
+                                persisted = await persistenceService.persistFinancialMovementsBatch({
+                                    importId: importInfo.import_id,
+                                    fileInfo: {
+                                        original_name: file.name,
+                                        storage_path: uploadResult.path,
+                                        mime_type: uploadResult.mimeType,
+                                        size_bytes: file.size,
+                                        sha256_hash: hashHex
+                                    },
+                                    stagedRows: result
+                                });
+                                if (!validContext()) return;
+                            } catch (persistErr) {
+                                if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!validContext()) return;
+                                throw persistErr;
+                            }
+                            
+                            assertImportResult(persisted);
+                            await appStore.refreshOperationalData('tab-bancos');
+                            UIManager.render();
+                        } catch (err) {
+                            console.error("Error durante la persistencia bancaria:", err);
+                            alert("Error al guardar extracto bancario: " + (err.message || 'Error desconocido'));
+                        } finally {
+                            if (btnConfirm) {
+                                btnConfirm.disabled = false;
+                                btnConfirm.innerText = `Confirmar Importación (${validTransactions.length})`;
+                            }
+                        }
+                    });
+                }
+            } else if (type === 'sueldo') {
+                const results = parseSalaryRows(rows, context);
+                const firstRes = results && results[0];
+
+                if (firstRes && firstRes.errors && firstRes.errors.length > 0) {
+                    alert("Error en el archivo de sueldos: " + firstRes.errors.join(', '));
+                } else if (firstRes && firstRes.normalizedData) {
+                    try {
+                        const hashHex = await persistenceService.sha256File(file);
+                        if (!validContext()) return;
+                        
+                        const checkResult = await persistenceService.checkFileImportable(hashHex);
+                        if (!validContext()) return;
+                        if (checkResult && checkResult.importable === false) {
+                            await showExistingImport(checkResult, 'sueldo', validContext);
+                            return;
+                        }
+                        
+                        let importInfo;
+                        if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                            importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
+                            if (!validContext()) return;
+                        } else {
+                            importInfo = await persistenceService.createImport('PAYROLL_ACONPY', 'SUELDO');
+                            if (!validContext()) return;
+                        }
+                        validateImportEnvelope(importInfo, appStore.activeOrganizationId);
+                        const safeFilename = persistenceService.getSafeFilename(file.name);
+                        
+                        const uploadResult = await persistenceService.uploadImportSource(importInfo, {
+                            file: file,
+                            storagePrefix: importInfo.storage_prefix,
+                            safeFilename: safeFilename,
+                            mimeType: file.type || 'text/plain'
+                        });
+                        if (!validContext()) return;
+                        
+                        let persisted;
+                        try {
+                            persisted = await persistenceService.persistFinancialMovementsBatch({
+                                importId: importInfo.import_id,
+                                fileInfo: {
+                                    original_name: file.name,
+                                    storage_path: uploadResult.path,
+                                    mime_type: uploadResult.mimeType,
+                                    size_bytes: file.size,
+                                    sha256_hash: hashHex
+                                },
+                                stagedRows: results
+                            });
+                            if (!validContext()) return;
+                        } catch (persistErr) {
+                            if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
+                            if (!validContext()) return;
+                            throw persistErr;
+                        }
+                        
+                        assertImportResult(persisted);
+                        await appStore.refreshOperationalData('tab-sueldos');
+                        if (typeof updateSalaryFormFields === 'function') updateSalaryFormFields();
+                        alert(`Sueldos Acompy importados correctamente (Período: ${firstRes.normalizedData.periodo || 'N/D'}).`);
+                    } catch (err) {
+                        console.error("Error durante la persistencia de sueldos:", err);
+                        alert("Error al guardar sueldos: " + (err.message || 'Error desconocido'));
+                    }
+                } else {
+                    alert("No se pudo extraer el resumen de sueldos.");
+                }
+            }
+        } catch (error) {
+            alert("Error al procesar archivo: " + error.message);
+            console.error(error);
+        }
+    }
+
+    static render() {
+        this.renderMainTable();
+        this.renderPerceptionsTable();
+        this.renderBankTable();
+        this.renderSalarySummary();
+    }
+
+    static renderSalarySummary() {
+        const container = document.getElementById('salary-detail-container');
+        const badge = document.getElementById('salary-source-badge');
+        const sal = appStore.salaries;
+
+        if (!sal) {
+            if (badge) badge.innerText = "Fuente: ACOMPY | Período: Sin Cargar";
+            if (container) {
+                container.innerHTML = `Aún no se ha importado reporte de sueldos Acompy para este período.`;
+            }
+            return;
+        }
+
+        if (badge) {
+            badge.innerText = `Fuente: ${sal.fuente || 'ACOMPY'} | Período: ${sal.periodo || 'N/D'}`;
+        }
+
+        if (!container) return;
+
+        const fmt = (v) => `$ ${(v || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+        container.innerHTML = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; text-align: left;">
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Período Liquidado</span>
+                    <strong style="font-size: 14px; color: var(--primary);">${sal.periodo || 'N/D'}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Remunerativo</span>
+                    <strong style="font-size: 14px;">${fmt(sal.remunerativo)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">No Remunerativo</span>
+                    <strong style="font-size: 14px;">${fmt(sal.noRemunerativo)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Anticipos / Adelantos</span>
+                    <strong style="font-size: 14px;">${fmt(sal.anticipos)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">SAC Proporcional</span>
+                    <strong style="font-size: 14px;">${fmt(sal.sacProporcional)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Aporte Sindical Oblig.</span>
+                    <strong style="font-size: 14px;">${fmt(sal.aporteSindicalObligatorio)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">FAECYS</span>
+                    <strong style="font-size: 14px;">${fmt(sal.faecys)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Sueldo Neto Total</span>
+                    <strong style="font-size: 14px; color: var(--success);">${fmt(sal.sueldoNeto)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Sueldo Bruto Calculado</span>
+                    <strong style="font-size: 14px;">${fmt(sal.sueldoBrutoCalculado)}</strong>
+                </div>
+                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Aporte Sindical Calculado</span>
+                    <strong style="font-size: 14px;">${fmt(sal.aporteSindicalCalculado)}</strong>
+                </div>
+            </div>
+        `;
+    }
+
+    static updateJurisdictionFilterSelects() {
+        const sel = document.getElementById('percepciones-jurisdiction-select');
+        if (!sel) return;
+
+        const available = appStore.getAvailableJurisdictions();
+        const currentSelected = percepcionesGrid.primaryFilter || 'all';
+
+        let html = `<option value="all" ${currentSelected === 'all' ? 'selected' : ''}>Todas las Percepciones</option>`;
+        available.forEach(j => {
+            html += `<option value="${j}" ${currentSelected === j ? 'selected' : ''}>${j}</option>`;
+        });
+        sel.innerHTML = html;
+    }
+
+    static syncHeaderVisibility(grid, tableId) {
+        const table = document.getElementById(tableId);
+        if (!table) return;
+        const ths = table.querySelectorAll('thead th[data-col-key]');
+        ths.forEach(th => {
+            const key = th.getAttribute('data-col-key');
+            if (key) {
+                th.classList.toggle('hidden', !grid.isColumnVisible(key));
+            }
+        });
+    }
+
+    static renderPerceptionsTable() {
+        UIManager.updateJurisdictionFilterSelects();
+        UIManager.syncHeaderVisibility(percepcionesGrid, 'table-percepciones');
+
+        const tbody = document.getElementById('table-percepciones-body');
+        const summaryBar = document.getElementById('percepciones-summary-bar');
+        
+        const rawList = appStore.perceptions || [];
+        const list = percepcionesGrid.filterAndSort(rawList, {
+            fuente: p => p.fuente || p.jurisdiction || p.jurisdiccion || '',
+            agente: p => p.agente || p.razonSocial || '',
+            monto: p => typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)
+        });
+
+        if (summaryBar) {
+            const total = list.reduce((sum, p) => sum + (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)), 0);
+            const totalFormatted = total.toLocaleString('es-AR', {minimumFractionDigits: 2});
+            summaryBar.innerText = `${list.length} percepciones · Total $ ${totalFormatted}`;
+        }
+
+        if (!tbody) return;
+
+        const pageRows = renderGridPagination(percepcionesGrid, list, tbody, () => UIManager.renderPerceptionsTable());
+
+        if (list.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                        ${rawList.length > 0 ? 'No hay percepciones para los filtros seleccionados.' : 'No se han cargado percepciones para este período.'}
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        tbody.innerHTML = pageRows.map(p => {
+            const fuenteText = p.fuente || p.jurisdiction || 'ARBA';
+            const montoVal = (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)).toLocaleString('es-AR', {minimumFractionDigits: 2});
+            return `
+                <tr>
+                    <td><input type="checkbox" class="percepcion-checkbox" value="${p.id || ''}" onchange="appStore.updatePercepcionesBulkSelectionBar()"></td>
+                    <td data-label="Fuente" class="${percepcionesGrid.isColumnVisible('fuente') ? '' : 'hidden'}"><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; font-weight: 700;">${fuenteText}</span></td>
+                    <td data-label="Fecha" class="${percepcionesGrid.isColumnVisible('fecha') ? '' : 'hidden'}">${p.fecha}</td>
+                    <td data-label="Período" class="${percepcionesGrid.isColumnVisible('periodo') ? '' : 'hidden'}">${p.period || p.periodo || 'N/D'}</td>
+                    <td data-label="CUIT" class="${percepcionesGrid.isColumnVisible('cuit') ? '' : 'hidden'}">${p.cuit}</td>
+                    <td data-label="Agente / Razón Social" class="${percepcionesGrid.isColumnVisible('agente') ? '' : 'hidden'}" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;" title="${p.razonSocial || p.agente || ''}"><strong>${p.razonSocial || p.agente || 'AGENTE PERCEPCION'}</strong></td>
+                    <td data-label="Comprobante" class="${percepcionesGrid.isColumnVisible('comprobante') ? '' : 'hidden'}">${p.comprobante || 'N/D'}</td>
+                    <td data-label="Importe" class="${percepcionesGrid.isColumnVisible('monto') ? '' : 'hidden'}" style="font-weight: 600;">$ ${montoVal}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    static renderBankTable() {
+        UIManager.syncHeaderVisibility(bancosGrid, 'table-bancos');
+
+        const tbody = document.getElementById('table-bancos-body');
+        const summaryBar = document.getElementById('bancos-summary-bar');
+        if (!tbody) return;
+
+        const rawTxs = appStore.bankTransactions || [];
+        const transactions = bancosGrid.filterAndSort(rawTxs, {
+            fecha: t => t.fecha || t.fechaValor || '',
+            descripcion: t => t.descripcion || t.concepto || '',
+            monto: t => t.monto || t.amount || 0
+        });
+
+        if (summaryBar) {
+            const debits = transactions.filter(t => (t.monto || 0) < 0 || t.tipo === 'debit' || t.tipo === 'DEBITO').reduce((sum, t) => sum + Math.abs(t.monto || 0), 0);
+            const credits = transactions.filter(t => (t.monto || 0) >= 0 || t.tipo === 'credit' || t.tipo === 'CREDITO').reduce((sum, t) => sum + Math.abs(t.monto || 0), 0);
+            summaryBar.innerText = `${transactions.length} movimientos · Débitos: $ ${debits.toLocaleString('es-AR', {minimumFractionDigits: 2})} · Créditos: $ ${credits.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        }
+
+        const pageRows = renderGridPagination(bancosGrid, transactions, tbody, () => UIManager.renderBankTable());
+
+        if (transactions.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                        No hay extractos bancarios procesados para este período.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        const taxCategoriesHTML = `
+            <option value="">-- Seleccionar Categoría --</option>
+            ${(appStore.taxCategories || []).filter(cat => cat.is_assigned && cat.is_active).map(cat => `
+                <option value="${cat.id}">${cat.name}</option>
+            `).join('')}
+        `;
+
+        tbody.innerHTML = pageRows.map(t => {
+            const isDebit = (t.monto || 0) < 0 || t.tipo === 'debit' || t.tipo === 'DEBITO';
+            const badgeClass = isDebit ? 'badge-emitido' : 'badge-recibido';
+            const badgeText = isDebit ? 'DÉBITO' : 'CRÉDITO';
+            const montoVal = Math.abs(t.monto || 0).toLocaleString('es-AR', {minimumFractionDigits: 2});
+
+            return `
+                <tr data-item-id="${t.id}">
+                    <td><input type="checkbox" class="banco-checkbox" value="${t.id}" onchange="appStore.updateBankBulkSelectionBar()"></td>
+                    <td data-label="Fecha" class="${bancosGrid.isColumnVisible('fecha') ? '' : 'hidden'}">${t.fecha}</td>
+                    <td data-label="Descripción" class="${bancosGrid.isColumnVisible('descripcion') ? '' : 'hidden'}" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;" title="${t.descripcion}"><strong>${t.descripcion}</strong></td>
+                    <td data-label="Importe" class="${bancosGrid.isColumnVisible('monto') ? '' : 'hidden'}" style="font-weight: 600; color: ${isDebit ? '#c5221f' : '#15803d'};">$ ${montoVal}</td>
+                    <td data-label="Tipo" class="${bancosGrid.isColumnVisible('tipo') ? '' : 'hidden'}"><span class="badge ${badgeClass}">${badgeText}</span></td>
+                    <td data-label="Clasificación / Categoría" class="${bancosGrid.isColumnVisible('cuenta') ? '' : 'hidden'}">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="saveMicaClassification(this, 'updateBankCategory', '${t.id}')" ${!appStore.canOperationalAction('classify') ? 'disabled' : ''}>
+                            ${taxCategoriesHTML.replace(`value="${t.category_id || ''}"`, `value="${t.category_id || ''}" selected`)}
+                        </select>
+                        <select aria-label="Actividad del movimiento" class="select-category form-control" onchange="saveMicaClassification(this, 'updateBankActivity', '${t.id}')" ${!appStore.canOperationalAction('classify') ? 'disabled' : ''}>
+                            <option value="">-- Seleccionar Actividad --</option>
+                            ${(appStore.economicActivities || []).filter(a => a.is_active).map(a => `<option value="${a.id}" ${a.id === t.activity_id ? 'selected' : ''}>${a.name}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td data-label="Estado" class="${bancosGrid.isColumnVisible('estado') ? '' : 'hidden'}">${t.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    static renderMainTable() {
+        UIManager.syncHeaderVisibility(comprobantesGrid, 'table-comprobantes');
+
+        const tbody = document.getElementById('table-body');
+        if (!tbody) return;
+
+        const rawItems = appStore.items || [];
+        const items = comprobantesGrid.filterAndSort(rawItems, {
+            razonSocial: i => i.razonSocial || i.agente || '',
+            cuit: i => i.cuit || '',
+            comprobante: i => i.comprobante || '',
+            total: i => i.total || 0,
+            iva: i => i.iva || i.importeIva || 0,
+            fecha: i => i.fecha || ''
+        });
+
+        const summaryBar = document.getElementById('comprobantes-summary-bar');
+        if (summaryBar) {
+            const totalMonto = items.reduce((sum, i) => sum + (i.total || 0), 0);
+            summaryBar.innerText = `${items.length} comprobantes · $ ${totalMonto.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+        }
+
+        const pageRows = renderGridPagination(comprobantesGrid, items, tbody, () => UIManager.renderMainTable());
+
+        if (items.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="16" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                        Ningún comprobante coincide con los filtros aplicados.
+                    </td>
+                </tr>`;
+            return;
+        }
+
+        const taxCategoriesHTML = `
+            <option value="">-- Seleccionar Categoría --</option>
+            ${(appStore.taxCategories || []).filter(cat => cat.is_assigned && cat.is_active).map(cat => `
+                <option value="${cat.id}">${cat.name}</option>
+            `).join('')}
+        `;
+
+        const activitiesHTML = `
+            <option value="">-- Seleccionar Actividad --</option>
+            ${(appStore.economicActivities || []).map(act => `
+                <option value="${act.id}">${act.arca_code || act.arca_activity_code || ''} - ${act.name}</option>
+            `).join('')}
+        `;
+
+        const formatMoney = (val) => `$ ${(val || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+        tbody.innerHTML = pageRows.map(item => {
+            const isRecibido = item.tipo === 'recibido';
+            const badgeClass = isRecibido ? 'badge-recibido' : 'badge-emitido';
+            const badgeText = isRecibido ? 'Compra' : 'Venta';
+
+            return `
+                <tr data-item-id="${item.id}">
+                    <td><input type="checkbox" class="comprobante-checkbox" value="${item.id}" onchange="appStore.updateBulkSelectionBar()"></td>
+                    <td data-label="Origen" class="${comprobantesGrid.isColumnVisible('origen') ? '' : 'hidden'}"><span class="badge ${badgeClass}">${badgeText}</span></td>
+                    <td data-label="Fecha" class="${comprobantesGrid.isColumnVisible('fecha') ? '' : 'hidden'}">${item.fecha}</td>
+                    <td data-label="Comprobante" class="${comprobantesGrid.isColumnVisible('comprobante') ? '' : 'hidden'}">${item.comprobante}</td>
+                    <td data-label="CUIT" class="${comprobantesGrid.isColumnVisible('cuit') ? '' : 'hidden'}">${item.cuit}</td>
+                    <td data-label="Razón Social" class="${comprobantesGrid.isColumnVisible('razonSocial') ? '' : 'hidden'}" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;" title="${item.razonSocial || ''}"><strong>${item.razonSocial || ''}</strong></td>
+                    <td data-label="Neto Gravado" class="${comprobantesGrid.isColumnVisible('neto') ? '' : 'hidden'}">${formatMoney(item.netoGravado)}</td>
+                    <td data-label="Exentas" class="${comprobantesGrid.isColumnVisible('exentas') ? '' : 'hidden'}">${formatMoney(item.exento)}</td>
+                    <td data-label="Otros Tributos" class="${comprobantesGrid.isColumnVisible('otrosTributos') ? '' : 'hidden'}">${formatMoney(item.otrosTributos)}</td>
+                    <td data-label="IVA" class="${comprobantesGrid.isColumnVisible('iva') ? '' : 'hidden'}">${formatMoney(item.iva)}</td>
+                    <td data-label="Perc. IVA" class="${comprobantesGrid.isColumnVisible('percIva') ? '' : 'hidden'}">${formatMoney(item.percepcionIva || 0)}</td>
+                    <td data-label="Perc. IIBB" class="${comprobantesGrid.isColumnVisible('percIibb') ? '' : 'hidden'}">${formatMoney(item.percepcionIibb || 0)}</td>
+                    <td data-label="Total" class="${comprobantesGrid.isColumnVisible('total') ? '' : 'hidden'}" style="font-weight: 700;">${formatMoney(item.total)}</td>
+                    <td data-label="Categoría Tributaria" class="${comprobantesGrid.isColumnVisible('categoria') ? '' : 'hidden'}">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="saveMicaClassification(this, 'updateCategory', '${item.id}')" ${!appStore.canOperationalAction('classify') ? 'disabled' : ''}>
+                            ${taxCategoriesHTML.replace(`value="${item.category_id || ''}"`, `value="${item.category_id || ''}" selected`)}
+                        </select>
+                    </td>
+                    <td data-label="Actividad" class="${comprobantesGrid.isColumnVisible('actividad') ? '' : 'hidden'}">
+                        <select class="select-category form-control" style="font-size: 11px;" onchange="saveMicaClassification(this, 'updateActivity', '${item.id}')" ${!appStore.canOperationalAction('classify') ? 'disabled' : ''}>
+                            ${activitiesHTML.replace(`value="${item.activity_id || ''}"`, `value="${item.activity_id || ''}" selected`)}
+                        </select>
+                    </td>
+                    <td data-label="Estado" class="${comprobantesGrid.isColumnVisible('estado') ? '' : 'hidden'}">${item.confirmada ? '<span style="color:var(--success);">Categorizado</span>' : '<span style="color:var(--warning);">Pendiente</span>'}</td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    static renderCategorization() {
+        this.renderSettings();
+    }
+
+    static renderRecordActionToolbar({ containerId, grid, visibleItems, onEdit, onClone, onToggleActive, onDelete, options = {} }) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        const cardinality = grid.getSelectionCardinality(visibleItems);
+        const count = cardinality.count;
+
+        container.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 13px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                    <input type="checkbox" ${cardinality.isAllVisibleSelected ? 'checked' : ''} onchange="${options.masterToggleHandler}(this.checked)">
+                    <strong>Seleccionar todo</strong>
+                </label>
+                <span style="color: var(--text-muted); font-size: 12px;">${count} seleccionado${count !== 1 ? 's' : ''}</span>
+            </div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                ${options.allowEdit !== false ? `<button class="btn-secondary" ${!cardinality.canEdit ? 'disabled' : ''} onclick="${onEdit}">✏️ Editar</button>` : ''}
+                ${options.allowClone !== false ? `<button class="btn-secondary" ${!cardinality.canClone || options.isCloneDisabled ? 'disabled' : ''} onclick="${onClone}">📋 Clonar</button>` : ''}
+                ${options.allowToggle !== false ? `<button class="btn-secondary" ${!cardinality.canToggleActive ? 'disabled' : ''} onclick="${onToggleActive}">⚡ ${options.toggleLabel || 'Activar / Desactivar'}</button>` : ''}
+                ${options.allowDelete !== false ? `<button class="btn-danger" ${!cardinality.canDelete ? 'disabled' : ''} onclick="${onDelete}">🗑️ ${options.deleteLabel || 'Eliminar / Desasignar'}</button>` : ''}
+            </div>
+        `;
+    }
+
+    static renderSettings() {
+        const canManageGlobal = appStore.isCatalogPlatformContext() && appStore.canManageGlobalCatalog();
+        const canActOnTax = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('category');
+        const canActOnActivity = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('activity');
+        for (const id of ['btn-import-arca-catalog', 'btn-create-global-category']) {
+            const control = document.getElementById(id);
+            if (control) {
+                control.hidden = !canManageGlobal;
+                control.disabled = !canManageGlobal;
+            }
+        }
+        if (!canManageGlobal) {
+            this.closeModal('modal-arca-catalog');
+            this.closeModal('modal-tax-category');
+        }
+        const isGlobalMode = appStore.isCatalogPlatformContext();
+
+        // Target Org Containers para Global Mode
+        const targetTaxCatContainer = document.getElementById('target-org-tax-categories-container');
+        const selectTargetTaxCat = document.getElementById('select-target-org-tax-cat');
+        if (targetTaxCatContainer && selectTargetTaxCat) {
+            targetTaxCatContainer.style.display = isGlobalMode && appStore.canAssignCatalog() ? 'flex' : 'none';
+            const orgs = (appStore.catalogAssignmentTargets || []).map(o => ({ id: o.organization_id, name: o.organization_name }));
+            const previousTarget = selectTargetTaxCat.value;
+            selectTargetTaxCat.innerHTML = orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            selectTargetTaxCat.onchange = () => window.handleCatalogTargetChange('categories');
+        }
+
+        const targetEconActContainer = document.getElementById('target-org-economic-activities-container');
+        const selectTargetEconAct = document.getElementById('select-target-org-econ-act');
+        if (targetEconActContainer && selectTargetEconAct) {
+            targetEconActContainer.style.display = isGlobalMode && appStore.canAssignCatalog() ? 'flex' : 'none';
+            const orgs = (appStore.catalogAssignmentTargets || []).map(o => ({ id: o.organization_id, name: o.organization_name }));
+            const previousTarget = selectTargetEconAct.value;
+            selectTargetEconAct.innerHTML = orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            selectTargetEconAct.onchange = () => window.handleCatalogTargetChange('activities');
+        }
+
+        if (isGlobalMode) {
+            for (const [rows, target] of [
+                [appStore.taxCategories, selectTargetTaxCat?.value],
+                [appStore.displayedEconomicActivities, selectTargetEconAct?.value]
+            ]) {
+                for (const row of rows || []) {
+                    row.isAssignedToOrg = (row.assignedOrganizationIds || []).includes(target);
+                    row.assignedState = row.isAssignedToOrg ? 'Asignada' : 'No asignada';
+                }
+            }
+        }
+
+        // Header Columna Estado (Visible únicamente en Modo Global SUPERADMIN)
+        const thTaxCatEstado = document.getElementById('th-tax-cat-estado');
+        if (thTaxCatEstado) {
+            thTaxCatEstado.style.display = isGlobalMode ? '' : 'none';
+            thTaxCatEstado.innerText = 'Estado';
+        }
+
+        const thEconomicActEstado = document.getElementById('th-economic-act-estado');
+        if (thEconomicActEstado) {
+            thEconomicActEstado.style.display = isGlobalMode ? '' : 'none';
+            thEconomicActEstado.innerText = 'Estado';
+        }
+
+        // Configurar botones de filtro según Modo Global vs Modo Organización
+        const fgTaxCats = document.getElementById('filter-group-tax-categories');
+        if (fgTaxCats) {
+            if (isGlobalMode) {
+                fgTaxCats.innerHTML = `
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'all' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('all')">Todos</button>
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'assigned' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('assigned')">Asignados</button>
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'unassigned' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('unassigned')">Sin asignar</button>
+                `;
+            } else {
+                fgTaxCats.innerHTML = `
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'active' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('active')">Activas</button>
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'inactive' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('inactive')">Inactivas</button>
+                    <button class="btn-filter ${taxCategoriesGrid.getFilterStatus() === 'all' ? 'active' : ''}" onclick="window.setTaxCategoriesStatusFilter('all')">Todas</button>
+                `;
+            }
+        }
+
+        const fgEconActs = document.getElementById('filter-group-economic-activities');
+        if (fgEconActs) {
+            if (isGlobalMode) {
+                fgEconActs.innerHTML = `
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'all' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('all')">Todos</button>
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'assigned' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('assigned')">Asignados</button>
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'unassigned' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('unassigned')">Sin asignar</button>
+                `;
+            } else {
+                fgEconActs.innerHTML = `
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'active' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('active')">Activas</button>
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'inactive' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('inactive')">Inactivas</button>
+                    <button class="btn-filter ${economicActivitiesGrid.getFilterStatus() === 'all' ? 'active' : ''}" onclick="window.setEconomicActivitiesStatusFilter('all')">Todas</button>
+                `;
+            }
+        }
+
+        // 1. Categorías Tributarias
+        const allTaxCats = appStore.taxCategories || [];
+        const taxSearch = (taxCategoriesGrid.searchQuery || '').toLowerCase();
+        const taxStatus = taxCategoriesGrid.getFilterStatus();
+
+        let filteredTaxCats = allTaxCats.filter(c => {
+            const matchesSearch = !taxSearch || (c.name || '').toLowerCase().includes(taxSearch) || (c.description || '').toLowerCase().includes(taxSearch);
+            if (!matchesSearch) return false;
+
+            if (isGlobalMode) {
+                if (taxStatus === 'assigned') return c.isAssignedToOrg === true;
+                if (taxStatus === 'unassigned') return c.isAssignedToOrg !== true;
+            } else {
+                if (taxStatus === 'active') return c.is_active === true;
+                if (taxStatus === 'inactive') return c.is_active === false;
+            }
+            return true;
+        });
+
+        const taxDefaultLimit = isGlobalMode ? 10 : 5;
+        if (!taxCategoriesGrid.displayLimitCustom) {
+            taxCategoriesGrid.displayLimit = taxDefaultLimit;
+        }
+        const taxLimit = taxCategoriesGrid.getDisplayLimit();
+        const visibleTaxCats = filteredTaxCats.slice(0, taxLimit);
+        taxCategoriesGrid.reconcileSelection(visibleTaxCats);
+
+        this.renderRecordActionToolbar({
+            containerId: 'toolbar-tax-categories',
+            grid: taxCategoriesGrid,
+            visibleItems: visibleTaxCats,
+            onEdit: 'window.actionEditTaxCategory()',
+            onClone: 'window.actionCloneTaxCategory()',
+            onToggleActive: 'window.actionToggleTaxCategories()',
+            onDelete: 'window.actionDeleteTaxCategories()',
+            options: {
+                masterToggleHandler: 'window.toggleMasterTaxCategories',
+                allowEdit: canManageGlobal,
+                allowClone: canManageGlobal,
+                allowToggle: canActOnTax,
+                allowDelete: canActOnTax,
+                toggleLabel: isGlobalMode ? 'Asignar' : 'Activar',
+                deleteLabel: isGlobalMode ? 'Desasignar' : 'Desactivar'
+            }
+        });
+
+        const tcTbody = document.getElementById('table-tax-categories-body');
+        if (tcTbody) {
+            if (visibleTaxCats.length === 0) {
+                const colSpan = isGlobalMode ? 5 : 4;
+                tcTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay categorías tributarias que coincidan con los filtros.</td></tr>`;
+            } else {
+                tcTbody.innerHTML = visibleTaxCats.map(c => `
+                    <tr>
+                        <td style="text-align: center;"><input type="checkbox" class="tax-cat-checkbox" value="${c.id}" ${taxCategoriesGrid.isRowSelected(c.id) ? 'checked' : ''} onchange="window.toggleTaxCategoryRowSelection('${c.id}')"></td>
+                        <td><strong>${c.name}</strong></td>
+                        <td>${c.description || '-'}</td>
+                        ${isGlobalMode ? `<td>${c.assignedState ? `<span style="color:var(--success); font-weight: 600;">${c.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
+                        <td>
+                            ${canManageGlobal ? `<button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.editSingleTaxCategory('${c.id}')">Editar</button>` : ''}
+                            ${canActOnTax ? `<button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleTaxCategoryAssignment('${c.id}')">${isGlobalMode ? (c.isAssignedToOrg ? 'Desasignar' : 'Asignar') : (c.is_active ? 'Desactivar' : 'Activar')}</button>` : ''}
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // Paginación Incremental Categorías
+        const pgTaxCatContainer = document.getElementById('pagination-tax-categories');
+        if (pgTaxCatContainer) {
+            const totalCount = filteredTaxCats.length;
+            const currentCount = visibleTaxCats.length;
+            const canLoadMore = currentCount < totalCount;
+            const canLoadLess = taxLimit > taxDefaultLimit;
+
+            pgTaxCatContainer.innerHTML = `
+                <span style="font-size: 12px; color: var(--text-muted);">Mostrando ${currentCount} de ${totalCount} categorías</span>
+                <div style="display: flex; gap: 8px;">
+                    ${canLoadLess ? `<button class="btn-secondary" style="font-size: 12px; padding: 3px 10px;" onclick="window.loadLessTaxCategories()">Ver menos</button>` : ''}
+                    ${canLoadMore ? `<button class="btn-primary" style="font-size: 12px; padding: 3px 12px;" onclick="window.loadMoreTaxCategories()">Ver más (+${taxDefaultLimit})</button>` : ''}
+                </div>
+            `;
+        }
+
+        // 2. Actividades Económicas ARCA
+        const allEconActs = appStore.displayedEconomicActivities || appStore.economicActivities || [];
+        const econSearch = (economicActivitiesGrid.searchQuery || '').toLowerCase();
+        const econStatus = economicActivitiesGrid.getFilterStatus();
+
+        let filteredEconActs = allEconActs.filter(a => {
+            const matchesSearch = !econSearch || (a.arca_code || '').toLowerCase().includes(econSearch) || (a.name || '').toLowerCase().includes(econSearch);
+            if (!matchesSearch) return false;
+
+            if (isGlobalMode) {
+                if (econStatus === 'assigned') return a.isAssignedToOrg === true;
+                if (econStatus === 'unassigned') return a.isAssignedToOrg !== true;
+            } else {
+                if (econStatus === 'active') return a.is_active === true;
+                if (econStatus === 'inactive') return a.is_active === false;
+            }
+            return true;
+        });
+
+        const econDefaultLimit = isGlobalMode ? 10 : 5;
+        if (!economicActivitiesGrid.displayLimitCustom) {
+            economicActivitiesGrid.displayLimit = econDefaultLimit;
+        }
+        const econLimit = economicActivitiesGrid.getDisplayLimit();
+        const visibleEconActs = filteredEconActs.slice(0, econLimit);
+        economicActivitiesGrid.reconcileSelection(visibleEconActs);
+
+        this.renderRecordActionToolbar({
+            containerId: 'toolbar-economic-activities',
+            grid: economicActivitiesGrid,
+            visibleItems: visibleEconActs,
+            onEdit: 'window.actionEditEconomicActivity()',
+            onClone: 'window.actionCloneEconomicActivity()',
+            onToggleActive: 'window.actionAssignEconomicActivities()',
+            onDelete: 'window.actionUnassignEconomicActivities()',
+            options: {
+                masterToggleHandler: 'window.toggleMasterEconomicActivities',
+                allowEdit: false,
+                allowClone: true,
+                isCloneDisabled: true,
+                allowToggle: canActOnActivity,
+                allowDelete: canActOnActivity,
+                toggleLabel: isGlobalMode ? 'Asignar' : 'Activar',
+                deleteLabel: isGlobalMode ? 'Desasignar' : 'Desactivar'
+            }
+        });
+
+        const eaTbody = document.getElementById('table-economic-activities-body');
+        if (eaTbody) {
+            if (visibleEconActs.length === 0) {
+                const colSpan = isGlobalMode ? 5 : 4;
+                eaTbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-muted);">No hay actividades económicas que coincidan con la búsqueda.</td></tr>`;
+            } else {
+                eaTbody.innerHTML = visibleEconActs.map(a => `
+                    <tr>
+                        <td style="text-align: center;"><input type="checkbox" class="economic-act-checkbox" value="${a.id}" ${economicActivitiesGrid.isRowSelected(a.id) ? 'checked' : ''} onchange="window.toggleEconomicActivityRowSelection('${a.id}')"></td>
+                        <td><span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:700;">${a.arca_code || ''}</span></td>
+                        <td><strong>${a.name}</strong></td>
+                        ${isGlobalMode ? `<td>${a.assignedState ? `<span style="color:var(--success); font-weight: 600;">${a.assignedState}</span>` : '<span style="color:var(--text-muted);">-</span>'}</td>` : ''}
+                        <td>
+                            ${canActOnActivity ? `<button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.toggleSingleEconomicActivityAssignment('${a.id}')">${isGlobalMode ? (a.isAssignedToOrg ? 'Desasignar' : 'Asignar') : (a.is_active ? 'Desactivar' : 'Activar')}</button>` : ''}
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // Paginación Incremental Actividades
+        const pgEconActContainer = document.getElementById('pagination-economic-activities');
+        if (pgEconActContainer) {
+            const totalCount = filteredEconActs.length;
+            const currentCount = visibleEconActs.length;
+            const canLoadMore = currentCount < totalCount;
+            const canLoadLess = econLimit > econDefaultLimit;
+
+            pgEconActContainer.innerHTML = `
+                <span style="font-size: 12px; color: var(--text-muted);">Mostrando ${currentCount} de ${totalCount} actividades</span>
+                <div style="display: flex; gap: 8px;">
+                    ${canLoadLess ? `<button class="btn-secondary" style="font-size: 12px; padding: 3px 10px;" onclick="window.loadLessEconomicActivities()">Ver menos</button>` : ''}
+                    ${canLoadMore ? `<button class="btn-primary" style="font-size: 12px; padding: 3px 12px;" onclick="window.loadMoreEconomicActivities()">Ver más (+${econDefaultLimit})</button>` : ''}
+                </div>
+            `;
+        }
+
+        // 3. IIBB Rates
+        const rates = appStore.iibbRates || [];
+        this.renderRecordActionToolbar({
+            containerId: 'toolbar-iibb-rates',
+            grid: iibbRatesGrid,
+            visibleItems: rates,
+            onEdit: 'window.actionEditIibbRate()',
+            onClone: 'window.actionCloneIibbRate()',
+            onToggleActive: 'window.actionToggleIibbRates()',
+            onDelete: 'window.actionDeleteIibbRates()',
+            options: {
+                masterToggleHandler: 'window.toggleMasterIibbRates',
+                toggleLabel: 'Activar / Desactivar',
+                deleteLabel: 'Desactivar / Eliminar'
+            }
+        });
+
+        const irTbody = document.getElementById('table-iibb-rates-body');
+        if (irTbody) {
+            if (isGlobalMode) {
+                irTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 16px;">Modo Global MICA. Selecciona una Organización de trabajo para gestionar sus Tasas IIBB.</td></tr>`;
+            } else if (rates.length === 0) {
+                irTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">No hay tasas IIBB configuradas para esta organización.</td></tr>`;
+            } else {
+                irTbody.innerHTML = rates.map(r => `
+                    <tr>
+                        <td style="text-align: center;"><input type="checkbox" class="iibb-rate-checkbox" value="${r.id}" ${iibbRatesGrid.isRowSelected(r.id) ? 'checked' : ''} onchange="window.toggleIibbRateRowSelection('${r.id}')"></td>
+                        <td><strong>${r.activity_name || 'Desconocida'}</strong></td>
+                        <td><strong>${r.jurisdiction}</strong></td>
+                        <td style="font-weight: 700; color: var(--primary);">${r.rate_percent}%</td>
+                        <td>${r.valid_from ? new Date(r.valid_from).toLocaleDateString() : '-'}</td>
+                        <td>${r.valid_to ? new Date(r.valid_to).toLocaleDateString() : 'Indefinido'}</td>
+                        <td>${r.is_active ? '<span style="color:var(--success); font-weight:600;">Vigente</span>' : '<span style="color:var(--text-muted);">Inactivo</span>'}</td>
+                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.promptEditIibbRateModal('${r.id}')">Editar</button></td>
+                    </tr>
+                `).join('');
+            }
+        }
+    }
+
+    static renderImportIssues() {
+        const tbody = document.getElementById('table-import-issues-body');
+        if (!tbody) return;
+
+        const issues = appStore.importIssues || [];
+        if (issues.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--success); padding: 20px;">No se registran errores de importación pendientes.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = issues.map(iss => {
+            return `
+                <tr>
+                    <td><span class="badge badge-emitido">Fila ${iss.source_row_number}</span></td>
+                    <td style="color: var(--danger); font-size: 12px;">${JSON.stringify(iss.errors)}</td>
+                    <td style="font-size: 11px; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${JSON.stringify(iss.raw_row_data)}</td>
+                    <td><span style="color:var(--warning);">Pendiente</span></td>
+                    <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 8px;">Revisar</button></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    static openModal(modalId) {
+        if (['modal-arca-catalog', 'modal-tax-category'].includes(modalId) && !appStore.canManageGlobalCatalog()) return;
+        document.getElementById(modalId)?.classList.remove('hidden');
+    }
+
+    static closeModal(modalId) {
+        document.getElementById(modalId)?.classList.add('hidden');
+    }
+}
+
+// Exponer métodos globales en window para los event handlers del HTML
+window.switchTab = switchTab;
+window.appStore = appStore;
+window.toggleMobileMoreSheet = toggleMobileMoreSheet;
+window.logout = logout;
+window.UIManager = UIManager;
+
+window.handleComprobantesDateModeChange = function(e) {
+    const mode = e.target.value;
+    comprobantesGrid.setDateMode(mode);
+    const mContainer = document.getElementById('comprobantes-month-container');
+    const cContainer = document.getElementById('comprobantes-custom-container');
+    if (mContainer) mContainer.style.display = mode === 'custom' ? 'none' : 'flex';
+    if (cContainer) cContainer.style.display = mode === 'custom' ? 'flex' : 'none';
+    UIManager.renderMainTable();
+};
+
+window.handleComprobantesCustomDateChange = function() {
+    const from = document.getElementById('comprobantes-date-from')?.value;
+    const to = document.getElementById('comprobantes-date-to')?.value;
+    comprobantesGrid.setCustomRange(from, to);
+    UIManager.renderMainTable();
+};
+
+window.handlePercepcionesDateModeChange = function(e) {
+    const mode = e.target.value;
+    percepcionesGrid.setDateMode(mode);
+    const mContainer = document.getElementById('percepciones-month-container');
+    const cContainer = document.getElementById('percepciones-custom-container');
+    if (mContainer) mContainer.style.display = mode === 'custom' ? 'none' : 'flex';
+    if (cContainer) cContainer.style.display = mode === 'custom' ? 'flex' : 'none';
+    UIManager.renderPerceptionsTable();
+};
+
+window.handlePercepcionesCustomDateChange = function() {
+    const from = document.getElementById('percepciones-date-from')?.value;
+    const to = document.getElementById('percepciones-date-to')?.value;
+    percepcionesGrid.setCustomRange(from, to);
+    UIManager.renderPerceptionsTable();
+};
+
+window.handleBancosDateModeChange = function(e) {
+    const mode = e.target.value;
+    bancosGrid.setDateMode(mode);
+    const mContainer = document.getElementById('bancos-month-container');
+    const cContainer = document.getElementById('bancos-custom-container');
+    if (mContainer) mContainer.style.display = mode === 'custom' ? 'none' : 'flex';
+    if (cContainer) cContainer.style.display = mode === 'custom' ? 'flex' : 'none';
+    UIManager.renderBankTable();
+};
+
+window.handleBancosCustomDateChange = function() {
+    const from = document.getElementById('bancos-date-from')?.value;
+    const to = document.getElementById('bancos-date-to')?.value;
+    bancosGrid.setCustomRange(from, to);
+    UIManager.renderBankTable();
+};
+
+// --- CONTEXTO ORGANIZACIONAL Y CATEGORIZACIÓN ---
+
+window.updateUserHeaderDisplay = function() {
+    renderOperationalHeader(appStore, document);
+};
+
+window.handleOrgContextChange = async function(orgId) {
+    try { await appStore.switchOrganizationContext(orgId); }
+    catch (error) { console.error('Context switch:', error); }
+};
+
+window.handleTaxCategoriesSearch = function(query) {
+    taxCategoriesGrid.displayLimitCustom = false;
+    taxCategoriesGrid.searchQuery = query || '';
+    const limit = appStore.isCatalogPlatformContext() ? 10 : 5;
+    taxCategoriesGrid.resetDisplayLimit(limit);
+    UIManager.renderSettings();
+};
+
+window.setTaxCategoriesStatusFilter = function(status) {
+    taxCategoriesGrid.displayLimitCustom = false;
+    taxCategoriesGrid.setFilterStatus(status);
+    taxCategoriesGrid.clearSelection();
+    UIManager.renderSettings();
+};
+
+window.loadMoreTaxCategories = function() {
+    taxCategoriesGrid.displayLimitCustom = true;
+    const step = appStore.isCatalogPlatformContext() ? 10 : 5;
+    taxCategoriesGrid.loadMoreRows(step);
+    UIManager.renderSettings();
+};
+
+window.loadLessTaxCategories = function() {
+    taxCategoriesGrid.displayLimitCustom = false;
+    const limit = appStore.isCatalogPlatformContext() ? 10 : 5;
+    taxCategoriesGrid.resetDisplayLimit(limit);
+    UIManager.renderSettings();
+};
+
+window.handleEconomicActivitiesSearch = function(query) {
+    economicActivitiesGrid.displayLimitCustom = false;
+    economicActivitiesGrid.searchQuery = query || '';
+    const limit = appStore.isCatalogPlatformContext() ? 10 : 5;
+    economicActivitiesGrid.resetDisplayLimit(limit);
+    UIManager.renderSettings();
+};
+
+window.setEconomicActivitiesStatusFilter = function(status) {
+    economicActivitiesGrid.displayLimitCustom = false;
+    economicActivitiesGrid.setFilterStatus(status);
+    economicActivitiesGrid.clearSelection();
+    UIManager.renderSettings();
+};
+
+window.loadMoreEconomicActivities = function() {
+    economicActivitiesGrid.displayLimitCustom = true;
+    const step = appStore.isCatalogPlatformContext() ? 10 : 5;
+    economicActivitiesGrid.loadMoreRows(step);
+    UIManager.renderSettings();
+};
+
+window.loadLessEconomicActivities = function() {
+    economicActivitiesGrid.displayLimitCustom = false;
+    const limit = appStore.isCatalogPlatformContext() ? 10 : 5;
+    economicActivitiesGrid.resetDisplayLimit(limit);
+    UIManager.renderSettings();
+};
+
+window.handleCatalogTargetChange = function(kind) {
+    if (kind === 'categories') taxCategoriesGrid.clearSelection();
+    else economicActivitiesGrid.clearSelection();
+    UIManager.renderSettings();
+};
+
+// A. Categorías Tributarias
+window.toggleMasterTaxCategories = function(checked) {
+    const allCats = appStore.taxCategories || [];
+    const taxSearch = (taxCategoriesGrid.searchQuery || '').toLowerCase();
+    const taxStatus = taxCategoriesGrid.getFilterStatus();
+    const isGlobalMode = appStore.isCatalogPlatformContext();
+
+    const filtered = allCats.filter(c => {
+        const matchesSearch = !taxSearch || (c.name || '').toLowerCase().includes(taxSearch) || (c.description || '').toLowerCase().includes(taxSearch);
+        if (!matchesSearch) return false;
+        if (isGlobalMode) {
+            if (taxStatus === 'assigned') return c.isAssignedToOrg === true;
+            if (taxStatus === 'unassigned') return c.isAssignedToOrg !== true;
+        } else {
+            if (taxStatus === 'active') return c.is_active === true;
+            if (taxStatus === 'inactive') return c.is_active === false;
+        }
+        return true;
+    });
+
+    if (!taxCategoriesGrid.displayLimitCustom) {
+        taxCategoriesGrid.displayLimit = isGlobalMode ? 10 : 5;
+    }
+    const visible = filtered.slice(0, taxCategoriesGrid.getDisplayLimit());
+    taxCategoriesGrid.reconcileSelection(visible);
+    taxCategoriesGrid.toggleSelectAllVisible(visible);
+    UIManager.renderSettings();
+};
+
+window.toggleTaxCategoryRowSelection = function(id) {
+    if (!appStore.taxCategories.some(row => row.id === id)) return;
+    taxCategoriesGrid.toggleRowSelection(id);
+    UIManager.renderSettings();
+};
+
+window.editSingleTaxCategory = function(id) {
+    if (!appStore.canManageGlobalCatalog()) return;
+    const cat = (appStore.taxCategories || []).find(c => c.id === id);
+    if (!cat) return;
+    document.getElementById('tax-category-name').value = cat.name || '';
+    document.getElementById('tax-category-type').value = cat.category_type || 'EXPENSE';
+    document.getElementById('tax-category-desc').value = cat.description || '';
+    document.getElementById('form-tax-category').dataset.editingId = cat.id;
+    UIManager.openModal('modal-tax-category');
+};
+
+window.actionEditTaxCategory = function() {
+    if (!appStore.canManageGlobalCatalog()) return;
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length !== 1) {
+        alert("Debes seleccionar exactamente 1 categoría para editar.");
+        return;
+    }
+    window.editSingleTaxCategory(ids[0]);
+};
+
+window.actionCloneTaxCategory = function() {
+    if (!appStore.canManageGlobalCatalog()) return;
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length !== 1) {
+        alert("Debes seleccionar exactamente 1 categoría para clonar.");
+        return;
+    }
+    const cat = (appStore.taxCategories || []).find(c => c.id === ids[0]);
+    if (!cat) return;
+    document.getElementById('tax-category-name').value = `${cat.name || ''} (Copia)`;
+    document.getElementById('tax-category-type').value = cat.category_type || 'EXPENSE';
+    document.getElementById('tax-category-desc').value = cat.description || '';
+    delete document.getElementById('form-tax-category').dataset.editingId;
+    UIManager.openModal('modal-tax-category');
+};
+
+window.toggleSingleTaxCategoryAssignment = async function(id) {
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('category')) return;
+    UIManager.renderSettings();
+    const row = appStore.taxCategories.find(r => r.id === id);
+    if (!row) return;
+    const globalMode = appStore.isCatalogPlatformContext();
+    const enabled = globalMode ? row.isAssignedToOrg : row.is_active;
+    const action = globalMode ? (enabled ? 'Desasignar' : 'Asignar') : (enabled ? 'Desactivar' : 'Activar');
+    if (!confirm(`¿${action} categoría "${row.name}"?`)) return;
+    try {
+        if (globalMode) {
+            const target = document.getElementById('select-target-org-tax-cat')?.value;
+            if (enabled) await appStore.unassignTaxCategoryFromOrg(id, target);
+            else await appStore.assignTaxCategoryToOrg(id, target);
+        } else {
+            await appStore.setTaxCategoriesActive([id], !enabled);
+        }
+        UIManager.renderSettings();
+    } catch (err) {
+        alert(err.message);
+    }
+};
+window.actionToggleTaxCategories = async function() {
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('category')) return;
+    UIManager.renderSettings(); // Reconcile selection against the current visible rows.
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    const globalMode = appStore.isCatalogPlatformContext();
+    const action = globalMode ? 'Asignar' : 'Activar';
+    if (!confirm(`¿${action} ${ids.length} elemento(s)?`)) return;
+    try {
+        if (globalMode) {
+            const target = document.getElementById('select-target-org-tax-cat')?.value;
+            await appStore.bulkAssignTaxCategories(ids, target);
+        } else {
+            await appStore.setTaxCategoriesActive(ids, true);
+        }
+        taxCategoriesGrid.clearSelection();
+        UIManager.renderSettings();
+    } catch (err) {
+        alert(err.message);
+    }
+};
+window.actionDeleteTaxCategories = async function() {
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('category')) return;
+    UIManager.renderSettings(); // Reconcile selection against the current visible rows.
+    const ids = taxCategoriesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    const globalMode = appStore.isCatalogPlatformContext();
+    const action = globalMode ? 'Desasignar' : 'Desactivar';
+    if (!confirm(`¿${action} ${ids.length} elemento(s)?`)) return;
+    try {
+        if (globalMode) {
+            const target = document.getElementById('select-target-org-tax-cat')?.value;
+            await appStore.bulkUnassignTaxCategories(ids, target);
+        } else {
+            await appStore.setTaxCategoriesActive(ids, false);
+        }
+        taxCategoriesGrid.clearSelection();
+        UIManager.renderSettings();
+    } catch (err) {
+        alert(err.message);
+    }
+};
+// B. Actividades Económicas ARCA
+window.toggleMasterEconomicActivities = function(checked) {
+    const allActs = appStore.displayedEconomicActivities || appStore.economicActivities || [];
+    const econSearch = (economicActivitiesGrid.searchQuery || '').toLowerCase();
+    const econStatus = economicActivitiesGrid.getFilterStatus();
+    const isGlobalMode = appStore.isCatalogPlatformContext();
+
+    const filtered = allActs.filter(a => {
+        const matchesSearch = !econSearch || (a.arca_code || '').toLowerCase().includes(econSearch) || (a.name || '').toLowerCase().includes(econSearch);
+        if (!matchesSearch) return false;
+        if (isGlobalMode) {
+            if (econStatus === 'assigned') return a.isAssignedToOrg === true;
+            if (econStatus === 'unassigned') return a.isAssignedToOrg !== true;
+        } else {
+            if (econStatus === 'active') return a.is_active === true;
+            if (econStatus === 'inactive') return a.is_active === false;
+        }
+        return true;
+    });
+
+    if (!economicActivitiesGrid.displayLimitCustom) {
+        economicActivitiesGrid.displayLimit = isGlobalMode ? 10 : 5;
+    }
+    const visible = filtered.slice(0, economicActivitiesGrid.getDisplayLimit());
+    economicActivitiesGrid.reconcileSelection(visible);
+    economicActivitiesGrid.toggleSelectAllVisible(visible);
+    UIManager.renderSettings();
+};
+
+window.toggleEconomicActivityRowSelection = function(id) {
+    if (!appStore.displayedEconomicActivities.some(row => row.id === id)) return;
+    economicActivitiesGrid.toggleRowSelection(id);
+    UIManager.renderSettings();
+};
+
+window.actionCloneEconomicActivity = function() {
+    alert("No está permitido clonar actividades oficiales del catálogo ARCA.");
+};
+
+window.toggleSingleEconomicActivityAssignment = async function(id) {
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('activity')) return;
+    UIManager.renderSettings();
+    const row = appStore.displayedEconomicActivities.find(r => r.id === id);
+    if (!row) return;
+    const globalMode = appStore.isCatalogPlatformContext();
+    const enabled = globalMode ? row.isAssignedToOrg : row.is_active;
+    const action = globalMode ? (enabled ? 'Desasignar' : 'Asignar') : (enabled ? 'Desactivar' : 'Activar');
+    if (!confirm(`¿${action} actividad "${row.name}"?`)) return;
+    try {
+        if (globalMode) {
+            const target = document.getElementById('select-target-org-econ-act')?.value;
+            if (enabled) await appStore.unassignEconomicActivityFromOrg(id, target);
+            else await appStore.assignEconomicActivityToOrg(id, target);
+        } else {
+            await appStore.setEconomicActivitiesActive([id], !enabled);
+        }
+        UIManager.renderSettings();
+    } catch (err) {
+        alert(err.message);
+    }
+};
+window.actionAssignEconomicActivities = async function() {
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('activity')) return;
+    UIManager.renderSettings(); // Reconcile selection against the current visible rows.
+    const ids = economicActivitiesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    const globalMode = appStore.isCatalogPlatformContext();
+    const action = globalMode ? 'Asignar' : 'Activar';
+    if (!confirm(`¿${action} ${ids.length} elemento(s)?`)) return;
+    try {
+        if (globalMode) {
+            const target = document.getElementById('select-target-org-econ-act')?.value;
+            await appStore.bulkAssignEconomicActivitiesToOrg(ids, target);
+        } else {
+            await appStore.setEconomicActivitiesActive(ids, true);
+        }
+        economicActivitiesGrid.clearSelection();
+        UIManager.renderSettings();
+    } catch (err) {
+        alert(err.message);
+    }
+};
+window.actionUnassignEconomicActivities = async function() {
+    if (appStore.isCatalogPlatformContext() ? !appStore.canAssignCatalog() : !appStore.canActivateCatalog('activity')) return;
+    UIManager.renderSettings(); // Reconcile selection against the current visible rows.
+    const ids = economicActivitiesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    const globalMode = appStore.isCatalogPlatformContext();
+    const action = globalMode ? 'Desasignar' : 'Desactivar';
+    if (!confirm(`¿${action} ${ids.length} elemento(s)?`)) return;
+    try {
+        if (globalMode) {
+            const target = document.getElementById('select-target-org-econ-act')?.value;
+            await appStore.bulkUnassignEconomicActivitiesFromOrg(ids, target);
+        } else {
+            await appStore.setEconomicActivitiesActive(ids, false);
+        }
+        economicActivitiesGrid.clearSelection();
+        UIManager.renderSettings();
+    } catch (err) {
+        alert(err.message);
+    }
+};
+// C. Tasas IIBB
+window.toggleMasterIibbRates = function(checked) {
+    iibbRatesGrid.toggleSelectAllVisible(appStore.iibbRates || []);
+    UIManager.renderSettings();
+};
+
+window.toggleIibbRateRowSelection = function(id) {
+    iibbRatesGrid.toggleRowSelection(id);
+    UIManager.renderSettings();
+};
+
+window.populateIibbActivitySelect = function(selectedActivityId = null) {
+    const select = document.getElementById('iibb-rate-activity');
+    if (!select) return;
+
+    const assignedActivities = appStore.economicActivities || [];
+    if (assignedActivities.length === 0) {
+        select.innerHTML = '<option value="" disabled selected>-- No hay actividades asignadas a la organización --</option>';
+        return false;
+    }
+
+    select.innerHTML = [
+        '<option value="" disabled>-- Seleccionar Actividad Asignada --</option>',
+        ...assignedActivities.map(a => `
+            <option value="${a.id}" ${selectedActivityId === a.id ? 'selected' : ''}>
+                ${a.arca_code ? `[${a.arca_code}] ` : ''}${a.name}
+            </option>
+        `)
+    ].join('');
+
+    if (selectedActivityId && assignedActivities.some(a => a.id === selectedActivityId)) {
+        select.value = selectedActivityId;
+    } else {
+        select.value = assignedActivities[0].id;
+    }
+    return true;
+};
+
+window.promptCreateIibbRateModal = function() {
+    const assignedActivities = appStore.economicActivities || [];
+    if (assignedActivities.length === 0) {
+        alert("No hay actividades económicas asignadas a la organización. Asigna al menos una actividad antes de crear una tasa IIBB.");
+        return;
+    }
+
+    const form = document.getElementById('form-iibb-rate');
+    if (form) {
+        form.reset();
+        delete form.dataset.editingId;
+    }
+
+    window.populateIibbActivitySelect();
+    UIManager.openModal('modal-iibb-rate');
+};
+
+window.promptEditIibbRateModal = function(id) {
+    const rate = (appStore.iibbRates || []).find(r => r.id === id);
+    if (!rate) return;
+
+    const form = document.getElementById('form-iibb-rate');
+    if (form) {
+        form.dataset.editingId = rate.id;
+    }
+
+    window.populateIibbActivitySelect(rate.activity_id);
+    document.getElementById('iibb-rate-jurisdiction').value = rate.jurisdiction || '';
+    document.getElementById('iibb-rate-percent').value = rate.rate_percent !== undefined ? rate.rate_percent : rate.rate;
+    document.getElementById('iibb-rate-from').value = rate.valid_from ? rate.valid_from.substring(0, 10) : '';
+
+    UIManager.openModal('modal-iibb-rate');
+};
+
+window.actionEditIibbRate = function() {
+    const ids = iibbRatesGrid.getSelectedIds();
+    if (ids.length !== 1) {
+        alert("Debes seleccionar exactamente 1 tasa IIBB para editar.");
+        return;
+    }
+    window.promptEditIibbRateModal(ids[0]);
+};
+
+window.actionCloneIibbRate = function() {
+    const ids = iibbRatesGrid.getSelectedIds();
+    if (ids.length !== 1) {
+        alert("Debes seleccionar exactamente 1 tasa IIBB para clonar.");
+        return;
+    }
+    const rate = (appStore.iibbRates || []).find(r => r.id === ids[0]);
+    if (!rate) return;
+
+    const form = document.getElementById('form-iibb-rate');
+    if (form) {
+        delete form.dataset.editingId; // Genera un nuevo registro sin reutilizar ID
+    }
+
+    window.populateIibbActivitySelect(rate.activity_id);
+    document.getElementById('iibb-rate-jurisdiction').value = rate.jurisdiction ? `${rate.jurisdiction} (Copia)` : '';
+    document.getElementById('iibb-rate-percent').value = rate.rate_percent !== undefined ? rate.rate_percent : rate.rate;
+    document.getElementById('iibb-rate-from').value = rate.valid_from ? rate.valid_from.substring(0, 10) : '';
+
+    UIManager.openModal('modal-iibb-rate');
+};
+
+window.actionToggleIibbRates = async function() {
+    const ids = iibbRatesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    try {
+        await appStore.bulkToggleIibbRates(ids);
+        iibbRatesGrid.clearSelection();
+        alert(`${ids.length} tasa(s) IIBB actualizadas.`);
+    } catch (err) {
+        alert("Error al actualizar tasas IIBB: " + err.message);
+    }
+};
+
+window.actionDeleteIibbRates = async function() {
+    const ids = iibbRatesGrid.getSelectedIds();
+    if (ids.length === 0) return;
+    if (!confirm(`¿Deseas desactivar ${ids.length} tasa(s) IIBB?`)) return;
+    try {
+        await appStore.bulkDeleteIibbRates(ids);
+        iibbRatesGrid.clearSelection();
+        alert(`${ids.length} tasa(s) IIBB desactivadas.`);
+    } catch (err) {
+        alert("Error al desactivar tasas IIBB: " + err.message);
+    }
+};
+
+window.submitIibbRateForm = async () => {
+    const select = document.getElementById('iibb-rate-activity');
+    const activityId = select ? select.value : null;
+    const jurisdiction = document.getElementById('iibb-rate-jurisdiction').value;
+    const ratePercent = parseFloat(document.getElementById('iibb-rate-percent').value);
+    const validFrom = document.getElementById('iibb-rate-from').value;
+    const form = document.getElementById('form-iibb-rate');
+    const editingId = form ? form.dataset.editingId : null;
+
+    if (!activityId || String(activityId).trim() === '') {
+        alert("Debe seleccionar una Actividad Económica asignada.");
+        return;
+    }
+
+    if (!jurisdiction || isNaN(ratePercent) || !validFrom) {
+        alert("Completar todos los campos requeridos.");
+        return;
+    }
+
+    try {
+        if (editingId) {
+            await appStore.updateIibbRate(editingId, {
+                rate_percent: ratePercent,
+                valid_from: validFrom,
+                valid_to: null,
+                is_active: true
+            });
+            alert("Tasa IIBB actualizada exitosamente.");
+        } else {
+            await appStore.createIibbRate({
+                activity_id: activityId,
+                jurisdiction: jurisdiction,
+                rate_percent: ratePercent,
+                valid_from: validFrom,
+                valid_to: null,
+                is_active: true
+            });
+            alert("Tasa IIBB creada exitosamente.");
+        }
+        UIManager.closeModal('modal-iibb-rate');
+        if (form) {
+            form.reset();
+            delete form.dataset.editingId;
+        }
+    } catch (e) {
+        alert("Error al guardar Tasa IIBB: " + e.message);
+    }
+};
+
+let parsedArcaCatalogState = null;
+
+window.handleArcaFileSelected = function(event) {
+    if (!appStore.canManageGlobalCatalog()) return;
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const rawText = e.target.result;
+            const parsed = parseF883ActivitiesTxt(rawText);
+            parsedArcaCatalogState = parsed;
+
+            document.getElementById('stat-total-rows').innerText = parsed.totalRows;
+            document.getElementById('stat-valid-rows').innerText = parsed.validRows;
+            document.getElementById('stat-duplicate-rows').innerText = parsed.duplicateCodes;
+            document.getElementById('stat-invalid-rows').innerText = parsed.invalidRows;
+
+            const tbody = document.getElementById('table-arca-preview-body');
+            if (tbody) {
+                tbody.innerHTML = parsed.previewRows.map(row => `
+                    <tr>
+                        <td><strong>${row.arca_code}</strong></td>
+                        <td>${row.name}</td>
+                        <td>${row.description}</td>
+                    </tr>
+                `).join('');
+            }
+
+            document.getElementById('arca-preview-container').style.display = 'block';
+            const feedback = document.getElementById('arca-catalog-feedback');
+            if (feedback) feedback.style.display = 'none';
+        } catch (err) {
+            alert("Error al leer archivo F883: " + err.message);
+        }
+    };
+    reader.readAsText(file);
+};
+
+window.handleArcaTextInputs = function() {
+    if (!appStore.canManageGlobalCatalog()) return;
+    const textInput = document.getElementById('arca-catalog-json');
+    const text = textInput ? textInput.value : '';
+    if (!text.trim()) {
+        const prev = document.getElementById('arca-preview-container');
+        if (prev) prev.style.display = 'none';
+        return;
+    }
+
+    try {
+        const parsed = parseF883ActivitiesTxt(text);
+        parsedArcaCatalogState = parsed;
+
+        document.getElementById('stat-total-rows').innerText = parsed.totalRows;
+        document.getElementById('stat-valid-rows').innerText = parsed.validRows;
+        document.getElementById('stat-duplicate-rows').innerText = parsed.duplicateCodes;
+        document.getElementById('stat-invalid-rows').innerText = parsed.invalidRows;
+
+        const tbody = document.getElementById('table-arca-preview-body');
+        if (tbody) {
+            tbody.innerHTML = parsed.previewRows.map(row => `
+                <tr>
+                    <td><strong>${row.arca_code}</strong></td>
+                    <td>${row.name}</td>
+                    <td>${row.description}</td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('arca-preview-container').style.display = 'block';
+        const feedback = document.getElementById('arca-catalog-feedback');
+        if (feedback) feedback.style.display = 'none';
+    } catch (err) {
+        console.warn(err);
+    }
+};
+
+window.submitArcaCatalogForm = async () => {
+    if (!appStore.canManageGlobalCatalog()) return;
+    const btn = document.getElementById('btn-confirm-arca-import');
+    const feedback = document.getElementById('arca-catalog-feedback');
+
+    if (!parsedArcaCatalogState || parsedArcaCatalogState.validActivities.length === 0) {
+        // Si pegaron JSON plano fallback
+        const jsonStr = document.getElementById('arca-catalog-json').value;
+        try {
+            const parsedJson = JSON.parse(jsonStr);
+            if (Array.isArray(parsedJson) && parsedJson.length > 0) {
+                parsedArcaCatalogState = { validActivities: parsedJson };
+            }
+        } catch (e) {
+            // No era JSON
+        }
+    }
+
+    if (!parsedArcaCatalogState || !parsedArcaCatalogState.validActivities || parsedArcaCatalogState.validActivities.length === 0) {
+        if (feedback) {
+            feedback.innerText = "No se encontraron actividades válidas para importar.";
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+        return;
+    }
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = "Importando catálogo...";
+        }
+        if (feedback) feedback.style.display = "none";
+
+        const count = await appStore.upsertArcaCatalog(parsedArcaCatalogState.validActivities);
+
+        UIManager.render();
+
+        alert(`Se importaron ${count} actividades económicas al Catálogo Global ARCA exitosamente en base de datos. (Nota: Las actividades importadas forman parte del Catálogo Global ARCA. La lista de la organización únicamente muestra las actividades explícitamente asignadas).`);
+        UIManager.closeModal('modal-arca-catalog');
+        parsedArcaCatalogState = null;
+        const fileIn = document.getElementById('arca-catalog-file');
+        const textIn = document.getElementById('arca-catalog-json');
+        if (fileIn) fileIn.value = '';
+        if (textIn) textIn.value = '';
+        const prev = document.getElementById('arca-preview-container');
+        if (prev) prev.style.display = 'none';
+    } catch (err) {
+        console.error("Error al importar catálogo ARCA:", err);
+        if (feedback) {
+            feedback.innerText = "Error: " + (err.message || "Error al guardar en el servidor");
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "✓ Confirmar e Importar Catálogo";
+        }
+    }
+};
+
+window.submitTaxCategoryForm = async () => {
+    if (!appStore.canManageGlobalCatalog()) return;
+    const nameInput = document.getElementById('tax-category-name');
+    const typeInput = document.getElementById('tax-category-type');
+    const descInput = document.getElementById('tax-category-desc');
+    const btn = document.getElementById('btn-save-tax-category');
+    const feedback = document.getElementById('tax-category-feedback');
+
+    const name = nameInput ? nameInput.value.trim() : '';
+    const category_type = typeInput ? typeInput.value : 'EXPENSE';
+    const description = descInput ? descInput.value.trim() : '';
+
+    if (!name) {
+        if (feedback) {
+            feedback.innerText = "El nombre de la categoría es obligatorio.";
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+        return;
+    }
+
+    // Validación client-side de duplicados
+    const existing = appStore.taxCategories || [];
+    if (existing.some(c => c.id !== document.getElementById('form-tax-category')?.dataset.editingId && (c.name || '').toLowerCase() === name.toLowerCase())) {
+        if (feedback) {
+            feedback.innerText = "Ya existe una categoría tributaria con el mismo nombre.";
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+        return;
+    }
+
+    const activeOrgId = appStore.activeOrganizationId;
+    if (!activeOrgId && !appStore.isCatalogPlatformContext()) {
+        if (feedback) {
+            feedback.innerText = "No hay una organización activa seleccionada.";
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+        return;
+    }
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = "Guardando...";
+        }
+        if (feedback) feedback.style.display = "none";
+
+        const editingId = document.getElementById('form-tax-category')?.dataset.editingId;
+        if (editingId) await appStore.updateTaxCategory(editingId, { name, description });
+        else await appStore.createTaxCategory({ name, description, category_type });
+        UIManager.render();
+
+        alert(`Categoría tributaria "${name}" guardada en el catálogo global.`);
+        UIManager.closeModal('modal-tax-category');
+
+        if (nameInput) nameInput.value = '';
+        if (descInput) descInput.value = '';
+    } catch (err) {
+        console.error("Error al crear categoría tributaria:", err);
+        if (feedback) {
+            feedback.innerText = "Error: " + (err.message || "Error al guardar en servidor");
+            feedback.className = "auth-status-banner auth-error";
+            feedback.style.display = "block";
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "Guardar Categoría";
+        }
+    }
+};
+
+appStore.tenantResetListeners.push(() => {
+    for (const grid of [comprobantesGrid, percepcionesGrid, bancosGrid, taxCategoriesGrid, economicActivitiesGrid, iibbRatesGrid]) grid.resetTenantState();
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+        if (el.id) el.classList.add('hidden');
+        else el.remove();
+    });
+    document.querySelectorAll('.modal').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.tab-content input, .tab-content select, .tab-content textarea').forEach(el => {
+        if (el.classList.contains('operational-org-select')) return;
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = false;
+        else el.value = '';
+    });
+    document.querySelectorAll('form[data-editing-id]').forEach(el => delete el.dataset.editingId);
+    for (const id of ['form-purchase-reginfo','form-internal-movement']) document.getElementById(id)?.reset?.();
+    const today = new Date().toISOString().slice(0,10);
+    const manualDate = document.getElementById('internal-date'), manualPeriod = document.getElementById('internal-imputacion');
+    if (manualDate) manualDate.value = today;
+    if (manualPeriod) manualPeriod.value = today.slice(0,7);
+    document.getElementById('bulk-actions-bar')?.classList.add('hidden');
+    parsedArcaCatalogState = null;
+});
+
+// Suscribirse a los eventos del store para reactividad
+let manualContextRendered = -1;
+appStore.subscribe(() => {
+    renderModuleAccess(appStore, document, switchTab);
+    renderOperationalHeader(appStore, document);
+    renderOperationalImportControls(appStore, document);
+    document.querySelectorAll('.modal, .modal-overlay').forEach(el => {
+        el.inert = !['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState);
+    });
+    if (!['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState)) return;
+    UIManager.render();
+    if (document.querySelector('.tab-content:not(.hidden)')?.id === 'tab-movimientos-manuales' && manualContextRendered !== appStore.contextGeneration) {
+        manualContextRendered = appStore.contextGeneration; renderManualRecords();
+    }
+    requestOperationalData(appStore, document, document.querySelector('.tab-content:not(.hidden)')?.id);
+    updateSalaryFormFields();
+    if (appStore.canVisitModule('tab-client-dashboard')) renderClientDashboard();
+    if (appStore.canVisitModule('tab-movimientos-manuales')) renderOcrHistory();
+    if (appStore.canVisitModule('tab-movimientos-manuales')) renderResolucionManual();
+    if (appStore.canVisitModule('tab-categorizacion')) UIManager.renderCategorization();
+    if (appStore.hasCapability('IMPORT_VIEW', { scope: 'ORGANIZATION', orgId: appStore.activeOrganizationId })) UIManager.renderImportIssues();
+});
+
+// Inicialización de componentes al cargar el documento
+// Refresh a returned session before allowing stale module authority to persist.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && appStore.sessionUserId && !appStore.pendingOperations &&
+        ['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState)) {
+        appStore.reloadOperationalContext().catch(error => console.error('Access refresh failed:', error));
+    }
+});
+
+// Direct calls to grid/catalog UI handlers obey the same module boundary as navigation.
+for (const [pattern, module] of [
+    [/Comprobantes/, 'tab-conciliador'], [/Percepciones/, 'tab-percepciones'],
+    [/Bancos/, 'tab-bancos'], [/TaxCategor|EconomicActivit|Iibb|ArcaCatalog/, 'tab-categorizacion']
+]) {
+    for (const name of Object.keys(window)) {
+        if (!pattern.test(name) || typeof window[name] !== 'function') continue;
+        const handler = window[name];
+        window[name] = function (...args) {
+            if (!appStore.canVisitModule(module)) return false;
+            return handler.apply(this, args);
+        };
+    }
+}
+document.addEventListener('DOMContentLoaded', () => {
+    mountOperationalOrgSelectors(appStore, document);
+    renderModuleAccess(appStore, document, switchTab);
+    renderOperationalImportControls(appStore, document);
+    UIManager.init();
+    setupOCR();
+
+    // Seteo de fecha hoy en formularios
+    const dateInput = document.getElementById('internal-date');
+    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+
+    const imputInput = document.getElementById('internal-imputacion');
+    if (imputInput) {
+        const date = new Date();
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        imputInput.value = `${date.getFullYear()}-${mm}`;
+    }
+
+    // Listener del Formulario de Movimiento Interno
+    const formInternal = document.getElementById('form-internal-movement');
+    if (formInternal) {
+        formInternal.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(formInternal);
+            const data = {
+                tipo: formData.get('tipo'),
+                fecha: formData.get('fecha'),
+                imputacion: formData.get('imputacion'),
+                importe: formData.get('importe'),
+                descripcion: formData.get('descripcion')
+            };
+
+            const submit = formInternal.querySelector('[type=submit]'); if (submit.disabled) return; submit.disabled=true;
+            const res = await ManualMovements.saveInternalMovement(data); submit.disabled=false;
+            if (res.success) {
+                alert("Movimiento interno guardado con éxito.");
+                formInternal.reset();
+                if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+            } else {
+                alert(res.error);
+            }
+        });
+    }
+
+    // Listener del Formulario de Compra Manual REGINFO
+    const formReginfo = document.getElementById('form-purchase-reginfo');
+    if (formReginfo) {
+        formReginfo.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(formReginfo);
+            const data = {};
+            formData.forEach((val, key) => { data[key] = val; });
+
+            const submit = formReginfo.querySelector('[type=submit]'); if (submit.disabled) return; submit.disabled=true;
+            const res = await ManualMovements.saveReginfoPurchase(data); submit.disabled=false;
+            if (res.success) {
+                alert("Comprobante guardado en el registro manual de esta organización.");
+                formReginfo.reset();
+            } else {
+                alert(res.error);
+            }
+        });
+    }
+
+    // Inputs manuales de liquidación de sueldos (cálculos en vivo)
+    const f931Input = document.getElementById('input-f931');
+    const sindicContribInput = document.getElementById('input-sindicato-contrib');
+    if (f931Input) f931Input.addEventListener('input', updateSalaryFormFields);
+    if (sindicContribInput) sindicContribInput.addEventListener('input', updateSalaryFormFields);
+
+    const btnSavePayroll = document.getElementById('btn-save-payroll');
+    if (btnSavePayroll) {
+        btnSavePayroll.onclick = () => {
+            if (!appStore.salaries) {
+                alert("Primero debes cargar el Excel de sueldos de Acompy.");
+                return;
+            }
+            alert("Sueldos consolidados y liquidados guardados en base de datos.");
+        };
+    }
+
+    // Agregar reglas bancarias en vivo
+    const btnAddRule = document.getElementById('btn-add-rule');
+    if (btnAddRule) {
+        btnAddRule.onclick = () => {
+            const type = document.getElementById('rule-type').value;
+            const pattern = document.getElementById('rule-pattern').value;
+            const category = document.getElementById('rule-category').value;
+
+            if (!pattern || !category) {
+                alert("Por favor ingresa palabra clave y categoría.");
+                return;
+            }
+
+            appStore.addBankRule(type, pattern, category);
+            alert(`Regla agregada para ${type === 'debit' ? 'débitos' : 'créditos'}: "${pattern}" -> "${category}"`);
+            
+            // Limpiar inputs
+            document.getElementById('rule-pattern').value = "";
+            document.getElementById('rule-category').value = "";
+
+            // Re-procesar banco si hay transacciones cargadas
+            if (appStore.bankTransactions.length > 0) {
+                appStore.bankTransactions.forEach(tx => {
+                    if (!tx.confirmada) {
+                        tx.cuentaSugerida = BankParser.classifyTransaction(tx.tipo, tx.descripcion);
+                    }
+                });
+                appStore.notify();
+            }
+        };
+    }
+});
+
+async function showExistingImport(check, type, isCurrent) {
+    const message = await refreshDuplicateImport({ check, type, service: persistenceService, store: appStore, isCurrent });
+    if (!message || !isCurrent()) return;
+    const grid = {recibido:comprobantesGrid,emitido:comprobantesGrid,percepcion:percepcionesGrid,banco:bancosGrid}[type];
+    grid?.resetTenantState();
+    UIManager.render(); updateSalaryFormFields(); alert(message);
+}
