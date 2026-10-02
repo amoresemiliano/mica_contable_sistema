@@ -13,12 +13,14 @@ test('039b changes none of the previous migrations', () => {
 });
 test('SQL seed and JS proposal contain identical exact MICA capability lists', () => {
     for (const [code, caps] of Object.entries(MICA_TENANT_PRESETS)) {
-        expect(up).toContain(`('${code}',ARRAY[${caps.filter(c=>c!=='FISCAL_DOCUMENT_IMPORT').map(c=>`'${c}'`).join(',')}]::TEXT[],`);
+        const historicalCaps=historical.filter(c=>c.scope==='ORGANIZATION'&&c.defaultPresets.includes(code)).map(c=>c.code);
+        expect(up).toContain(`('${code}',ARRAY[${historicalCaps.map(c=>`'${c}'`).join(',')}]::TEXT[],`);
         expect(new Set(caps).size).toBe(caps.length);
         for (const c of caps) expect(isMicaCapability(c,'ORGANIZATION')).toBe(true);
     }
     expect(MICA_TENANT_PRESETS.MICA_ORG_ADMIN).not.toContain('RECORD_RESTORE');
-    expect(up).toContain(`ARRAY[${MICA_ACCOUNTING_PLATFORM.map(c=>`'${c}'`).join(',')}]::TEXT[]`);
+    const historicalAccounting = historical.filter(c=>c.scope==='PLATFORM' && c.defaultPresets.includes('ACCOUNTING_SUPERADMIN')).map(c=>c.code);
+    expect(up).toContain(`ARRAY[${historicalAccounting.map(c=>`'${c}'`).join(',')}]::TEXT[]`);
     expect(MICA_ACCOUNTING_PLATFORM).not.toEqual(expect.arrayContaining(['ACCESS_ANY_ORG']));
     expect(MICA_ACCOUNTING_PLATFORM).not.toContain('PLATFORM_MANAGE');
     expect(up).toContain('unnest(ARRAY[root_template,accounting])');

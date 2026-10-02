@@ -16,7 +16,7 @@ export function createAdministrationView(root, store, service = administrationSe
     const context = () => [store.sessionUserId, store.contextGeneration, store.contextState, store.activeOrganizationId].join('|');
     const ready = () => ['TENANT_READY', 'PLATFORM_READY'].includes(store.contextState);
     const mayInvite = rights => rights.global_users || (store.activeOrganizationId &&
-        ['ORG_MEMBER_INVITE','ORG_MEMBER_MANAGE','ORG_MEMBER_PERMISSION_MANAGE'].every(code=>
+        ['ORG_MEMBER_INVITE','ORG_MEMBER_MANAGE','ORG_MEMBER_PRESET_ASSIGN'].every(code=>
             store.hasCapability?.(code,{scope:'ORGANIZATION',orgId:store.activeOrganizationId})));
     function clear(message) { drawer?.close(); drawer = null; root.replaceChildren(el('p', message, { role: 'status' })); }
     function field(form, name, title, value = '', options = null) {
@@ -119,10 +119,69 @@ export function createAdministrationView(root, store, service = administrationSe
     function openEditor(title = 'Editar configuración') {
         drawer?.close(); drawer = openAdminDrawer(root, title); return drawer.body;
     }
+    function renderOperational(data) {
+        const r=data.rights, org=store.activeOrganizationId;
+        const names=['Empresas','Usuarios de empresas','Categorías y actividades','Impuestos'];
+        if (!names.includes(activeSection)) activeSection='Empresas';
+        navigation(names,data);
+        const s=section(activeSection);
+        const selector=field(s,'operational-company','Empresa',org||'',[
+            ['','Seleccioná una empresa'],...options(data.organizations.filter(o=>o.is_active))]);
+        selector.value=org||'';
+        selector.onchange=async()=>{if(selector.value) {await store.switchOrganizationContext(selector.value);await load();}};
+        if(activeSection==='Empresas') {
+            const edit=(row={})=>{
+                const editor=openEditor(row.id?'Editar empresa':'Nueva empresa');
+                const f=form(editor,row.id?'Actualizar datos':'Crear empresa',fd=>service.apply('organization',{
+                    ...(row.id?{id:row.id}:{}),name:fd.get('name'),legal_name:fd.get('legal_name'),
+                    trade_name:fd.get('trade_name'),tax_id:fd.get('tax_id')}));
+                field(f,'name','Nombre',row.name).required=true;
+                field(f,'legal_name','Razón social',row.legal_name);
+                field(f,'trade_name','Nombre comercial',row.trade_name);
+                field(f,'tax_id','CUIT',row.tax_id);
+            };
+            table(s,data.organizations,[['Empresa',o=>o.name],['CUIT',o=>o.tax_id||'—'],['Estado',o=>o.is_active?'Activa':'Inactiva']],r.update_organization?edit:null);
+            if(r.create_organization) {const b=el('button','+ Nueva empresa',{type:'button'});b.onclick=()=>edit();s.actionHeader.append(b);}
+            s.append(el('p','Seleccioná una empresa para configurar sus datos operativos, categorías, actividades e impuestos.'));
+            return;
+        }
+        if(!org) {s.append(el('p','Seleccioná una empresa para continuar.'));return;}
+        if(activeSection!=='Usuarios de empresas') {
+            const b=el('button',activeSection==='Impuestos'?'Gestionar impuestos y tasas':'Gestionar categorías y actividades',{type:'button'});
+            b.onclick=()=>globalThis.window?.switchTab?.('tab-categorizacion');s.append(b);return;
+        }
+        const presets=data.presets.filter(p=>p.scope==='ORGANIZATION'&&p.is_active&&(!p.organization_id||p.organization_id===org));
+        const members=data.memberships.filter(m=>m.organization_id===org);
+        table(s,data.users.filter(u=>!u.protected),[['Usuario',u=>u.email],['Estado en empresa',u=>members.find(m=>m.user_profile_id===u.id)?.is_active?'Activo':'Inactivo']],r.memberships?user=>{
+            const member=members.find(m=>m.user_profile_id===user.id);
+            const editor=openEditor(user.email);
+            const f=form(editor,'Perfil y estado en empresa',fd=>service.apply('membership',{
+                organization_id:org,user_profile_id:user.id,role_template_id:fd.get('preset'),is_active:fd.get('active')==='true'}));
+            field(f,'preset','Perfil existente',member?.role_template_id||'',options(presets));
+            choice(f,'active','Estado en empresa',member?.is_active);
+            if(user.pending) form(editor,'Activar cuenta invitada en esta empresa',()=>service.apply('tenant_activate',{organization_id:org,user_profile_id:user.id}));
+        }:null);
+        if(r.memberships && service.invitation && mayInvite(r)) {
+            const b=el('button','+ Invitar usuario de empresa',{type:'button'});
+            b.onclick=()=>{const editor=openEditor('Invitar usuario de empresa');
+                const f=form(editor,'Invitar',fd=>service.invitation('create',org,{email:fd.get('email'),role_template_id:fd.get('preset')}));
+                field(f,'email','Email').required=true;field(f,'preset','Perfil existente','',options(presets));
+                f.append(el('p','Compartí el acceso habitual de MICA. Tras registrarse y confirmar su email, confirmá la asignación y activá la cuenta.'));};
+            s.actionHeader.append(b);
+            list(s,data.invitations||[],i=>i.email+' · '+(i.assigned_at?'Asignada':i.user_profile_id?'Confirmar asignación':'Esperando registro'),i=>{
+                const editor=openEditor(i.email);
+                if(i.user_profile_id&&!i.assigned_at) form(editor,'Confirmar asignación',()=>service.invitation('assign',org,{id:i.id,user_profile_id:i.user_profile_id}));
+                else editor.append(el('p','La cuenta debe registrarse y confirmar su email antes de asignarla. Las cuentas asignadas se activan desde su detalle.'));
+            });
+        }
+    }
     function render(data) {
+        // Deprecated presets remain in server history, never in assignment/edit controls.
+        data={...data,presets:data.presets.filter(p=>p.code!=='ACCOUNTING_SUPERADMIN')};
         drawer?.close(); drawer = null; root.replaceChildren();
         const { rights: r, organizations, users, presets, capabilities } = data;
         if (!Object.values(r).some(Boolean)) { clear('No tenés permisos de administración en este contexto.'); return; }
+        if(r.operational_admin) {renderOperational(data);return;}
         const availableSections = [[r.organizations,'Organizaciones'],[r.users,'Usuarios'],[r.presets,'Roles y permisos'],[r.assignments,'Asignaciones']].filter(([allowed])=>allowed).map(([,title])=>title);
         if (!availableSections.includes(activeSection)) activeSection = availableSections[0];
         navigation(availableSections, data);
@@ -365,12 +424,20 @@ export function createAdministrationView(root, store, service = administrationSe
             const results = el('div'); effective.append(results);
             const drawEffective = () => {
                 results.replaceChildren();
+                for (const scope of ['PLATFORM','ORGANIZATION']) {
+                results.append(el('h4', scope === 'PLATFORM' ? 'Permisos de plataforma' : 'Permisos de organización'));
+                if (scope === 'ORGANIZATION' && !org) {
+                    results.append(el('p', 'Seleccioná una organización para consultar sus permisos efectivos.'));
+                    continue;
+                }
                 list(results, capabilities.filter(c => editableCapabilities([c],c.scope,'PLATFORM_BRIDGE').length &&
+                    c.scope === scope &&
                     (c.code + ' ' + capabilityPresentation(c).label).toLowerCase().includes(filter.value.toLowerCase())), c => {
                     const state = assignmentPermissionPreview(data, selectedUser, org, c);
                     return capabilityPresentation(c).label + ' · Efectivo: ' +
                         (state.unknown ? 'No calculado' : state.effective ? 'Permitido' : 'Denegado') + ' · ' + PERMISSION_STATES[state.effect];
                 });
+                }
             };
             filter.oninput = drawEffective; drawEffective();
             }

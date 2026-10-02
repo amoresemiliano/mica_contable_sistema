@@ -122,7 +122,16 @@ export const MICA_PERMISSION_CATALOG_039B = Object.freeze([
     ...proposed.map((r,i)=>entry(r,'ORGANIZATION','PROPOSED',200+i))
 ]);
 // Frozen 039b projection keeps applied migration artifacts reproducible.
-export const MICA_PERMISSION_CATALOG = Object.freeze(MICA_PERMISSION_CATALOG_039B.map(c => {
+export const MICA_PRESET_ASSIGN_CAPABILITY = Object.freeze({code:'ORG_MEMBER_PRESET_ASSIGN',
+    label:'Asignar perfiles de empresa',description:'Asignar un preset tenant existente, sin editar sus permisos.',
+    group:'users',scope:'ORGANIZATION',status:'PREPARED_039H',runtimeStatus:'ACTIVE',ownerReserved:false,
+    delegationClass:'ORGANIZATION_DELEGABLE',assignable:true,visibleInEditor:true,order:107,
+    delegationTargets:Object.freeze(['STANDARD','PLATFORM_BRIDGE']),defaultPresets:Object.freeze([root,mica,admin])});
+export const MICA_PERMISSION_CATALOG = Object.freeze([...MICA_PERMISSION_CATALOG_039B.map(c => {
+    if (c.code === 'ORGANIZATION_CREATE') return Object.freeze({ ...c,
+        description: 'Crear organizaciones desde la administración funcional MICA.',
+        ownerReserved: false, delegationClass: 'PLATFORM_DELEGABLE', assignable: true, visibleInEditor: true,
+        defaultPresets: Object.freeze([root,mica]) });
     if (c.code === 'FISCAL_DOCUMENT_IMPORT') return Object.freeze({ ...c,
         description: 'Importar comprobantes ARCA emitidos y recibidos con el pipeline fiscal.',
         status: 'PREPARED_039C', runtimeStatus: 'ACTIVE', assignable: true, visibleInEditor: true,
@@ -130,7 +139,10 @@ export const MICA_PERMISSION_CATALOG = Object.freeze(MICA_PERMISSION_CATALOG_039
     if (c.code.startsWith('MANUAL_MOVEMENT_')) return Object.freeze({ ...c,
         description: 'Carga manual persistente en la organización activa.', runtimeStatus: 'ACTIVE' });
     return c;
-}));
+}),MICA_PRESET_ASSIGN_CAPABILITY]);
+export const MICA_OPERATIONAL_PLATFORM = Object.freeze(['ORGANIZATION_CREATE','ORGANIZATION_UPDATE',
+    'GLOBAL_CATALOG_VIEW','GLOBAL_CATALOG_MANAGE','CATALOG_ASSIGN_ANY_ORG','RATE_MANAGE_ANY_ORG',
+    'DATA_RESTORE_ANY_ORG','REPORT_COMPARE_SCOPED_ORGS','REPORT_CONSOLIDATED_SCOPED_ORGS']);
 export const permissionByCode = code => MICA_PERMISSION_CATALOG.find(c=>c.code===code);
 // Several business functions share a legacy approved capability. These are explanations,
 // not extra grants or independently assignable capabilities.
@@ -144,6 +156,8 @@ export const MICA_BUSINESS_FUNCTIONS = Object.freeze([
     {label:'Ver comprobantes de ventas',group:'sales',capability:'RECORD_VIEW'}
 ]);
 export function presetCapabilities(preset, scope) {
+    if (preset === 'ADMINISTRACION_OPERATIVA_MICA') return scope === 'PLATFORM' ? [...MICA_OPERATIONAL_PLATFORM] :
+        MICA_PERMISSION_CATALOG.filter(c=>c.scope==='ORGANIZATION' && c.status!=='PROPOSED' && c.code!=='ORG_MEMBER_PERMISSION_MANAGE').map(c=>c.code);
     return MICA_PERMISSION_CATALOG.filter(c=>c.scope===scope && c.defaultPresets.includes(preset)).map(c=>c.code);
 }
 export const MICA_MODULE_CONTRACT = Object.freeze({

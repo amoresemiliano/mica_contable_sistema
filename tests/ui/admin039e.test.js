@@ -25,6 +25,61 @@ const data=()=>({rights:{organizations:true,users:true,assignments:true,membersh
     organizations:[{id:'north',name:'Norte',tax_id:'123',is_active:true},{id:'south',name:'Sur',tax_id:'456',is_active:true}],
     users:[{id:'ana',email:'ana@example.invalid',is_active:true},{id:'bea',email:'bea@example.invalid',is_active:false,pending:true}],
     presets:[],capabilities:[],platform_roles:[],memberships:[{user_profile_id:'ana',organization_id:'north',is_active:true}],scopes:[],overrides:[]});
+test('039g platform context explains organization permissions instead of showing false denials',async()=>{
+    const root=node('root'), snapshot=data();
+    snapshot.rights={assignments:true};
+    snapshot.capabilities=[{code:'ORGANIZATION_CREATE',scope:'PLATFORM'},{code:'RECORD_VIEW',scope:'ORGANIZATION'}];
+    const store={sessionUserId:'actor',contextGeneration:1,contextState:'PLATFORM_READY',activeOrganizationId:null,subscribe(){}};
+    await createAdministrationView(root,store,{read:async()=>snapshot}).load();
+    walk(root).find(n=>n.textContent==='Ver detalle').onclick();
+    const texts=walk(root).map(n=>n.textContent||'');
+    expect(texts).toContain('Permisos de plataforma');
+    expect(texts).toContain('Permisos de organización');
+    expect(texts).toContain('Seleccioná una organización para consultar sus permisos efectivos.');
+    expect(texts.some(t=>t.startsWith('Ver comprobantes · Efectivo:'))).toBe(false);
+});
+
+test('039g revised operational configuration hides structural tools and leads with companies',async()=>{
+    const root=node('root'), snapshot=data();
+    snapshot.rights={operational_admin:true,organizations:true,create_organization:true,update_organization:true,users:true,memberships:true};
+    snapshot.presets=[{id:'reader',name:'Consulta',scope:'ORGANIZATION',is_active:true}];
+    const store={sessionUserId:'operator',contextGeneration:1,contextState:'TENANT_READY',activeOrganizationId:'north',subscribe(){},hasCapability:()=>true};
+    await createAdministrationView(root,store,{read:async()=>snapshot,invitation:async()=>[]}).load();
+    expect(walk(root).filter(n=>n.role==='tab').map(n=>n.textContent)).toEqual(['Empresas','Usuarios de empresas','Categorías y actividades','Impuestos']);
+    expect(walk(root).some(n=>n.textContent==='+ Nueva empresa')).toBe(true);
+    walk(root).find(n=>n.textContent==='+ Nueva empresa').onclick();
+    expect(walk(root).filter(n=>['name','legal_name','trade_name','tax_id'].includes(n.name))).toHaveLength(4);
+    expect(walk(root).some(n=>n.name==='is_active')).toBe(false);
+    walk(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios de empresas').onclick();
+    const text=walk(root).map(n=>n.textContent||'').join(' ');
+    for(const forbidden of ['Roles y permisos','Asignaciones','Overrides','Capabilities','Ámbitos de plataforma','Estado de la cuenta']) expect(text).not.toContain(forbidden);
+    expect(walk(root).some(n=>n.name==='operational-company')).toBe(true);
+    expect(walk(root).some(n=>n.textContent==='+ Invitar usuario de empresa')).toBe(true);
+    walk(root).find(n=>n.textContent==='Ver detalle').onclick();
+    expect(walk(root).some(n=>n.name==='preset')).toBe(true);
+    expect(walk(root).some(n=>n.name==='active')).toBe(true);
+});
+
+test.each([false,true])('deprecated accounting never appears in assignment selectors, even stale active=%s',async(is_active)=>{
+    const root=node('root'), snapshot=data();
+    snapshot.rights={assignments:true,memberships:true,global_users:true};
+    snapshot.presets=[{id:'historical',code:'ACCOUNTING_SUPERADMIN',name:'Historical accounting',scope:'PLATFORM',is_active,capabilities:[],bridge:[]},
+        {id:'operational',code:'ADMINISTRACION_OPERATIVA_MICA',name:'Operativa',scope:'PLATFORM',is_active:true,capabilities:[],bridge:[]}];
+    const store={sessionUserId:'root',contextGeneration:1,contextState:'PLATFORM_READY',activeOrganizationId:null,subscribe(){}};
+    await createAdministrationView(root,store,{read:async()=>snapshot}).load();
+    walk(root).find(n=>n.textContent==='Ver detalle').onclick();
+    const values=walk(root).filter(n=>n.tag==='option').map(n=>n.value);
+    expect(values).toContain('operational');
+    expect(values).not.toContain('historical');
+});
+
+test('root retains full configuration navigation',async()=>{
+    const root=node('root'), snapshot=data();
+    snapshot.rights={organizations:true,users:true,presets:true,assignments:true,global_users:true};
+    const store={sessionUserId:'root',contextGeneration:1,contextState:'PLATFORM_READY',activeOrganizationId:null,subscribe(){}};
+    await createAdministrationView(root,store,{read:async()=>snapshot}).load();
+    expect(walk(root).filter(n=>n.role==='tab').map(n=>n.textContent)).toEqual(['Organizaciones','Usuarios','Roles y permisos','Asignaciones']);
+});
 test('vertical keyboard navigation mounts only selected section and user filters combine',async()=>{
     const root=node('root'),store={sessionUserId:'actor',contextGeneration:1,contextState:'TENANT_READY',activeOrganizationId:'north',subscribe(){}};
     await createAdministrationView(root,store,{read:async()=>data()}).load();

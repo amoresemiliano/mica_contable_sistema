@@ -122,7 +122,8 @@ test('mock configuration is replaced; imported operational controls are untouche
     expect(html).toContain('mica-administration');
     expect(html).not.toMatch(/emiliano_admin|micaela_contable|VARONE/);
     const ui = read('src/js/components/administration.js');
-    expect(ui).not.toMatch(/innerHTML|import-box|SUPERADMIN/);
+    // A deprecated preset code may be excluded; the legacy role must never authorize the UI.
+    expect(ui).not.toMatch(/innerHTML|import-box|\bSUPERADMIN\b/);
     expect(ui).toContain('++store.pendingOperations');
     expect(ui).toContain('token !== epoch');
 });
