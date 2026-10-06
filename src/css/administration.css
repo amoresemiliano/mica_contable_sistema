@@ -117,15 +117,38 @@
 #mica-administration .mica-admin-drawer header h3 { margin:0; overflow-wrap:anywhere; }
 #mica-administration .mica-admin-drawer header button { border:1px solid var(--admin-border); border-radius:8px; background:transparent; color:inherit; }
 #mica-administration .mica-admin-drawer .mica-admin-form { grid-template-columns:1fr; }
-@media(max-width:1024px) {
-    #mica-administration { grid-template-columns:155px minmax(0,1fr); gap:16px; }
-    #mica-administration .mica-preset-split { grid-template-columns:1fr; }
-    #mica-administration .mica-preset-list { flex-direction:row; flex-wrap:wrap; }
-    #mica-administration .mica-admin-drawer { width:620px; }
-}
+#mica-administration { display:flex; flex-direction:column; gap:16px; color:var(--text-main); }
+#mica-administration .mica-admin-persistent-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 18px; background:var(--bg-card,#ffffff); border:1px solid var(--border-color,#dde3eb); border-radius:12px; flex-wrap:wrap; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
+#mica-administration .mica-admin-header-left { display:flex; align-items:center; gap:16px; flex-wrap:wrap; max-width:100%; }
+#mica-administration .mica-admin-org-selector { display:flex; align-items:center; gap:8px; font-size:.88rem; font-weight:600; }
+#mica-administration .mica-admin-org-select { padding:6px 12px; border-radius:8px; border:1px solid var(--border-color,#dde3eb); font-size:.85rem; font-weight:500; background-color:var(--bg-card,#fff); color:var(--text-main,#334155); }
+#mica-administration .mica-admin-nav-group { display:flex; align-items:center; gap:6px; overflow-x:auto; max-width:100%; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+#mica-administration .mica-admin-nav-group::-webkit-scrollbar { display:none; }
+#mica-administration .mica-admin-nav-btn { padding:8px 16px; border-radius:8px; border:1px solid transparent; background:transparent; font-weight:600; font-size:.88rem; color:var(--text-muted,#64748b); cursor:pointer; white-space:nowrap; min-height:40px; transition:all .15s ease-in-out; }
+#mica-administration .mica-admin-nav-btn:hover { color:var(--text-main,#1e293b); background:var(--bg-main,#f8fafc); }
+#mica-administration .mica-admin-nav-btn[aria-selected="true"] { background:var(--accent,#245ac2); color:#ffffff; }
+
+#mica-administration .mica-admin-subnav-group { display:inline-flex; align-items:center; gap:4px; padding:4px; background:var(--bg-main,#f1f5f9); border:1px solid var(--border-color,#dde3eb); border-radius:10px; margin-bottom:16px; }
+#mica-administration .mica-admin-subnav-btn { padding:6px 14px; border-radius:6px; border:0; background:transparent; font-size:.85rem; font-weight:600; color:var(--text-muted,#64748b); cursor:pointer; transition:all .15s; }
+#mica-administration .mica-admin-subnav-btn[aria-selected="true"] { background:var(--bg-card,#ffffff); color:var(--accent,#245ac2); box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+
+#mica-administration .mica-action-btn-group { display:inline-flex; align-items:center; gap:6px; }
+#mica-administration .mica-action-btn { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; padding:0; border-radius:6px; border:1px solid var(--border-color,#dde3eb); background:var(--bg-card,#ffffff); color:var(--text-muted,#64748b); cursor:pointer; transition:all .15s; }
+#mica-administration .mica-action-btn:hover { color:var(--accent,#245ac2); border-color:var(--accent,#245ac2); background:var(--bg-main,#f8fafc); }
+#mica-administration .mica-action-btn.mica-action-danger:hover { color:#ef4444; border-color:#ef4444; background:#fef2f2; }
+
+.mica-company-detail-card { padding:16px; background:var(--bg-card,#ffffff); border:1px solid var(--border-color,#dde3eb); border-radius:10px; display:flex; flex-direction:column; gap:12px; }
+.mica-company-detail-card h3 { margin:0 0 8px 0; color:var(--primary,#1e293b); border-bottom:1px solid var(--border-color,#dde3eb); padding-bottom:8px; }
+.mica-detail-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; }
+.mica-detail-grid p { margin:0; font-size:.88rem; color:var(--text-main,#334155); }
+
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border-width:0; }
+
 @media(max-width:640px) {
-    #mica-administration { grid-template-columns:1fr; }
-    #mica-administration .mica-admin-tabs { display:grid; grid-template-columns:1fr 1fr; }
+    #mica-administration .mica-admin-persistent-header { flex-direction:column; align-items:stretch; }
+    #mica-administration .mica-admin-header-left { flex-direction:column; align-items:stretch; }
+    #mica-administration .mica-admin-nav-group { justify-content:flex-start; }
     #mica-administration .mica-admin-drawer { width:100vw; padding:16px; }
     #mica-administration .mica-admin-table-scroll { max-height:none; }
 }
+

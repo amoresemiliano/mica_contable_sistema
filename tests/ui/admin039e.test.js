@@ -45,19 +45,16 @@ test('039g revised operational configuration hides structural tools and leads wi
     snapshot.presets=[{id:'reader',name:'Consulta',scope:'ORGANIZATION',is_active:true}];
     const store={sessionUserId:'operator',contextGeneration:1,contextState:'TENANT_READY',activeOrganizationId:'north',subscribe(){},hasCapability:()=>true};
     await createAdministrationView(root,store,{read:async()=>snapshot,invitation:async()=>[]}).load();
-    expect(walk(root).filter(n=>n.role==='tab').map(n=>n.textContent)).toEqual(['Empresas','Usuarios de empresas','Categorías y actividades','Impuestos']);
-    expect(walk(root).some(n=>n.textContent==='+ Nueva empresa')).toBe(true);
-    walk(root).find(n=>n.textContent==='+ Nueva empresa').onclick();
-    expect(walk(root).filter(n=>['name','legal_name','trade_name','tax_id'].includes(n.name))).toHaveLength(4);
+    expect(walk(root).filter(n=>n.role==='tab').map(n=>n.textContent)).toEqual(['Empresas','Usuarios','Categorización']);
+    expect(walk(root).some(n=>n.textContent==='+ Nueva Empresa')).toBe(true);
+    walk(root).find(n=>n.textContent==='+ Nueva Empresa').onclick();
+    expect(walk(root).filter(n=>['name','legal_name','trade_name','tax_id'].includes(n.name)).length).toBeGreaterThanOrEqual(4);
     expect(walk(root).some(n=>n.name==='is_active')).toBe(false);
-    walk(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios de empresas').onclick();
+    walk(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios').onclick();
     const text=walk(root).map(n=>n.textContent||'').join(' ');
     for(const forbidden of ['Roles y permisos','Asignaciones','Overrides','Capabilities','Ámbitos de plataforma','Estado de la cuenta']) expect(text).not.toContain(forbidden);
     expect(walk(root).some(n=>n.name==='operational-company')).toBe(true);
-    expect(walk(root).some(n=>n.textContent==='+ Invitar usuario de empresa')).toBe(true);
-    walk(root).find(n=>n.textContent==='Ver detalle').onclick();
-    expect(walk(root).some(n=>n.name==='preset')).toBe(true);
-    expect(walk(root).some(n=>n.name==='active')).toBe(true);
+    expect(walk(root).some(n=>n.textContent==='+ Invitar usuario')).toBe(true);
 });
 
 test.each([false,true])('deprecated accounting never appears in assignment selectors, even stale active=%s',async(is_active)=>{

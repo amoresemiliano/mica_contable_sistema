@@ -106,15 +106,55 @@ window.clearComprobantesSearch = function() {
     UIManager.renderMainTable();
 };
 
-window.toggleComprobantesColDropdown = function(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('comprobantes-col-menu');
-    if (menu) {
-        const isHidden = menu.style.display === 'none' || !menu.style.display;
-        menu.style.display = isHidden ? 'block' : 'none';
-        if (isHidden) renderComprobantesColumnCheckboxes();
+// --- Unified Column Dropdown Manager ---
+const COLUMN_DROPDOWN_IDS = [
+    { btnId: 'comprobantes-col-btn', menuId: 'comprobantes-col-menu', renderFn: () => renderComprobantesColumnCheckboxes() },
+    { btnId: 'percepciones-col-btn', menuId: 'percepciones-col-menu', renderFn: () => renderPercepcionesColumnCheckboxes() },
+    { btnId: 'bancos-col-btn', menuId: 'bancos-col-menu', renderFn: () => renderBancosColumnCheckboxes() }
+];
+
+function closeAllColumnDropdowns() {
+    COLUMN_DROPDOWN_IDS.forEach(({ menuId }) => {
+        const menu = document.getElementById(menuId);
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+function handleColumnDropdownToggle(e, menuId, renderFn) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById(menuId);
+    if (!menu) return;
+    const isCurrentlyOpen = menu.style.display === 'block';
+    closeAllColumnDropdowns();
+    if (!isCurrentlyOpen) {
+        menu.style.display = 'block';
+        if (renderFn) renderFn();
     }
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    const handleOutsideDismiss = (e) => {
+        COLUMN_DROPDOWN_IDS.forEach(({ btnId, menuId }) => {
+            const menu = document.getElementById(menuId);
+            if (menu && menu.style.display === 'block') {
+                const btn = document.getElementById(btnId);
+                if (!menu.contains(e.target) && (!btn || !btn.contains(e.target))) {
+                    menu.style.display = 'none';
+                }
+            }
+        });
+    };
+    document.addEventListener('click', handleOutsideDismiss);
+    document.addEventListener('touchstart', handleOutsideDismiss, { passive: true });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeAllColumnDropdowns();
+    });
+}
+
+window.toggleComprobantesColDropdown = function(e) {
+    handleColumnDropdownToggle(e, 'comprobantes-col-menu', renderComprobantesColumnCheckboxes);
 };
+
 
 function renderComprobantesColumnCheckboxes() {
     const container = document.getElementById('comprobantes-col-checkboxes');
@@ -197,13 +237,7 @@ window.clearPercepcionesSearch = function() {
 };
 
 window.togglePercepcionesColDropdown = function(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('percepciones-col-menu');
-    if (menu) {
-        const isHidden = menu.style.display === 'none' || !menu.style.display;
-        menu.style.display = isHidden ? 'block' : 'none';
-        if (isHidden) renderPercepcionesColumnCheckboxes();
-    }
+    handleColumnDropdownToggle(e, 'percepciones-col-menu', renderPercepcionesColumnCheckboxes);
 };
 
 function renderPercepcionesColumnCheckboxes() {
@@ -282,13 +316,7 @@ window.clearBancosSearch = function() {
 };
 
 window.toggleBancosColDropdown = function(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('bancos-col-menu');
-    if (menu) {
-        const isHidden = menu.style.display === 'none' || !menu.style.display;
-        menu.style.display = isHidden ? 'block' : 'none';
-        if (isHidden) renderBancosColumnCheckboxes();
-    }
+    handleColumnDropdownToggle(e, 'bancos-col-menu', renderBancosColumnCheckboxes);
 };
 
 function renderBancosColumnCheckboxes() {
@@ -497,13 +525,15 @@ export function switchTab(tabId) {
         renderManualRecords();
     }
     else if (tabId === 'tab-categorizacion') {
-        if (appStore.loadTaxCategories) appStore.loadTaxCategories();
-        if (appStore.loadEconomicActivities) appStore.loadEconomicActivities();
-        if (appStore.loadIibbRates) appStore.loadIibbRates();
+        titleElement.innerText = "Administración MICA";
+        // Route to tab-configuracion shell so persistent header stays visible
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+        document.getElementById('tab-configuracion')?.classList.remove('hidden');
+        openAdministration(appStore, { section: 'Categorización' });
     }
     else if (tabId === 'tab-configuracion') {
         titleElement.innerText = "Administración MICA";
-        openAdministration(appStore);
+        openAdministration(appStore, { section: 'Empresas' });
     }
     else if (tabId === 'tab-client-dashboard') {
         renderClientDashboard();

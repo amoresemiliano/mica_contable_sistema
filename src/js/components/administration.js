@@ -119,60 +119,278 @@ export function createAdministrationView(root, store, service = administrationSe
     function openEditor(title = 'Editar configuración') {
         drawer?.close(); drawer = openAdminDrawer(root, title); return drawer.body;
     }
-    function renderOperational(data) {
-        const r=data.rights, org=store.activeOrganizationId;
-        const names=['Empresas','Usuarios de empresas','Categorías y actividades','Impuestos'];
-        if (!names.includes(activeSection)) activeSection='Empresas';
-        navigation(names,data);
-        const s=section(activeSection);
-        const selector=field(s,'operational-company','Empresa',org||'',[
-            ['','Seleccioná una empresa'],...options(data.organizations.filter(o=>o.is_active))]);
-        selector.value=org||'';
-        selector.onchange=async()=>{if(selector.value) {await store.switchOrganizationContext(selector.value);await load();}};
-        if(activeSection==='Empresas') {
-            const edit=(row={})=>{
-                const editor=openEditor(row.id?'Editar empresa':'Nueva empresa');
-                const f=form(editor,row.id?'Actualizar datos':'Crear empresa',fd=>service.apply('organization',{
-                    ...(row.id?{id:row.id}:{}),name:fd.get('name'),legal_name:fd.get('legal_name'),
-                    trade_name:fd.get('trade_name'),tax_id:fd.get('tax_id')}));
-                field(f,'name','Nombre',row.name).required=true;
-                field(f,'legal_name','Razón social',row.legal_name);
-                field(f,'trade_name','Nombre comercial',row.trade_name);
-                field(f,'tax_id','CUIT',row.tax_id);
+    function renderPersistentHeader(data, onNewCompany) {
+        const header = el('div', null, { className: 'mica-admin-persistent-header' });
+        const leftGroup = el('div', null, { className: 'mica-admin-header-left' });
+        const orgSelectorWrap = el('div', null, { className: 'mica-admin-org-selector' });
+        
+        const orgSelectLabel = el('label', 'Organización:', { className: 'mica-admin-org-label' });
+        const selector = el('select', null, { className: 'mica-admin-org-select', name: 'operational-company' });
+        selector.append(el('option', 'Seleccioná una empresa', { value: '' }));
+        for (const o of data.organizations.filter(org => org.is_active)) {
+            selector.append(el('option', o.name + (o.tax_id ? ` (${o.tax_id})` : ''), { value: o.id }));
+        }
+        selector.value = store.activeOrganizationId || '';
+        selector.onchange = async () => {
+            if (selector.value) {
+                await store.switchOrganizationContext(selector.value);
+                await load();
+            }
+        };
+        orgSelectorWrap.append(orgSelectLabel, selector);
+        leftGroup.append(orgSelectorWrap);
+
+        const navGroup = el('nav', null, { className: 'mica-admin-nav-group', role: 'tablist', ariaLabel: 'Secciones de administración' });
+        const navSections = ['Empresas', 'Usuarios', 'Categorización'];
+        
+        navSections.forEach((secName) => {
+            const btn = el('button', secName, {
+                type: 'button',
+                role: 'tab',
+                className: 'mica-admin-nav-btn' + (secName === activeSection ? ' active' : ''),
+                id: 'mica-nav-' + secName.replaceAll(' ', '-'),
+                ariaSelected: String(secName === activeSection),
+                tabIndex: secName === activeSection ? 0 : -1
+            });
+            btn.onclick = () => {
+                activeSection = secName;
+                render(data);
             };
-            table(s,data.organizations,[['Empresa',o=>o.name],['CUIT',o=>o.tax_id||'—'],['Estado',o=>o.is_active?'Activa':'Inactiva']],r.update_organization?edit:null);
-            if(r.create_organization) {const b=el('button','+ Nueva empresa',{type:'button'});b.onclick=()=>edit();s.actionHeader.append(b);}
-            s.append(el('p','Seleccioná una empresa para configurar sus datos operativos, categorías, actividades e impuestos.'));
+            navGroup.append(btn);
+        });
+        leftGroup.append(navGroup);
+        header.append(leftGroup);
+
+        if (data.rights?.create_organization || data.rights?.organizations) {
+            const rightGroup = el('div', null, { className: 'mica-admin-header-right' });
+            const newCompanyBtn = el('button', '+ Nueva Empresa', {
+                type: 'button',
+                className: 'btn-primary mica-admin-new-company-btn'
+            });
+            newCompanyBtn.onclick = onNewCompany;
+            rightGroup.append(newCompanyBtn);
+            header.append(rightGroup);
+        }
+
+        return header;
+    }
+
+    function renderCompanyDetailModal(o) {
+        const modal = el('dialog', null, { className: 'mica-company-detail-card' });
+        const title = el('h3', o.name || 'Detalle de la empresa');
+        const closeBtn = el('button', '×', { type: 'button', className: 'mica-modal-close' });
+        closeBtn.onclick = () => modal.remove();
+        
+        const detailsList = el('dl', null, { className: 'mica-company-detail-list' });
+        const fields = [
+            ['Razón Social', o.legal_name || o.name || '—'],
+            ['CUIT', o.tax_id || '—'],
+            ['Teléfono', o.phone || '—'],
+            ['Email', o.email || '—'],
+            ['Contacto', o.contact_person || '—'],
+            ['Website', o.website || '—'],
+            ['Domicilio', o.address || '—']
+        ];
+        fields.forEach(([label, val]) => {
+            detailsList.append(el('dt', label), el('dd', val));
+        });
+        modal.append(closeBtn, title, detailsList);
+        root.append(modal);
+        if (modal.showModal) modal.showModal();
+    }
+
+    function editCompanyForm(o = {}) {
+        const editor = openEditor(o.id ? 'Editar empresa' : 'Nueva empresa');
+        const f = form(editor, o.id ? 'Editar datos de empresa' : 'Crear nueva empresa', fd => {
+            const payload = o.id ? { id: o.id } : {};
+            payload.name = fd.get('name');
+            payload.legal_name = fd.get('legal_name');
+            payload.trade_name = fd.get('trade_name');
+            payload.tax_id = fd.get('tax_id');
+            if (fd.get('phone')) payload.phone = fd.get('phone');
+            if (fd.get('email')) payload.email = fd.get('email');
+            if (fd.get('contact_person')) payload.contact_person = fd.get('contact_person');
+            if (fd.get('website')) payload.website = fd.get('website');
+            if (fd.get('address')) payload.address = fd.get('address');
+            return service.apply('organization', payload);
+        });
+        field(f, 'name', 'Nombre', o.name).required = true;
+        field(f, 'legal_name', 'Razón social', o.legal_name);
+        field(f, 'trade_name', 'Nombre comercial', o.trade_name);
+        field(f, 'tax_id', 'CUIT', o.tax_id);
+        field(f, 'phone', 'Teléfono', o.phone || '');
+        field(f, 'email', 'Email', o.email || '');
+        field(f, 'contact_person', 'Contacto', o.contact_person || '');
+        field(f, 'website', 'Website', o.website || '');
+        field(f, 'address', 'Domicilio', o.address || '');
+    }
+
+    async function archiveCompany(o) {
+        if (confirm(`¿Deseás archivar la empresa "${o.name}"?`)) {
+            try {
+                await service.apply('organization', { id: o.id, is_active: false });
+                if (store.reloadOperationalContext) await store.reloadOperationalContext();
+                await load();
+            } catch (err) {
+                alert(err.message || 'No se pudo archivar la empresa.');
+            }
+        }
+    }
+
+    function renderOperational(data) {
+        const r = data.rights, org = store.activeOrganizationId;
+        const validSections = ['Empresas', 'Usuarios', 'Categorización'];
+        if (!validSections.includes(activeSection)) activeSection = 'Empresas';
+
+        content = el('div', null, { className: 'mica-admin-content' });
+        root.append(renderPersistentHeader(data, () => editCompanyForm()), content);
+
+        const s = section(activeSection);
+
+        // SECTION 1: EMPRESAS
+        if (activeSection === 'Empresas') {
+            table(s, data.organizations, [
+                ['Empresa', o => o.name],
+                ['CUIT', o => o.tax_id || '—'],
+                ['Estado', o => o.is_active ? 'Activa' : 'Inactiva']
+            ], o => {
+                const group = el('div', null, { className: 'mica-action-btn-group' });
+                
+                const viewBtn = createIconButton(ICON_EYE, `Ver detalle de ${o.name}`, 'Ver detalle', () => renderCompanyDetailModal(o));
+                group.append(viewBtn);
+
+                if (r.update_organization || r.organizations) {
+                    const editBtn = createIconButton(ICON_PENCIL, `Editar ${o.name}`, 'Editar', () => editCompanyForm(o));
+                    group.append(editBtn);
+                }
+
+                if (r.archive_organization || r.organizations) {
+                    const trashBtn = createIconButton(ICON_TRASH, `Archivar ${o.name}`, 'Archivar', () => archiveCompany(o), true);
+                    group.append(trashBtn);
+                }
+
+                return group;
+            });
+            s.append(el('p', 'Seleccioná una empresa para administrar sus datos operativos, usuarios y categorización.'));
             return;
         }
-        if(!org) {s.append(el('p','Seleccioná una empresa para continuar.'));return;}
-        if(activeSection!=='Usuarios de empresas') {
-            const b=el('button',activeSection==='Impuestos'?'Gestionar impuestos y tasas':'Gestionar categorías y actividades',{type:'button'});
-            b.onclick=()=>globalThis.window?.switchTab?.('tab-categorizacion');s.append(b);return;
+
+        // SECTION 2: USUARIOS
+        if (activeSection === 'Usuarios') {
+            if (!org) {
+                s.append(el('p', 'Seleccioná una empresa en el selector superior para ver y gestionar sus usuarios.'));
+                return;
+            }
+            const presets = data.presets.filter(p => p.scope === 'ORGANIZATION' && p.is_active && (!p.organization_id || p.organization_id === org));
+            const members = data.memberships.filter(m => m.organization_id === org);
+            const orgUsers = data.users.filter(u => !u.protected && members.some(m => m.user_profile_id === u.id));
+
+            table(s, orgUsers.length ? orgUsers : data.users.filter(u => !u.protected), [
+                ['Usuario', u => u.email],
+                ['Rol / Perfil', u => {
+                    const m = members.find(mem => mem.user_profile_id === u.id);
+                    return presets.find(p => p.id === m?.role_template_id)?.name || 'Usuario';
+                }],
+                ['Estado en empresa', u => members.find(m => m.user_profile_id === u.id)?.is_active ? 'Activo' : 'Inactivo']
+            ], r.memberships ? user => {
+                const group = el('div', null, { className: 'mica-action-btn-group' });
+                const member = members.find(m => m.user_profile_id === user.id);
+                
+                const editRoleBtn = createIconButton(ICON_PENCIL, `Editar rol de ${user.email}`, 'Cambiar rol', () => {
+                    const editor = openEditor(`Editar rol: ${user.email}`);
+                    const f = form(editor, 'Perfil y estado en empresa', fd => service.apply('membership', {
+                        organization_id: org, user_profile_id: user.id, role_template_id: fd.get('preset'), is_active: fd.get('active') === 'true'
+                    }));
+                    field(f, 'preset', 'Perfil existente', member?.role_template_id || '', options(presets));
+                    choice(f, 'active', 'Estado en empresa', member?.is_active);
+                    if (user.pending) form(editor, 'Activar cuenta invitada en esta empresa', () => service.apply('tenant_activate', { organization_id: org, user_profile_id: user.id }));
+                });
+                group.append(editRoleBtn);
+
+                if (member) {
+                    const toggleAccessBtn = createIconButton(ICON_TRASH, `Quitar acceso a ${user.email}`, 'Quitar acceso', async () => {
+                        if (confirm(`¿Deseás desactivar el acceso de ${user.email} en esta empresa?`)) {
+                            await service.apply('membership', {
+                                organization_id: org, user_profile_id: user.id, role_template_id: member.role_template_id, is_active: false
+                            });
+                            await load();
+                        }
+                    }, true);
+                    group.append(toggleAccessBtn);
+                }
+
+                return group;
+            } : null);
+
+            if (r.memberships && service.invitation && mayInvite(r)) {
+                const b = el('button', '+ Invitar usuario', { type: 'button', className: 'btn-primary' });
+                b.onclick = () => {
+                    const editor = openEditor('Invitar usuario');
+                    const f = form(editor, 'Invitar', fd => service.invitation('create', org, { email: fd.get('email'), role_template_id: fd.get('preset') }));
+                    field(f, 'email', 'Email').required = true;
+                    field(f, 'preset', 'Perfil existente', '', options(presets));
+                    f.append(el('p', 'Compartí el acceso habitual de MICA. Tras registrarse y confirmar su email, confirmá la asignación y activá la cuenta.'));
+                };
+                s.actionHeader.append(b);
+
+                if (data.invitations && data.invitations.length > 0) {
+                    list(s, data.invitations, i => i.email + ' · ' + (i.assigned_at ? 'Asignada' : i.user_profile_id ? 'Confirmar asignación' : 'Esperando registro'), i => {
+                        const editor = openEditor(i.email);
+                        if (i.user_profile_id && !i.assigned_at) form(editor, 'Confirmar asignación', () => service.invitation('assign', org, { id: i.id, user_profile_id: i.user_profile_id }));
+                        else editor.append(el('p', 'La cuenta debe registrarse y confirmar su email antes de asignarla.'));
+                    });
+                }
+            }
+
+            const advancedDetails = disclosure(s, 'Permisos avanzados');
+            advancedDetails.append(el('p', 'Configuración de permisos individuales y overrides por capability para administradores.'));
+            return;
         }
-        const presets=data.presets.filter(p=>p.scope==='ORGANIZATION'&&p.is_active&&(!p.organization_id||p.organization_id===org));
-        const members=data.memberships.filter(m=>m.organization_id===org);
-        table(s,data.users.filter(u=>!u.protected),[['Usuario',u=>u.email],['Estado en empresa',u=>members.find(m=>m.user_profile_id===u.id)?.is_active?'Activo':'Inactivo']],r.memberships?user=>{
-            const member=members.find(m=>m.user_profile_id===user.id);
-            const editor=openEditor(user.email);
-            const f=form(editor,'Perfil y estado en empresa',fd=>service.apply('membership',{
-                organization_id:org,user_profile_id:user.id,role_template_id:fd.get('preset'),is_active:fd.get('active')==='true'}));
-            field(f,'preset','Perfil existente',member?.role_template_id||'',options(presets));
-            choice(f,'active','Estado en empresa',member?.is_active);
-            if(user.pending) form(editor,'Activar cuenta invitada en esta empresa',()=>service.apply('tenant_activate',{organization_id:org,user_profile_id:user.id}));
-        }:null);
-        if(r.memberships && service.invitation && mayInvite(r)) {
-            const b=el('button','+ Invitar usuario de empresa',{type:'button'});
-            b.onclick=()=>{const editor=openEditor('Invitar usuario de empresa');
-                const f=form(editor,'Invitar',fd=>service.invitation('create',org,{email:fd.get('email'),role_template_id:fd.get('preset')}));
-                field(f,'email','Email').required=true;field(f,'preset','Perfil existente','',options(presets));
-                f.append(el('p','Compartí el acceso habitual de MICA. Tras registrarse y confirmar su email, confirmá la asignación y activá la cuenta.'));};
-            s.actionHeader.append(b);
-            list(s,data.invitations||[],i=>i.email+' · '+(i.assigned_at?'Asignada':i.user_profile_id?'Confirmar asignación':'Esperando registro'),i=>{
-                const editor=openEditor(i.email);
-                if(i.user_profile_id&&!i.assigned_at) form(editor,'Confirmar asignación',()=>service.invitation('assign',org,{id:i.id,user_profile_id:i.user_profile_id}));
-                else editor.append(el('p','La cuenta debe registrarse y confirmar su email antes de asignarla. Las cuentas asignadas se activan desde su detalle.'));
+
+        // SECTION 3: CATEGORIZACIÓN
+        if (activeSection === 'Categorización') {
+            const subNav = el('nav', null, { className: 'mica-admin-subnav-group', ariaLabel: 'Secciones de categorización' });
+            const subSections = [
+                { id: 'Categorías', label: 'Categorías' },
+                { id: 'Actividades', label: 'Actividades' },
+                { id: 'Impuestos', label: 'Impuestos' }
+            ];
+            
+            subSections.forEach(({ id, label }) => {
+                const subBtn = el('button', label, {
+                    type: 'button',
+                    className: 'mica-admin-subnav-btn' + (activeCategorizationSubSection === id ? ' active' : ''),
+                    ariaSelected: String(activeCategorizationSubSection === id)
+                });
+                subBtn.onclick = () => {
+                    activeCategorizationSubSection = id;
+                    render(data);
+                };
+                subNav.append(subBtn);
             });
+            s.append(subNav);
+
+            const catContainer = el('div', null, { id: 'mica-categorizacion-subview' });
+            s.append(catContainer);
+
+            const taxCatCard = document.getElementById('card-tax-categories');
+            const econActCard = document.getElementById('card-economic-activities');
+            const iibbCard = document.getElementById('card-iibb-rates');
+            const ivaCard = document.getElementById('card-iva-rates');
+
+            if (activeCategorizationSubSection === 'Categorías') {
+                if (taxCatCard) catContainer.append(taxCatCard);
+                if (appStore.loadTaxCategories) appStore.loadTaxCategories();
+            } else if (activeCategorizationSubSection === 'Actividades') {
+                if (econActCard) catContainer.append(econActCard);
+                if (appStore.loadEconomicActivities) appStore.loadEconomicActivities();
+            } else if (activeCategorizationSubSection === 'Impuestos') {
+                if (iibbCard) catContainer.append(iibbCard);
+                if (ivaCard) catContainer.append(ivaCard);
+                if (appStore.loadIibbRates) appStore.loadIibbRates();
+            }
+
+            return;
         }
     }
     function render(data) {
