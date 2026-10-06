@@ -120,6 +120,15 @@
 #mica-administration { display:flex; flex-direction:column; gap:16px; color:var(--text-main); }
 #mica-administration .mica-admin-persistent-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 18px; background:var(--bg-card,#ffffff); border:1px solid var(--border-color,#dde3eb); border-radius:12px; flex-wrap:wrap; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
 #mica-administration .mica-admin-header-left { display:flex; align-items:center; gap:16px; flex-wrap:wrap; max-width:100%; }
+#mica-administration .mica-admin-persistent-header, #mica-administration .mica-admin-header-left,
+#mica-administration .mica-admin-org-selector { min-width:0; box-sizing:border-box; }
+#mica-administration .mica-admin-org-select { min-width:0; max-width:100%; }
+#mica-administration .mica-admin-advanced-toggle { border:1px solid var(--admin-border); border-radius:8px; background:transparent; color:inherit; }
+#mica-administration .mica-admin-advanced { border:1px solid var(--admin-border); border-radius:10px; padding:12px; min-width:0; }
+#mica-administration .mica-admin-advanced-nav { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+#mica-administration .mica-admin-advanced-nav button { min-width:0; white-space:normal; }
+#mica-administration .mica-admin-subnav-group { max-width:100%; box-sizing:border-box; overflow-x:auto; }
+#mica-administration .mica-admin-subnav-btn { white-space:nowrap; flex-shrink:0; }
 #mica-administration .mica-admin-org-selector { display:flex; align-items:center; gap:8px; font-size:.88rem; font-weight:600; }
 #mica-administration .mica-admin-org-select { padding:6px 12px; border-radius:8px; border:1px solid var(--border-color,#dde3eb); font-size:.85rem; font-weight:500; background-color:var(--bg-card,#fff); color:var(--text-main,#334155); }
 #mica-administration .mica-admin-nav-group { display:flex; align-items:center; gap:6px; overflow-x:auto; max-width:100%; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
@@ -147,6 +156,7 @@
 @media(max-width:640px) {
     #mica-administration .mica-admin-persistent-header { flex-direction:column; align-items:stretch; }
     #mica-administration .mica-admin-header-left { flex-direction:column; align-items:stretch; }
+    #mica-administration .mica-admin-org-select { flex:1; width:0; }
     #mica-administration .mica-admin-nav-group { justify-content:flex-start; }
     #mica-administration .mica-admin-drawer { width:100vw; padding:16px; }
     #mica-administration .mica-admin-table-scroll { max-height:none; }

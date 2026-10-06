@@ -24,6 +24,7 @@ beforeEach(() => {
     oldDocument = global.document;
     global.document = {
         createElement: node,
+        createElementNS: (_namespace, tag) => node(tag),
         activeElement: null,
         addEventListener: jest.fn(),
         getElementById: jest.fn(id => node(id))
@@ -67,7 +68,7 @@ describe('DEV-ADMIN-UX-01 Administration UX & Persistent Header', () => {
         
         await createAdministrationView(root, store, { read: async () => snapshot }).load();
 
-        const buttons = walk(root).filter(n => n.className?.includes('mica-action-btn'));
+        const buttons = walk(root).filter(n => n.tag === 'button' && n.className?.includes('mica-action-btn'));
         expect(buttons.length).toBeGreaterThanOrEqual(3);
         const labels = buttons.map(b => b['aria-label']);
         expect(labels.some(l => l.includes('Ver detalle de Empresa Norte'))).toBe(true);
@@ -105,4 +106,109 @@ describe('DEV-ADMIN-UX-01 Administration UX & Persistent Header', () => {
         const subTabs = walk(root).filter(n => n.className?.includes('mica-admin-subnav-btn')).map(n => n.textContent);
         expect(subTabs).toEqual(['Categorías', 'Actividades', 'Impuestos']);
     });
+});
+
+const primaryTabs = root => walk(root).filter(n => n.role === 'tab').map(n => n.textContent);
+const click = (root, text) => walk(root).find(n => n.tag === 'button' && n.textContent === text).onclick();
+const storeFixture = org => ({ sessionUserId: 'admin', contextGeneration: 1, contextState: org ? 'TENANT_READY' : 'PLATFORM_READY',
+    activeOrganizationId: org, pendingOperations: 0, subscribe(fn) { this.listener = fn; }, hasCapability: () => true,
+    reloadOperationalContext: jest.fn(async () => {}) });
+const platformRights = { organizations: true, create_organization: true, update_organization: true, archive_organization: true,
+    users: true, global_users: true, presets: true, global_presets: true, assignments: true, memberships: true };
+
+test.each(['operational', 'platform'])('%s admin shares Empresas, Usuarios and Categorización and defaults to Empresas', async kind => {
+    const root = node('root'), snapshot = data(), store = storeFixture('norte');
+    if (kind === 'platform') snapshot.rights = { ...platformRights };
+    const rightsBefore = { ...snapshot.rights };
+    await createAdministrationView(root, store, { read: async () => snapshot }).load();
+    expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
+    expect(walk(root).find(n => n.role === 'tabpanel').actionHeader.children[0].textContent).toBe('Empresas');
+    expect(walk(root).some(n => n['aria-label'] === 'Editar Empresa Norte')).toBe(true);
+    expect(snapshot.rights).toEqual(rightsBefore);
+    click(root, 'Usuarios');
+    expect(walk(root).some(n => n.textContent === 'Permisos avanzados')).toBe(kind === 'platform');
+    expect(walk(root).filter(n => n.type === 'checkbox')).toHaveLength(0);
+    if (kind === 'platform') {
+        click(root, 'Permisos avanzados');
+        expect(walk(root).find(n => n.className === 'mica-admin-advanced-nav').children.map(n => n.textContent))
+            .toEqual(['Usuarios de plataforma', 'Roles y permisos', 'Asignaciones']);
+        expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
+    }
+});
+
+test.each(['create', 'edit'])('platform company %s persists all profile fields, including clearing existing values', async mode => {
+    const oldFormData = global.FormData;
+    global.FormData = class {
+        constructor(form) { this.values = new Map(walk(form).filter(n => n.name).map(n => [n.name, n.value])); }
+        get(key) { return this.values.get(key); }
+    };
+    try {
+        const root = node('root'), snapshot = data(), store = storeFixture('norte');
+        snapshot.rights = { ...platformRights };
+        const service = { read: jest.fn(async () => snapshot), apply: jest.fn(async () => 'saved') };
+        await createAdministrationView(root, store, service).load();
+        if (mode === 'create') click(root, '+ Nueva Empresa');
+        else walk(root).find(n => n['aria-label'] === 'Editar Empresa Norte').onclick();
+        const form = walk(root).find(n => n.tag === 'form');
+        const payload = mode === 'edit' ? { id: 'norte' } : {};
+        for (const field of ['name', 'legal_name', 'trade_name', 'tax_id', 'phone', 'email', 'contact_person', 'website', 'address']) {
+            const input = walk(form).find(n => n.name === field);
+            expect(input).toBeDefined();
+            input.value = field === 'phone' ? '' : 'value-' + field;
+            payload[field] = input.value;
+        }
+        await form.events.submit({ preventDefault() {} });
+        expect(service.apply).toHaveBeenCalledWith('organization', payload);
+        expect(store.reloadOperationalContext).toHaveBeenCalledTimes(1);
+        expect(service.read).toHaveBeenCalledTimes(2);
+    } finally { global.FormData = oldFormData; }
+});
+
+test.each(['operational', 'platform'])('%s categorization retains cards, header and active organization across route changes', async kind => {
+    const root = node('root'), snapshot = data(), store = storeFixture('norte');
+    if (kind === 'platform') snapshot.rights = { ...platformRights };
+    const cards = new Map(['card-tax-categories', 'card-economic-activities', 'card-iibb-rates', 'card-iva-rates'].map(id => [id, node(id)]));
+    document.getElementById = jest.fn(id => cards.get(id));
+    store.loadTaxCategories = jest.fn(); store.loadEconomicActivities = jest.fn(); store.loadIibbRates = jest.fn();
+    const view = createAdministrationView(root, store, { read: async () => snapshot });
+    await view.load({ section: 'Categorización' });
+    const body = () => walk(root).find(n => n.id === 'mica-categorizacion-subview');
+    expect(body().children).toEqual([cards.get('card-tax-categories')]);
+    click(root, 'Actividades'); expect(body().children).toEqual([cards.get('card-economic-activities')]);
+    click(root, 'Impuestos'); expect(body().children).toEqual([cards.get('card-iibb-rates'), cards.get('card-iva-rates')]);
+    // Detached card IDs are no longer discoverable; reuse the original nodes.
+    document.getElementById = jest.fn(() => null);
+    click(root, 'Categorías'); expect(body().children).toEqual([cards.get('card-tax-categories')]);
+    expect(walk(root).find(n => n.name === 'operational-company').value).toBe('norte');
+    await view.load({ section: 'Empresas' });
+    expect(walk(root).find(n => n.role === 'tabpanel').actionHeader.children[0].textContent).toBe('Empresas');
+});
+
+test('Users defaults to the selected organization and never substitutes global users for an empty membership list', async () => {
+    const root = node('root'), snapshot = data(); snapshot.rights = { ...platformRights }; snapshot.memberships = [];
+    const view = createAdministrationView(root, storeFixture('norte'), { read: async () => snapshot });
+    await view.load({ section: 'Usuarios' });
+    expect(walk(root).filter(n => n.tag === 'td').map(n => n.textContent)).toEqual(['Sin resultados.']);
+    expect(walk(root).some(n => n.className === 'mica-admin-advanced')).toBe(false);
+});
+
+test('selector switches confirmed organization and reads the new context without losing primary navigation', async () => {
+    const root = node('root'), snapshot = data(), store = storeFixture('norte');
+    const read = jest.fn(async () => snapshot);
+    store.switchOrganizationContext = jest.fn(async id => { store.activeOrganizationId = id; store.contextGeneration++; });
+    await createAdministrationView(root, store, { read }).load();
+    const selector = walk(root).find(n => n.name === 'operational-company');
+    selector.value = 'sur'; await selector.onchange();
+    expect(store.switchOrganizationContext).toHaveBeenCalledWith('sur');
+    expect(read).toHaveBeenLastCalledWith('sur', '');
+    expect(walk(root).find(n => n.name === 'operational-company').value).toBe('sur');
+    expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
+});
+
+test('aggregate organization visibility never substitutes for individual create, update or archive rights', async () => {
+    const root = node('root'), snapshot = data(); snapshot.rights = { organizations: true, users: true };
+    await createAdministrationView(root, storeFixture('norte'), { read: async () => snapshot }).load();
+    expect(walk(root).filter(n => n.tag === 'button' && n.className === 'mica-action-btn').map(n => n.title)).toEqual(['Ver detalle', 'Ver detalle']);
+    expect(walk(root).some(n => n.textContent === '+ Nueva Empresa')).toBe(false);
+    click(root, 'Usuarios'); expect(walk(root).some(n => n.textContent === 'Permisos avanzados')).toBe(false);
 });

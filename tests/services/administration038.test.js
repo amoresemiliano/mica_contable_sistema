@@ -155,11 +155,11 @@ test('organization form sends real values server-first and reloads confirmed sta
             apply: jest.fn(() => new Promise(resolve => { resolveSave = resolve; }))
         };
         await createAdministrationView(root, store, service).load();
-        all(root).find(n => n.textContent === 'Nueva organización').onclick();
+        all(root).find(n => n.textContent === '+ Nueva Empresa').onclick();
         const form = all(root).find(n => n.tag === 'form');
         all(form).find(n => n.name === 'name').value = '<NORTE>';
         const save = form.events.submit({ preventDefault() {} });
-        expect(service.apply).toHaveBeenCalledWith('organization', { name: '<NORTE>', legal_name: '', trade_name: '', tax_id: '' });
+        expect(service.apply).toHaveBeenCalledWith('organization', { name: '<NORTE>', legal_name: '', trade_name: '', tax_id: '', phone: '', email: '', contact_person: '', website: '', address: '' });
         expect(store.reloadOperationalContext).not.toHaveBeenCalled();
         expect(store.pendingOperations).toBe(1);
         resolveSave('new-org'); await save;

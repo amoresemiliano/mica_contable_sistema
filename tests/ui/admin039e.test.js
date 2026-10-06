@@ -10,7 +10,7 @@ function node(tag) {
         closest(){return null;},getClientRects(){return [1];},querySelectorAll(){return walk(this).filter(n=>['button','input','select'].includes(n.tag));}};
 }
 let oldDocument;
-beforeEach(()=>{oldDocument=global.document;global.document={createElement:node,activeElement:null};});
+beforeEach(()=>{oldDocument=global.document;global.document={createElement:node,createElementNS:(_ns,tag)=>node(tag),activeElement:null};});
 afterEach(()=>{global.document=oldDocument;});
 test('drawer cycles keyboard focus in both directions and Escape restores opener',()=>{
     const opener=node('button');opener.focus();const root=node('root');
@@ -21,6 +21,11 @@ test('drawer cycles keyboard focus in both directions and Escape restores opener
     dialog.events.keydown({key:'Tab',shiftKey:false,preventDefault(){}});expect(global.document.activeElement).toBe(close);
     dialog.events.keydown({key:'Escape',preventDefault(){}});expect(dialog.remove).toHaveBeenCalled();expect(global.document.activeElement).toBe(opener);
 });
+function advanced(root, section) {
+    walk(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios').onclick();
+    walk(root).find(n=>n.textContent==='Permisos avanzados').onclick();
+    if(section) walk(root).find(n=>n.className==='mica-admin-advanced-nav').children.find(n=>n.textContent===section).onclick();
+}
 const data=()=>({rights:{organizations:true,users:true,assignments:true,memberships:true},
     organizations:[{id:'north',name:'Norte',tax_id:'123',is_active:true},{id:'south',name:'Sur',tax_id:'456',is_active:true}],
     users:[{id:'ana',email:'ana@example.invalid',is_active:true},{id:'bea',email:'bea@example.invalid',is_active:false,pending:true}],
@@ -31,6 +36,7 @@ test('039g platform context explains organization permissions instead of showing
     snapshot.capabilities=[{code:'ORGANIZATION_CREATE',scope:'PLATFORM'},{code:'RECORD_VIEW',scope:'ORGANIZATION'}];
     const store={sessionUserId:'actor',contextGeneration:1,contextState:'PLATFORM_READY',activeOrganizationId:null,subscribe(){}};
     await createAdministrationView(root,store,{read:async()=>snapshot}).load();
+    advanced(root, 'Asignaciones');
     walk(root).find(n=>n.textContent==='Ver detalle').onclick();
     const texts=walk(root).map(n=>n.textContent||'');
     expect(texts).toContain('Permisos de plataforma');
@@ -64,28 +70,33 @@ test.each([false,true])('deprecated accounting never appears in assignment selec
         {id:'operational',code:'ADMINISTRACION_OPERATIVA_MICA',name:'Operativa',scope:'PLATFORM',is_active:true,capabilities:[],bridge:[]}];
     const store={sessionUserId:'root',contextGeneration:1,contextState:'PLATFORM_READY',activeOrganizationId:null,subscribe(){}};
     await createAdministrationView(root,store,{read:async()=>snapshot}).load();
+    advanced(root, 'Asignaciones');
     walk(root).find(n=>n.textContent==='Ver detalle').onclick();
     const values=walk(root).filter(n=>n.tag==='option').map(n=>n.value);
     expect(values).toContain('operational');
     expect(values).not.toContain('historical');
 });
 
-test('root retains full configuration navigation',async()=>{
+test('root shares primary navigation and retains secondary structural tools',async()=>{
     const root=node('root'), snapshot=data();
     snapshot.rights={organizations:true,users:true,presets:true,assignments:true,global_users:true};
     const store={sessionUserId:'root',contextGeneration:1,contextState:'PLATFORM_READY',activeOrganizationId:null,subscribe(){}};
     await createAdministrationView(root,store,{read:async()=>snapshot}).load();
-    expect(walk(root).filter(n=>n.role==='tab').map(n=>n.textContent)).toEqual(['Organizaciones','Usuarios','Roles y permisos','Asignaciones']);
+    expect(walk(root).filter(n=>n.role==='tab').map(n=>n.textContent)).toEqual(['Empresas','Usuarios','Categorización']);
+    advanced(root);
+    expect(walk(root).find(n=>n.className==='mica-admin-advanced-nav').children.map(n=>n.textContent)).toEqual(['Usuarios de plataforma','Roles y permisos','Asignaciones']);
 });
-test('vertical keyboard navigation mounts only selected section and user filters combine',async()=>{
-    const root=node('root'),store={sessionUserId:'actor',contextGeneration:1,contextState:'TENANT_READY',activeOrganizationId:'north',subscribe(){}};
-    await createAdministrationView(root,store,{read:async()=>data()}).load();
+test('keyboard navigation mounts one primary panel and advanced user filters combine',async()=>{
+    const root=node('root'),snapshot=data(),store={sessionUserId:'actor',contextGeneration:1,contextState:'TENANT_READY',activeOrganizationId:'north',subscribe(){}};
+    snapshot.rights.global_users=true;
+    await createAdministrationView(root,store,{read:async()=>snapshot}).load();
     expect(walk(root).filter(n=>n.role==='tabpanel')).toHaveLength(1);
     expect(walk(root).some(n=>n.name==='user-state')).toBe(false);
     walk(root).find(n=>n.role==='tab').onkeydown({key:'ArrowDown',preventDefault(){}});
     expect(walk(root).filter(n=>n.role==='tabpanel')).toHaveLength(1);
+    walk(root).find(n=>n.textContent==='Permisos avanzados').onclick();
     const state=walk(root).find(n=>n.name==='user-state'),org=walk(root).find(n=>n.name==='user-org');
-    const visibleEmail=()=>walk(root).filter(n=>n.tag==='td'&&n.textContent?.includes('@')).map(n=>n.textContent);
+    const visibleEmail=()=>walk(walk(root).find(n=>n.id==='mica-admin-advanced')).filter(n=>n.tag==='td'&&n.textContent?.includes('@')).map(n=>n.textContent);
     state.value='pending';state.onchange();expect(visibleEmail()).toEqual(['bea@example.invalid']);
     org.value='north';org.onchange();expect(visibleEmail()).toEqual([]);
     state.value='active';state.onchange();expect(visibleEmail()).toEqual(['ana@example.invalid']);

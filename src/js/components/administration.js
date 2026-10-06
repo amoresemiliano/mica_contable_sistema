@@ -7,6 +7,8 @@ export function createAdministrationView(root, store, service = administrationSe
     let epoch = 0, snapshot = null, busy = false, contextKey = '', search = '';
     let activeSection = '', selectedUser = '', selectedPreset = '', tabs, content, drawer;
     let userState = '', userOrg = '';
+    let advancedSection = '', advancedOpen = false, activeCategorizationSubSection = 'Categorías';
+    const categorizationCards = new Map();
     const el = (tag, text, props = {}) => {
         const node = document.createElement(tag);
         if (text !== null && text !== undefined) node.textContent = text;
@@ -55,30 +57,13 @@ export function createAdministrationView(root, store, service = administrationSe
         section.append(f); f.append(button, status);
         return f;
     }
-    function section(title) {
-        const node = el('section', null, { className: 'mica-admin-panel', role: 'tabpanel', id: 'mica-admin-content' });
-        node.setAttribute?.('aria-labelledby', 'mica-section-' + activeSection.replaceAll(' ', '-'));
+    function section(title, parent = content) {
+        const node = el('section', null, { className: 'mica-admin-panel', role: parent === content ? 'tabpanel' : 'region', id: parent === content ? 'mica-admin-content' : 'mica-admin-advanced-content' });
+        node.setAttribute?.(parent === content ? 'aria-labelledby' : 'aria-label', parent === content ? 'mica-nav-' + activeSection.replaceAll(' ', '-') : title);
         node.actionHeader = el('header', null, {className:'mica-admin-heading'});
-        node.actionHeader.append(el('h3', title)); node.append(node.actionHeader); content.append(node); return node;
+        node.actionHeader.append(el('h3', title)); node.append(node.actionHeader); parent.append(node); return node;
     }
-    function navigation(titles, data) {
-        tabs = el('nav', null, { className: 'mica-admin-tabs', role: 'tablist', ariaLabel: 'Secciones de configuración' });
-        tabs.setAttribute?.('aria-orientation', 'vertical');
-        titles.forEach((title, index) => {
-            const button = el('button', title, { type: 'button', role: 'tab', id: 'mica-section-' + title.replaceAll(' ', '-') });
-            button.setAttribute?.('aria-controls', 'mica-admin-content');
-            button.ariaSelected = String(title === activeSection); button.tabIndex = title === activeSection ? 0 : -1;
-            button.onclick = () => { activeSection = title; render(data); tabs.children[index]?.focus?.(); };
-            button.onkeydown = event => {
-                const next = {ArrowDown:(index+1)%titles.length,ArrowUp:(index+titles.length-1)%titles.length,Home:0,End:titles.length-1}[event.key];
-                if (next === undefined) return;
-                event.preventDefault(); activeSection=titles[next]; render(data); tabs.children[next]?.focus?.();
-            };
-            tabs.append(button);
-        });
-        content = el('div', null, { className: 'mica-admin-content' }); root.append(tabs, content);
-    }
-    function table(parent, rows, columns, edit) {
+    function table(parent, rows, columns, edit, customActions = false) {
         const table = el('table', null, { className: 'mica-admin-table' });
         const head = el('thead'), headings = el('tr');
         for (const [label] of columns) headings.append(el('th', label, { scope: 'col' }));
@@ -88,8 +73,12 @@ export function createAdministrationView(root, store, service = administrationSe
         for (const row of rows) {
             const tr = el('tr');
             for (const [,value] of columns) tr.append(el('td', value(row)));
-            if (edit) { const td=el('td'), button=el('button','Ver detalle',{type:'button'});
-                button.onclick=()=>edit(row); td.append(button); tr.append(td); }
+            if (edit) {
+                const td=el('td'), actions=customActions ? edit(row) : null;
+                if (actions) td.append(actions);
+                else { const button=el('button','Ver detalle',{type:'button'}); button.onclick=()=>edit(row); td.append(button); }
+                tr.append(td);
+            }
             body.append(tr);
         }
         if (!rows.length) {const tr=el('tr');tr.append(el('td','Sin resultados.',{colSpan:columns.length+(edit?1:0)}));body.append(tr);}
@@ -119,6 +108,22 @@ export function createAdministrationView(root, store, service = administrationSe
     function openEditor(title = 'Editar configuración') {
         drawer?.close(); drawer = openAdminDrawer(root, title); return drawer.body;
     }
+    const ICON_EYE = 'eye', ICON_PENCIL = 'pencil', ICON_TRASH = 'trash';
+    function createIconButton(icon, label, title, action, danger = false) {
+        const button = el('button', null, { type: 'button', title, className: 'mica-action-btn' + (danger ? ' mica-action-danger' : '') });
+        button.setAttribute?.('aria-label', label);
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', '18'); svg.setAttribute('height', '18');
+        svg.setAttribute('fill', 'none'); svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.8');
+        svg.setAttribute('aria-hidden', 'true');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', {
+            eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+            pencil: 'm16 3 5 5-12 12-6 1 1-6L16 3Z M13 6l5 5',
+            trash: 'M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7'
+        }[icon]);
+        svg.append(path); button.append(svg); button.onclick = action; return button;
+    }
     function renderPersistentHeader(data, onNewCompany) {
         const header = el('div', null, { className: 'mica-admin-persistent-header' });
         const leftGroup = el('div', null, { className: 'mica-admin-header-left' });
@@ -143,7 +148,7 @@ export function createAdministrationView(root, store, service = administrationSe
         const navGroup = el('nav', null, { className: 'mica-admin-nav-group', role: 'tablist', ariaLabel: 'Secciones de administración' });
         const navSections = ['Empresas', 'Usuarios', 'Categorización'];
         
-        navSections.forEach((secName) => {
+        navSections.forEach((secName, index) => {
             const btn = el('button', secName, {
                 type: 'button',
                 role: 'tab',
@@ -156,12 +161,20 @@ export function createAdministrationView(root, store, service = administrationSe
                 activeSection = secName;
                 render(data);
             };
+            btn.setAttribute?.('aria-controls', 'mica-admin-content');
+            btn.onkeydown = event => {
+                const next = { ArrowRight: (index + 1) % 3, ArrowDown: (index + 1) % 3, ArrowLeft: (index + 2) % 3, ArrowUp: (index + 2) % 3, Home: 0, End: 2 }[event.key];
+                if (next === undefined) return;
+                event.preventDefault(); activeSection = navSections[next]; render(data);
+                tabs.children[next]?.focus?.();
+            };
             navGroup.append(btn);
         });
+        tabs = navGroup;
         leftGroup.append(navGroup);
         header.append(leftGroup);
 
-        if (data.rights?.create_organization || data.rights?.organizations) {
+        if (data.rights?.create_organization) {
             const rightGroup = el('div', null, { className: 'mica-admin-header-right' });
             const newCompanyBtn = el('button', '+ Nueva Empresa', {
                 type: 'button',
@@ -207,11 +220,7 @@ export function createAdministrationView(root, store, service = administrationSe
             payload.legal_name = fd.get('legal_name');
             payload.trade_name = fd.get('trade_name');
             payload.tax_id = fd.get('tax_id');
-            if (fd.get('phone')) payload.phone = fd.get('phone');
-            if (fd.get('email')) payload.email = fd.get('email');
-            if (fd.get('contact_person')) payload.contact_person = fd.get('contact_person');
-            if (fd.get('website')) payload.website = fd.get('website');
-            if (fd.get('address')) payload.address = fd.get('address');
+            for (const key of ['phone', 'email', 'contact_person', 'website', 'address']) payload[key] = fd.get(key);
             return service.apply('organization', payload);
         });
         field(f, 'name', 'Nombre', o.name).required = true;
@@ -237,7 +246,7 @@ export function createAdministrationView(root, store, service = administrationSe
         }
     }
 
-    function renderOperational(data) {
+    function renderPrimary(data) {
         const r = data.rights, org = store.activeOrganizationId;
         const validSections = ['Empresas', 'Usuarios', 'Categorización'];
         if (!validSections.includes(activeSection)) activeSection = 'Empresas';
@@ -259,24 +268,25 @@ export function createAdministrationView(root, store, service = administrationSe
                 const viewBtn = createIconButton(ICON_EYE, `Ver detalle de ${o.name}`, 'Ver detalle', () => renderCompanyDetailModal(o));
                 group.append(viewBtn);
 
-                if (r.update_organization || r.organizations) {
+                if (r.update_organization) {
                     const editBtn = createIconButton(ICON_PENCIL, `Editar ${o.name}`, 'Editar', () => editCompanyForm(o));
                     group.append(editBtn);
                 }
 
-                if (r.archive_organization || r.organizations) {
+                if (r.archive_organization) {
                     const trashBtn = createIconButton(ICON_TRASH, `Archivar ${o.name}`, 'Archivar', () => archiveCompany(o), true);
                     group.append(trashBtn);
                 }
 
                 return group;
-            });
+            }, true);
             s.append(el('p', 'Seleccioná una empresa para administrar sus datos operativos, usuarios y categorización.'));
             return;
         }
 
         // SECTION 2: USUARIOS
         if (activeSection === 'Usuarios') {
+            renderAdvancedEntry(s, data);
             if (!org) {
                 s.append(el('p', 'Seleccioná una empresa en el selector superior para ver y gestionar sus usuarios.'));
                 return;
@@ -285,8 +295,9 @@ export function createAdministrationView(root, store, service = administrationSe
             const members = data.memberships.filter(m => m.organization_id === org);
             const orgUsers = data.users.filter(u => !u.protected && members.some(m => m.user_profile_id === u.id));
 
-            table(s, orgUsers.length ? orgUsers : data.users.filter(u => !u.protected), [
-                ['Usuario', u => u.email],
+            table(s, orgUsers, [
+                ['Usuario', u => u.name || u.email.split('@')[0]],
+                ['Email', u => u.email],
                 ['Rol / Perfil', u => {
                     const m = members.find(mem => mem.user_profile_id === u.id);
                     return presets.find(p => p.id === m?.role_template_id)?.name || 'Usuario';
@@ -320,7 +331,7 @@ export function createAdministrationView(root, store, service = administrationSe
                 }
 
                 return group;
-            } : null);
+            } : null, true);
 
             if (r.memberships && service.invitation && mayInvite(r)) {
                 const b = el('button', '+ Invitar usuario', { type: 'button', className: 'btn-primary' });
@@ -334,7 +345,7 @@ export function createAdministrationView(root, store, service = administrationSe
                 s.actionHeader.append(b);
 
                 if (data.invitations && data.invitations.length > 0) {
-                    list(s, data.invitations, i => i.email + ' · ' + (i.assigned_at ? 'Asignada' : i.user_profile_id ? 'Confirmar asignación' : 'Esperando registro'), i => {
+                    list(s, data.invitations.filter(i => i.organization_id === org), i => i.email + ' · ' + (i.assigned_at ? 'Asignada' : i.user_profile_id ? 'Confirmar asignación' : 'Esperando registro'), i => {
                         const editor = openEditor(i.email);
                         if (i.user_profile_id && !i.assigned_at) form(editor, 'Confirmar asignación', () => service.invitation('assign', org, { id: i.id, user_profile_id: i.user_profile_id }));
                         else editor.append(el('p', 'La cuenta debe registrarse y confirmar su email antes de asignarla.'));
@@ -342,8 +353,6 @@ export function createAdministrationView(root, store, service = administrationSe
                 }
             }
 
-            const advancedDetails = disclosure(s, 'Permisos avanzados');
-            advancedDetails.append(el('p', 'Configuración de permisos individuales y overrides por capability para administradores.'));
             return;
         }
 
@@ -373,21 +382,27 @@ export function createAdministrationView(root, store, service = administrationSe
             const catContainer = el('div', null, { id: 'mica-categorizacion-subview' });
             s.append(catContainer);
 
-            const taxCatCard = document.getElementById('card-tax-categories');
-            const econActCard = document.getElementById('card-economic-activities');
-            const iibbCard = document.getElementById('card-iibb-rates');
-            const ivaCard = document.getElementById('card-iva-rates');
+            for (const id of ['card-tax-categories', 'card-economic-activities', 'card-iibb-rates', 'card-iva-rates']) {
+                if (!categorizationCards.has(id)) {
+                    const card = document.getElementById?.(id);
+                    if (card) categorizationCards.set(id, card);
+                }
+            }
+            const taxCatCard = categorizationCards.get('card-tax-categories');
+            const econActCard = categorizationCards.get('card-economic-activities');
+            const iibbCard = categorizationCards.get('card-iibb-rates');
+            const ivaCard = categorizationCards.get('card-iva-rates');
 
             if (activeCategorizationSubSection === 'Categorías') {
                 if (taxCatCard) catContainer.append(taxCatCard);
-                if (appStore.loadTaxCategories) appStore.loadTaxCategories();
+                store.loadTaxCategories?.();
             } else if (activeCategorizationSubSection === 'Actividades') {
                 if (econActCard) catContainer.append(econActCard);
-                if (appStore.loadEconomicActivities) appStore.loadEconomicActivities();
+                store.loadEconomicActivities?.();
             } else if (activeCategorizationSubSection === 'Impuestos') {
                 if (iibbCard) catContainer.append(iibbCard);
                 if (ivaCard) catContainer.append(ivaCard);
-                if (appStore.loadIibbRates) appStore.loadIibbRates();
+                store.loadIibbRates?.();
             }
 
             return;
@@ -397,40 +412,36 @@ export function createAdministrationView(root, store, service = administrationSe
         // Deprecated presets remain in server history, never in assignment/edit controls.
         data={...data,presets:data.presets.filter(p=>p.code!=='ACCOUNTING_SUPERADMIN')};
         drawer?.close(); drawer = null; root.replaceChildren();
-        const { rights: r, organizations, users, presets, capabilities } = data;
-        if (!Object.values(r).some(Boolean)) { clear('No tenés permisos de administración en este contexto.'); return; }
-        if(r.operational_admin) {renderOperational(data);return;}
-        const availableSections = [[r.organizations,'Organizaciones'],[r.users,'Usuarios'],[r.presets,'Roles y permisos'],[r.assignments,'Asignaciones']].filter(([allowed])=>allowed).map(([,title])=>title);
-        if (!availableSections.includes(activeSection)) activeSection = availableSections[0];
-        navigation(availableSections, data);
-        if (r.organizations && activeSection === 'Organizaciones') {
-            const s = section('Organizaciones');
-            let editor;
-            function edit(row = {}) {
-                editor = openEditor(row.id ? 'Editar organización' : 'Nueva organización');
-                const f = form(editor, row.id ? 'Editar organización' : 'Crear organización', fd => {
-                    const payload = row.id ? { id: row.id } : {};
-                    for (const key of ['name', 'legal_name', 'trade_name', 'tax_id']) if (fd.has(key)) payload[key] = fd.get(key);
-                    if (row.id && r.archive_organization) payload.is_active = fd.get('is_active') === 'true';
-                    return service.apply('organization', payload);
-                });
-                if (!row.id || r.update_organization) {
-                    field(f, 'name', 'Nombre', row.name).required = true;
-                    field(f, 'legal_name', 'Razón social', row.legal_name);
-                    field(f, 'trade_name', 'Nombre comercial', row.trade_name);
-                    field(f, 'tax_id', 'CUIT', row.tax_id);
-                }
-                if (row.id && r.archive_organization) choice(f, 'is_active', 'Estado', row.is_active);
-            }
-            s.append(el('p', organizations.length + ' organizaciones disponibles', {className:'mica-admin-summary'}));
-            table(s, organizations, [['Nombre',o=>o.name],['CUIT',o=>o.tax_id||'—'],['Estado',o=>o.is_active?'Activa':'Inactiva']], r.update_organization || r.archive_organization ? edit : null);
-            if (r.create_organization) {
-                const b = el('button', 'Nueva organización', { type: 'button' });
-                b.className='btn-primary mica-admin-primary'; b.onclick = () => edit(); s.actionHeader.append(b);
-            }
+        if (!Object.values(data.rights).some(Boolean)) { clear('No tenés permisos de administración en este contexto.'); return; }
+        renderPrimary(data);
+    }
+    function renderAdvancedEntry(parent, data) {
+        const r = data.rights;
+        if (!r.presets && !r.assignments && !(r.users && r.global_users)) return;
+        const button = el('button', 'Permisos avanzados', { type: 'button', className: 'mica-admin-advanced-toggle' });
+        button.setAttribute?.('aria-expanded', String(advancedOpen));
+        button.setAttribute?.('aria-controls', 'mica-admin-advanced');
+        button.onclick = () => { advancedOpen = !advancedOpen; render(data); };
+        parent.actionHeader.append(button);
+        if (advancedOpen) {
+            const advancedContent = el('div', null, { id: 'mica-admin-advanced', className: 'mica-admin-advanced' });
+            parent.append(advancedContent); renderAdvanced(data, advancedContent);
         }
-        if (r.users && activeSection === 'Usuarios') {
-            const s = section('Usuarios');
+    }
+    function renderAdvanced(data, advancedContent) {
+        const { rights: r, organizations, users, presets, capabilities } = data;
+        const available = [[r.users && r.global_users,'Usuarios'],[r.presets,'Roles y permisos'],[r.assignments,'Asignaciones']]
+            .filter(([allowed])=>allowed).map(([,title])=>title);
+        if (!available.includes(advancedSection)) advancedSection = available[0];
+        const nav = el('nav', null, { className: 'mica-admin-advanced-nav', ariaLabel: 'Herramientas avanzadas' });
+        for (const title of available) {
+            const button = el('button', title === 'Usuarios' ? 'Usuarios de plataforma' : title, { type: 'button', ariaPressed: String(title === advancedSection) });
+            button.onclick = () => { advancedSection = title; render(data); };
+            nav.append(button);
+        }
+        advancedContent.append(nav);
+        if (r.users && advancedSection === 'Usuarios') {
+            const s = section('Usuarios de plataforma', advancedContent);
             s.append(el('p', 'El usuario se registra con el acceso habitual. La cuenta nueva queda pendiente; asigná un preset y ámbito antes de aprobarla.'));
             const sf = el('form',null,{className:'mica-admin-search'});
             const q = field(sf, 'search', 'Buscar email', search);
@@ -483,13 +494,13 @@ export function createAdministrationView(root, store, service = administrationSe
                         user_profile_id:user.id,organization_id:store.activeOrganizationId,is_active:fd.get('active')==='true'
                     }));choice(f,'active','Estado',user.is_active); }
                     if(r.assignments) {const assign=el('button','Preset y permisos',{type:'button'});
-                        assign.onclick=()=>{selectedUser=user.id;activeSection='Asignaciones';render(data);};editor.append(assign);}
+                        assign.onclick=()=>{selectedUser=user.id;advancedSection='Asignaciones';render(data);};editor.append(assign);}
                 }); };
             state.onchange=()=>{userState=state.value;drawUsers();};organization.onchange=()=>{userOrg=organization.value;drawUsers();};drawUsers();
             if (users.length === 200) s.append(el('p', 'Se muestran 200 usuarios. Refiná la búsqueda.'));
         }
-        if (r.presets && activeSection === 'Roles y permisos') {
-            const s = section('Roles y permisos');
+        if (r.presets && advancedSection === 'Roles y permisos') {
+            const s = section('Roles y permisos', advancedContent);
             s.append(el('p', 'Presets MICA reutilizables. Los templates históricos no se editan desde esta pantalla.'));
             const split=el('div',null,{className:'mica-preset-split'}), master=el('div',null,{className:'mica-preset-list'}), editor=el('div',null,{className:'mica-admin-editor'});
             split.append(master,editor);s.append(split);
@@ -566,8 +577,8 @@ export function createAdministrationView(root, store, service = administrationSe
             else editor.append(el('p','Creá un preset para definir sus permisos.'));
 
         }
-        if (r.assignments && activeSection === 'Asignaciones') {
-            const s = section('Asignaciones');
+        if (r.assignments && advancedSection === 'Asignaciones') {
+            const s = section('Asignaciones', advancedContent);
             const candidates=users.filter(u=>!u.protected);
             if(!candidates.some(u=>u.id===selectedUser)) selectedUser='';
             table(s,candidates,[['Usuario',u=>u.email],['Estado',u=>u.is_active?'Activo':'Inactivo']],user=>{selectedUser=user.id;drawAssignment();});
@@ -662,7 +673,8 @@ export function createAdministrationView(root, store, service = administrationSe
             if(selectedUser) drawAssignment();
         }
     }
-    async function load() {
+    async function load(route = {}) {
+        if (['Empresas', 'Usuarios', 'Categorización'].includes(route.section)) activeSection = route.section;
         const token = ++epoch; contextKey = context(); snapshot = null;
         clear('Cargando administración…');
         if (!ready()) { clear('Esperá a que el contexto esté confirmado.'); return; }
@@ -682,9 +694,9 @@ export function createAdministrationView(root, store, service = administrationSe
 }
 
 let mounted;
-export function openAdministration(store) {
+export function openAdministration(store, route = { section: 'Empresas' }) {
     const root = document.getElementById('mica-administration');
     if (!root) return;
     mounted ||= createAdministrationView(root, store);
-    return mounted.load();
+    return mounted.load(route);
 }
