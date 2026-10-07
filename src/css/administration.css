@@ -130,6 +130,11 @@
 #mica-administration .mica-admin-subnav-group { max-width:100%; box-sizing:border-box; overflow-x:auto; }
 #mica-administration .mica-admin-subnav-btn { white-space:nowrap; flex-shrink:0; }
 #mica-administration .mica-admin-org-selector { display:flex; align-items:center; gap:8px; font-size:.88rem; font-weight:600; }
+#mica-administration .mica-admin-org-selector { flex-wrap:wrap; }
+#mica-administration .mica-admin-context { color:var(--text-muted,#64748b); }
+#mica-administration .mica-admin-org-selector .mica-admin-org-label { flex-wrap:wrap; gap:6px; }
+#mica-administration .card { min-width:0; box-sizing:border-box; max-width:100%; }
+#mica-administration .data-table-container { overflow:auto; max-width:100%; }
 #mica-administration .mica-admin-org-select { padding:6px 12px; border-radius:8px; border:1px solid var(--border-color,#dde3eb); font-size:.85rem; font-weight:500; background-color:var(--bg-card,#fff); color:var(--text-main,#334155); }
 #mica-administration .mica-admin-nav-group { display:flex; align-items:center; gap:6px; overflow-x:auto; max-width:100%; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 #mica-administration .mica-admin-nav-group::-webkit-scrollbar { display:none; }

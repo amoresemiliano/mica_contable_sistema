@@ -59,7 +59,8 @@ test('039g revised operational configuration hides structural tools and leads wi
     walk(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios').onclick();
     const text=walk(root).map(n=>n.textContent||'').join(' ');
     for(const forbidden of ['Roles y permisos','Asignaciones','Overrides','Capabilities','Ámbitos de plataforma','Estado de la cuenta']) expect(text).not.toContain(forbidden);
-    expect(walk(root).some(n=>n.name==='operational-company')).toBe(true);
+    expect(walk(root).some(n=>n.textContent==='Contexto: Norte')).toBe(true);
+    expect(walk(root).some(n=>n.name==='administration-target')).toBe(false);
     expect(walk(root).some(n=>n.textContent==='+ Invitar usuario')).toBe(true);
 });
 

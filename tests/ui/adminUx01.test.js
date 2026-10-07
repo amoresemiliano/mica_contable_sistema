@@ -59,7 +59,8 @@ describe('DEV-ADMIN-UX-01 Administration UX & Persistent Header', () => {
         const tabs = walk(root).filter(n => n.role === 'tab').map(n => n.textContent);
         expect(tabs).toEqual(['Empresas', 'Usuarios', 'Categorización']);
         expect(walk(root).some(n => n.textContent === '+ Nueva Empresa')).toBe(true);
-        expect(walk(root).some(n => n.name === 'operational-company')).toBe(true);
+        expect(walk(root).some(n => n.textContent === 'Contexto: Empresa Norte')).toBe(true);
+        expect(walk(root).some(n => n.name === 'administration-target')).toBe(false);
     });
 
     test('Empresas table renders action icons (View, Edit, Archive)', async () => {
@@ -112,7 +113,7 @@ const primaryTabs = root => walk(root).filter(n => n.role === 'tab').map(n => n.
 const click = (root, text) => walk(root).find(n => n.tag === 'button' && n.textContent === text).onclick();
 const storeFixture = org => ({ sessionUserId: 'admin', contextGeneration: 1, contextState: org ? 'TENANT_READY' : 'PLATFORM_READY',
     activeOrganizationId: org, pendingOperations: 0, subscribe(fn) { this.listener = fn; }, hasCapability: () => true,
-    reloadOperationalContext: jest.fn(async () => {}) });
+    isCatalogPlatformContext: () => !org, reloadOperationalContext: jest.fn(async () => {}) });
 const platformRights = { organizations: true, create_organization: true, update_organization: true, archive_organization: true,
     users: true, global_users: true, presets: true, global_presets: true, assignments: true, memberships: true };
 
@@ -179,7 +180,7 @@ test.each(['operational', 'platform'])('%s categorization retains cards, header 
     // Detached card IDs are no longer discoverable; reuse the original nodes.
     document.getElementById = jest.fn(() => null);
     click(root, 'Categorías'); expect(body().children).toEqual([cards.get('card-tax-categories')]);
-    expect(walk(root).find(n => n.name === 'operational-company').value).toBe('norte');
+    expect(walk(root).some(n => n.textContent === 'Contexto: Empresa Norte')).toBe(true);
     await view.load({ section: 'Empresas' });
     expect(walk(root).find(n => n.role === 'tabpanel').actionHeader.children[0].textContent).toBe('Empresas');
 });
@@ -192,16 +193,19 @@ test('Users defaults to the selected organization and never substitutes global u
     expect(walk(root).some(n => n.className === 'mica-admin-advanced')).toBe(false);
 });
 
-test('selector switches confirmed organization and reads the new context without losing primary navigation', async () => {
-    const root = node('root'), snapshot = data(), store = storeFixture('norte');
+test('administration target never switches the platform operational context', async () => {
+    const root = node('root'), snapshot = data(), store = storeFixture(null);
+    snapshot.rights = { ...platformRights };
     const read = jest.fn(async () => snapshot);
     store.switchOrganizationContext = jest.fn(async id => { store.activeOrganizationId = id; store.contextGeneration++; });
     await createAdministrationView(root, store, { read }).load();
-    const selector = walk(root).find(n => n.name === 'operational-company');
+    const selector = walk(root).find(n => n.name === 'administration-target');
     selector.value = 'sur'; await selector.onchange();
-    expect(store.switchOrganizationContext).toHaveBeenCalledWith('sur');
-    expect(read).toHaveBeenLastCalledWith('sur', '');
-    expect(walk(root).find(n => n.name === 'operational-company').value).toBe('sur');
+    expect(store.switchOrganizationContext).not.toHaveBeenCalled();
+    expect(store.activeOrganizationId).toBeNull();
+    expect(store.contextState).toBe('PLATFORM_READY');
+    expect(read).toHaveBeenLastCalledWith(null, '');
+    expect(walk(root).find(n => n.name === 'administration-target').value).toBe('sur');
     expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
 });
 
@@ -211,4 +215,44 @@ test('aggregate organization visibility never substitutes for individual create,
     expect(walk(root).filter(n => n.tag === 'button' && n.className === 'mica-action-btn').map(n => n.title)).toEqual(['Ver detalle', 'Ver detalle']);
     expect(walk(root).some(n => n.textContent === '+ Nueva Empresa')).toBe(false);
     click(root, 'Usuarios'); expect(walk(root).some(n => n.textContent === 'Permisos avanzados')).toBe(false);
+});
+
+test('management target survives primary navigation, resets for stale organizations and never leaks to another user', async () => {
+    const root = node('root'), snapshot = data(), store = storeFixture(null);
+    snapshot.rights = { ...platformRights };
+    store.switchOrganizationContext = jest.fn();
+    const view = createAdministrationView(root, store, { read: async () => snapshot });
+    await view.load();
+    const choose = async id => { const selector = walk(root).find(n => n.name === 'administration-target'); selector.value = id; await selector.onchange(); };
+    await choose('sur');
+    for (const section of ['Usuarios', 'Categorización', 'Empresas']) {
+        click(root, section);
+        expect(walk(root).find(n => n.name === 'administration-target').value).toBe('sur');
+    }
+    snapshot.organizations = snapshot.organizations.filter(o => o.id !== 'sur');
+    await view.load();
+    expect(walk(root).find(n => n.name === 'administration-target').value).toBe('');
+    await choose('norte');
+    store.contextState = 'SIGNED_OUT'; store.listener();
+    expect(view.snapshot).toBeNull();
+    expect(root.dataset.catalogTarget).toBe('');
+    store.sessionUserId = 'other-user'; store.contextState = 'PLATFORM_READY';
+    await view.load();
+    expect(walk(root).find(n => n.name === 'administration-target').value).toBe('');
+    expect(store.switchOrganizationContext).not.toHaveBeenCalled();
+});
+
+test('tenant context identity change resets managed target and keeps the real catalog nodes mounted', async () => {
+    const root = node('root'), snapshot = data(), store = storeFixture(null);
+    snapshot.rights = { ...platformRights };
+    const card = node('card-tax-categories'); card.append(node('category-table'));
+    document.getElementById = id => id === 'card-tax-categories' ? card : null;
+    const view = createAdministrationView(root, store, { read: async () => snapshot });
+    await view.load({ section: 'Categorización' });
+    const selector = walk(root).find(n => n.name === 'administration-target'); selector.value = 'norte'; await selector.onchange();
+    store.activeOrganizationId = 'sur'; store.contextState = 'TENANT_READY'; store.contextGeneration++;
+    await view.load();
+    expect(walk(root).some(n => n.name === 'administration-target')).toBe(false);
+    expect(walk(root).some(n => n.textContent === 'Contexto: Empresa Sur')).toBe(true);
+    expect(walk(root).find(n => n.id === 'mica-categorizacion-subview').children).toContain(card);
 });

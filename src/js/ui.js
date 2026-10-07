@@ -1978,8 +1978,8 @@ export class UIManager {
 
     static renderSettings() {
         const canManageGlobal = appStore.isCatalogPlatformContext() && appStore.canManageGlobalCatalog();
-        const canActOnTax = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('category');
-        const canActOnActivity = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('activity');
+        let canActOnTax = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('category');
+        let canActOnActivity = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('activity');
         for (const id of ['btn-import-arca-catalog', 'btn-create-global-category']) {
             const control = document.getElementById(id);
             if (control) {
@@ -1992,29 +1992,35 @@ export class UIManager {
             this.closeModal('modal-tax-category');
         }
         const isGlobalMode = appStore.isCatalogPlatformContext();
+        const admin = document.getElementById('mica-administration')?.dataset;
+        const managedTarget = admin?.catalogManagement === 'true';
 
         // Target Org Containers para Global Mode
         const targetTaxCatContainer = document.getElementById('target-org-tax-categories-container');
         const selectTargetTaxCat = document.getElementById('select-target-org-tax-cat');
         if (targetTaxCatContainer && selectTargetTaxCat) {
-            targetTaxCatContainer.style.display = isGlobalMode && appStore.canAssignCatalog() ? 'flex' : 'none';
+            targetTaxCatContainer.style.display = isGlobalMode && appStore.canAssignCatalog() && !managedTarget ? 'flex' : 'none';
             const orgs = (appStore.catalogAssignmentTargets || []).map(o => ({ id: o.organization_id, name: o.organization_name }));
-            const previousTarget = selectTargetTaxCat.value;
-            selectTargetTaxCat.innerHTML = orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            const previousTarget = managedTarget ? admin.catalogTarget : selectTargetTaxCat.value;
+            selectTargetTaxCat.innerHTML = (managedTarget ? '<option value="">Seleccioná una empresa gestionada</option>' : '') + orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            if (managedTarget) selectTargetTaxCat.value = orgs.some(o => o.id === previousTarget) ? previousTarget : '';
             selectTargetTaxCat.onchange = () => window.handleCatalogTargetChange('categories');
         }
 
         const targetEconActContainer = document.getElementById('target-org-economic-activities-container');
         const selectTargetEconAct = document.getElementById('select-target-org-econ-act');
         if (targetEconActContainer && selectTargetEconAct) {
-            targetEconActContainer.style.display = isGlobalMode && appStore.canAssignCatalog() ? 'flex' : 'none';
+            targetEconActContainer.style.display = isGlobalMode && appStore.canAssignCatalog() && !managedTarget ? 'flex' : 'none';
             const orgs = (appStore.catalogAssignmentTargets || []).map(o => ({ id: o.organization_id, name: o.organization_name }));
-            const previousTarget = selectTargetEconAct.value;
-            selectTargetEconAct.innerHTML = orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            const previousTarget = managedTarget ? admin.catalogTarget : selectTargetEconAct.value;
+            selectTargetEconAct.innerHTML = (managedTarget ? '<option value="">Seleccioná una empresa gestionada</option>' : '') + orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            if (managedTarget) selectTargetEconAct.value = orgs.some(o => o.id === previousTarget) ? previousTarget : '';
             selectTargetEconAct.onchange = () => window.handleCatalogTargetChange('activities');
         }
 
         if (isGlobalMode) {
+            canActOnTax = canActOnTax && !!selectTargetTaxCat?.value;
+            canActOnActivity = canActOnActivity && !!selectTargetEconAct?.value;
             for (const [rows, target] of [
                 [appStore.taxCategories, selectTargetTaxCat?.value],
                 [appStore.displayedEconomicActivities, selectTargetEconAct?.value]
@@ -2443,8 +2449,8 @@ window.loadLessEconomicActivities = function() {
 };
 
 window.handleCatalogTargetChange = function(kind) {
-    if (kind === 'categories') taxCategoriesGrid.clearSelection();
-    else economicActivitiesGrid.clearSelection();
+    if (kind === 'categories' || kind === 'all') taxCategoriesGrid.clearSelection();
+    if (kind !== 'categories') economicActivitiesGrid.clearSelection();
     UIManager.renderSettings();
 };
 
@@ -2532,6 +2538,7 @@ window.toggleSingleTaxCategoryAssignment = async function(id) {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-tax-cat')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             if (enabled) await appStore.unassignTaxCategoryFromOrg(id, target);
             else await appStore.assignTaxCategoryToOrg(id, target);
         } else {
@@ -2553,6 +2560,7 @@ window.actionToggleTaxCategories = async function() {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-tax-cat')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             await appStore.bulkAssignTaxCategories(ids, target);
         } else {
             await appStore.setTaxCategoriesActive(ids, true);
@@ -2574,6 +2582,7 @@ window.actionDeleteTaxCategories = async function() {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-tax-cat')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             await appStore.bulkUnassignTaxCategories(ids, target);
         } else {
             await appStore.setTaxCategoriesActive(ids, false);
@@ -2635,6 +2644,7 @@ window.toggleSingleEconomicActivityAssignment = async function(id) {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-econ-act')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             if (enabled) await appStore.unassignEconomicActivityFromOrg(id, target);
             else await appStore.assignEconomicActivityToOrg(id, target);
         } else {
@@ -2656,6 +2666,7 @@ window.actionAssignEconomicActivities = async function() {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-econ-act')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             await appStore.bulkAssignEconomicActivitiesToOrg(ids, target);
         } else {
             await appStore.setEconomicActivitiesActive(ids, true);
@@ -2677,6 +2688,7 @@ window.actionUnassignEconomicActivities = async function() {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-econ-act')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             await appStore.bulkUnassignEconomicActivitiesFromOrg(ids, target);
         } else {
             await appStore.setEconomicActivitiesActive(ids, false);
