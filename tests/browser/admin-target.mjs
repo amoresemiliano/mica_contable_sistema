@@ -159,6 +159,9 @@ try {
     await evaluate("[...document.querySelectorAll('button')].find(n=>n.textContent==='+ Invitar / asignar usuario').click()");
     await new Promise(r=>setTimeout(r,100));
     await assert("document.querySelector('[name=access-type]').value==='ORGANIZATION'&&document.querySelector('[name=access-company]').value==='sur'",'Company invitation default');
+    await evaluate("document.querySelector('[name=access-company]').value='norte';document.querySelector('[name=access-company]').onchange()");
+    await assert("document.querySelector('[name=access-company]').value==='norte'&&document.querySelector('[name=access-role]').options.length>0",'Authorized organization selector');
+    await evaluate("document.querySelector('[name=access-company]').value='sur';document.querySelector('[name=access-company]').onchange()");
     await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
     await assert("document.documentElement.scrollWidth<=innerWidth&&document.querySelector('dialog').getBoundingClientRect().right<=innerWidth",'Access editor mobile overflow');
     await assert("[...document.querySelector('[name=access-role]').options].every(o=>window.data.presets.find(p=>p.id===o.value).scope==='ORGANIZATION')",'Role scope filtering');
@@ -183,6 +186,13 @@ try {
     await assert("!document.querySelector('dialog')",'Role screen auto-opens giant form');
     await evaluate("[...document.querySelector('.mica-admin-advanced-nav').children].find(n=>n.textContent==='Accesos').click();[...document.querySelector('.mica-admin-advanced').querySelectorAll('button')].find(n=>n.textContent==='Ver detalle').click()");
     await assert("[...document.querySelectorAll('dialog details')].some(n=>n.querySelector('summary').textContent==='Excepciones avanzadas'&&!n.open)",'Overrides not collapsed');
+    await assert("!document.querySelector('dialog').textContent.includes('Las membresías requieren el contexto operativo')",'Platform access still demands tenant context');
+    await evaluate("document.querySelector('dialog header button').click()");
+    await evaluate("[...document.querySelector('.mica-admin-advanced').querySelectorAll('tr')].find(n=>n.textContent.includes('ana@example.invalid')).querySelector('button').click()");
+    await assert("document.querySelector('dialog').textContent.includes('Cambiar rol')&&document.querySelector('dialog').textContent.includes('Quitar acceso')",'Company access actions missing');
+    await evaluate("[...document.querySelector('dialog').querySelectorAll('button')].find(n=>n.textContent==='Cambiar rol').click()");
+    await new Promise(r=>setTimeout(r,100));
+    await assert("document.querySelector('[name=access-type]').value==='ORGANIZATION'&&document.querySelector('[name=access-company]').value==='norte'&&document.querySelector('[name=access-role]').value==='MICA_ACCOUNTANT'",'Role change confused existing access company with management target');
     await evaluate("document.querySelector('dialog header button').click()");
     await evaluate("[...document.querySelectorAll('[role=tab]')].find(n=>n.textContent==='Empresas').click();document.querySelector('[aria-label=\"Ver detalle de Sur S.R.L.\"]').click()");
     await evaluate("const sidebar=document.createElement('aside');sidebar.id='fixture-sidebar';sidebar.style.cssText='position:fixed;left:0;top:0;width:240px;height:100vh;z-index:2147483647;background:#eee';document.body.append(sidebar)");

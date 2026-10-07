@@ -260,9 +260,10 @@ export function createAdministrationView(root, store, service = administrationSe
                 { email: fd.get('email'), role_template_id: fd.get('access-role'), is_active: true }));
             const email = field(f, 'email', 'Email', existing?.email || ''); email.type = 'email'; email.required = true;
             const canCompany = access.organizations.length > 0;
-            const type = field(f, 'access-type', 'Tipo de acceso', canCompany && (managementOrg() || !platformRoles.length) ? 'ORGANIZATION' : 'PLATFORM',
+            const type = field(f, 'access-type', 'Tipo de acceso', canCompany && (existing?.organization_id || managementOrg() || !platformRoles.length) ? 'ORGANIZATION' : 'PLATFORM',
                 [...(canCompany ? [['ORGANIZATION','Empresa']] : []), ...(platformRoles.length ? [['PLATFORM','Plataforma']] : [])]);
-            const company = field(f, 'access-company', 'Empresa', access.organizations.some(o=>o.id===managementOrg()) ? managementOrg() : access.organizations[0]?.id || '', options(access.organizations));
+            const defaultCompany = existing?.organization_id || managementOrg();
+            const company = field(f, 'access-company', 'Empresa', access.organizations.some(o=>o.id===defaultCompany) ? defaultCompany : access.organizations[0]?.id || '', options(access.organizations));
             const role = field(f, 'access-role', 'Rol / Perfil', '', []);
             const draw = () => {
                 company.closest?.('label')?.toggleAttribute?.('hidden', type.value !== 'ORGANIZATION');
@@ -725,7 +726,31 @@ export function createAdministrationView(root, store, service = administrationSe
             list(panel, data.platform_roles.filter(p => p.user_profile_id === selectedUser), p =>
                 'Plataforma · ' + presetName(p.role_template_id) + ' · ' + (p.is_active ? 'Activo' : 'Inactivo'));
             panel.append(el('h4','Acceso a empresas'));
-            list(panel, data.memberships.filter(m => m.user_profile_id === selectedUser), m =>
+            const companyAccess = data.memberships.filter(m => m.user_profile_id === selectedUser);
+            const platformCompanyAccess = store.contextState === 'PLATFORM_READY' && r.global_users && service.platformAccess;
+            if (platformCompanyAccess) {
+                table(panel, companyAccess, [['Empresa',m=>organizations.find(o=>o.id===m.organization_id)?.name || 'Empresa'],
+                    ['Rol / Perfil',m=>presetName(m.role_template_id)],['Estado',m=>m.is_active?'Activo':'Inactivo']], membership => {
+                    const actions = el('div', null, { className: 'mica-action-btn-group' });
+                    const user = users.find(u=>u.id===selectedUser);
+                    const change = el('button', 'Cambiar rol', { type: 'button' });
+                    change.onclick = () => openAccessEditor(data, { ...user, ...membership }); actions.append(change);
+                    if (membership.is_active) {
+                        const remove = el('button', 'Quitar acceso', { type: 'button' });
+                        remove.onclick = async () => {
+                            if (!confirm('¿Desactivar el acceso de '+user.email+' a esta empresa?')) return;
+                            remove.disabled = true;
+                            const token = epoch;
+                            try {
+                                await service.platformAccess('remove', membership.organization_id, { user_profile_id: user.id });
+                                if (token === epoch) await load();
+                            } catch (error) { if (token === epoch) panel.append(el('p', error.message, { role: 'status' })); }
+                            finally { remove.disabled = false; }
+                        }; actions.append(remove);
+                    }
+                    return actions;
+                }, true);
+            } else list(panel, companyAccess, m =>
                 (organizations.find(o => o.id === m.organization_id)?.name || 'Empresa') + ' → ' + presetName(m.role_template_id) + ' · ' + (m.is_active ? 'Activo' : 'Inactivo'));
             if (store.contextState === 'PLATFORM_READY' && r.global_users && service.platformAccess) {
                 const addAccess = el('button','Agregar acceso de empresa',{type:'button'});
@@ -744,7 +769,8 @@ export function createAdministrationView(root, store, service = administrationSe
             field(f, 'preset', 'Rol / Perfil', '', options(available.filter(p => p.scope === 'PLATFORM' ? r.global_users : !!org)));
             choice(f, 'active', 'Estado', true);
             }
-            if (!org) panel.append(el('p', 'Las membresías requieren el contexto operativo de la empresa.'));
+            if (!org && !(store.contextState === 'PLATFORM_READY' && r.global_users && service.platformAccess))
+                panel.append(el('p', 'Las membresías requieren el contexto operativo de la empresa.'));
             if (r.global_users) {
                 const scopesPanel = disclosure(panel, 'Ámbitos de plataforma');
                 const scopeForm = form(scopesPanel, 'Asignar / revocar ámbito de plataforma', fd => service.apply('scope', {
