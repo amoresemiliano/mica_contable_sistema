@@ -36,7 +36,7 @@ test('039g platform context explains organization permissions instead of showing
     snapshot.capabilities=[{code:'ORGANIZATION_CREATE',scope:'PLATFORM'},{code:'RECORD_VIEW',scope:'ORGANIZATION'}];
     const store={sessionUserId:'actor',contextGeneration:1,contextState:'PLATFORM_READY',activeOrganizationId:null,subscribe(){}};
     await createAdministrationView(root,store,{read:async()=>snapshot}).load();
-    advanced(root, 'Asignaciones');
+    advanced(root, 'Accesos');
     walk(root).find(n=>n.textContent==='Ver detalle').onclick();
     const texts=walk(root).map(n=>n.textContent||'');
     expect(texts).toContain('Permisos de plataforma');
@@ -58,7 +58,7 @@ test('039g revised operational configuration hides structural tools and leads wi
     expect(walk(root).some(n=>n.name==='is_active')).toBe(false);
     walk(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios').onclick();
     const text=walk(root).map(n=>n.textContent||'').join(' ');
-    for(const forbidden of ['Roles y permisos','Asignaciones','Overrides','Capabilities','Ámbitos de plataforma','Estado de la cuenta']) expect(text).not.toContain(forbidden);
+    for(const forbidden of ['Roles','Accesos','Overrides','Capabilities','Ámbitos de plataforma','Estado de la cuenta']) expect(text).not.toContain(forbidden);
     expect(walk(root).some(n=>n.textContent==='Contexto: Norte')).toBe(true);
     expect(walk(root).some(n=>n.name==='administration-target')).toBe(false);
     expect(walk(root).some(n=>n.textContent==='+ Invitar usuario')).toBe(true);
@@ -71,7 +71,7 @@ test.each([false,true])('deprecated accounting never appears in assignment selec
         {id:'operational',code:'ADMINISTRACION_OPERATIVA_MICA',name:'Operativa',scope:'PLATFORM',is_active:true,capabilities:[],bridge:[]}];
     const store={sessionUserId:'root',contextGeneration:1,contextState:'PLATFORM_READY',activeOrganizationId:null,subscribe(){}};
     await createAdministrationView(root,store,{read:async()=>snapshot}).load();
-    advanced(root, 'Asignaciones');
+    advanced(root, 'Accesos');
     walk(root).find(n=>n.textContent==='Ver detalle').onclick();
     const values=walk(root).filter(n=>n.tag==='option').map(n=>n.value);
     expect(values).toContain('operational');
@@ -85,7 +85,7 @@ test('root shares primary navigation and retains secondary structural tools',asy
     await createAdministrationView(root,store,{read:async()=>snapshot}).load();
     expect(walk(root).filter(n=>n.role==='tab').map(n=>n.textContent)).toEqual(['Empresas','Usuarios','Categorización']);
     advanced(root);
-    expect(walk(root).find(n=>n.className==='mica-admin-advanced-nav').children.map(n=>n.textContent)).toEqual(['Usuarios de plataforma','Roles y permisos','Asignaciones']);
+    expect(walk(root).find(n=>n.className==='mica-admin-advanced-nav').children.map(n=>n.textContent)).toEqual(['Usuarios','Roles','Accesos']);
 });
 test('keyboard navigation mounts one primary panel and advanced user filters combine',async()=>{
     const root=node('root'),snapshot=data(),store={sessionUserId:'actor',contextGeneration:1,contextState:'TENANT_READY',activeOrganizationId:'north',subscribe(){}};

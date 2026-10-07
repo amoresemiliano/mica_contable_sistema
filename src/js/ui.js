@@ -2250,20 +2250,10 @@ export class UIManager {
 
         // 3. IIBB Rates
         const rates = appStore.iibbRates || [];
-        this.renderRecordActionToolbar({
-            containerId: 'toolbar-iibb-rates',
-            grid: iibbRatesGrid,
-            visibleItems: rates,
-            onEdit: 'window.actionEditIibbRate()',
-            onClone: 'window.actionCloneIibbRate()',
-            onToggleActive: 'window.actionToggleIibbRates()',
-            onDelete: 'window.actionDeleteIibbRates()',
-            options: {
-                masterToggleHandler: 'window.toggleMasterIibbRates',
-                toggleLabel: 'Activar / Desactivar',
-                deleteLabel: 'Desactivar / Eliminar'
-            }
-        });
+        const rateText = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const rateDate = value => value ? rateText(String(value).slice(0,10).split('-').reverse().join('/')) : '-';
+        const rateToolbar = document.getElementById('toolbar-iibb-rates');
+        if (rateToolbar) { rateToolbar.innerHTML = ''; rateToolbar.hidden = true; rateToolbar.style.display = 'none'; }
 
         const irTbody = document.getElementById('table-iibb-rates-body');
         if (irTbody) {
@@ -2274,14 +2264,14 @@ export class UIManager {
             } else {
                 irTbody.innerHTML = rates.map(r => `
                     <tr>
-                        <td style="text-align: center;"><input type="checkbox" class="iibb-rate-checkbox" value="${r.id}" ${iibbRatesGrid.isRowSelected(r.id) ? 'checked' : ''} onchange="window.toggleIibbRateRowSelection('${r.id}')"></td>
-                        <td><strong>${r.activity_name || 'Desconocida'}</strong></td>
-                        <td><strong>${r.jurisdiction}</strong></td>
+                        <td></td>
+                        <td><strong>${rateText(r.activity_name || 'Desconocida')}</strong></td>
+                        <td><strong>${rateText(r.jurisdiction)}</strong></td>
                         <td style="font-weight: 700; color: var(--primary);">${r.rate_percent}%</td>
-                        <td>${r.valid_from ? new Date(r.valid_from).toLocaleDateString() : '-'}</td>
-                        <td>${r.valid_to ? new Date(r.valid_to).toLocaleDateString() : 'Indefinido'}</td>
+                        <td>${rateDate(r.valid_from)}</td>
+                        <td>${r.valid_to ? rateDate(r.valid_to) : 'Indefinido'}</td>
                         <td>${r.is_active ? '<span style="color:var(--success); font-weight:600;">Vigente</span>' : '<span style="color:var(--text-muted);">Inactivo</span>'}</td>
-                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.promptEditIibbRateModal('${r.id}')">Editar</button></td>
+                        <td>Asignada por Platform</td>
                     </tr>
                 `).join('');
             }

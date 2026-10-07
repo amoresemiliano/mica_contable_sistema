@@ -132,7 +132,7 @@ test.each(['operational', 'platform'])('%s admin shares Empresas, Usuarios and C
     if (kind === 'platform') {
         click(root, 'Permisos avanzados');
         expect(walk(root).find(n => n.className === 'mica-admin-advanced-nav').children.map(n => n.textContent))
-            .toEqual(['Usuarios de plataforma', 'Roles y permisos', 'Asignaciones']);
+            .toEqual(['Usuarios', 'Roles', 'Accesos']);
         expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
     }
 });

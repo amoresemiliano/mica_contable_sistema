@@ -158,12 +158,21 @@
 
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border-width:0; }
 
+#mica-administration .mica-admin-drawer { width:600px; max-width:calc(100vw - 24px); inset:12px 12px 12px auto; height:calc(100dvh - 24px); max-height:calc(100dvh - 24px); border-radius:12px; }
+#mica-administration .mica-company-detail-list { display:grid; grid-template-columns:minmax(100px,1fr) minmax(0,2fr); gap:12px; margin:0; }
+#mica-administration .mica-company-detail-list dt { font-weight:600; }
+#mica-administration .mica-company-detail-list dd { margin:0; overflow-wrap:anywhere; }
+#mica-administration .mica-admin-table td { overflow-wrap:anywhere; }
+#mica-administration .mica-preset-list { display:grid; gap:8px; }
+#mica-administration .mica-preset-list button { text-align:left; white-space:normal; }
+#mica-administration .mica-rate-ownership { color:var(--text-muted); font-size:.85rem; }
+
 @media(max-width:640px) {
     #mica-administration .mica-admin-persistent-header { flex-direction:column; align-items:stretch; }
     #mica-administration .mica-admin-header-left { flex-direction:column; align-items:stretch; }
     #mica-administration .mica-admin-org-select { flex:1; width:0; }
     #mica-administration .mica-admin-nav-group { justify-content:flex-start; }
-    #mica-administration .mica-admin-drawer { width:100vw; padding:16px; }
+    #mica-administration .mica-admin-drawer { width:calc(100vw - 16px); max-width:calc(100vw - 16px); inset:8px; height:calc(100dvh - 16px); max-height:calc(100dvh - 16px); padding:16px; }
     #mica-administration .mica-admin-table-scroll { max-height:none; }
 }
 

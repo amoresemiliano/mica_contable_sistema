@@ -1,4 +1,5 @@
 import { openAdminDrawer } from './adminDrawer.js';
+import { renderPlatformRates } from './adminRates.js';
 import { administrationService, editableCapabilities, assignmentPermissionPreview } from '../core/services/administrationService.js';
 import { capabilityPresentation } from '../core/capabilityPresentation.js';
 import { SCOPE_LABELS, PERMISSION_STATES, MICA_BUSINESS_FUNCTIONS, PERMISSION_GROUPS } from '../core/micaPermissionContract.js';
@@ -12,6 +13,9 @@ export function createAdministrationView(root, store, service = administrationSe
     let adminTargetOrg = '', targetIdentity = '';
     const managementOrg = () => store.contextState === 'PLATFORM_READY' ? adminTargetOrg : store.activeOrganizationId;
     const tenantOrg = () => store.contextState === 'TENANT_READY' ? store.activeOrganizationId : null;
+    const assignableRole = (data, p) => p.is_active && !p.protected &&
+        !['ROOT_TECHNICAL_MICA','VEGEN_PLATFORM_ADMIN','ACCOUNTING_SUPERADMIN'].includes(p.code) &&
+        !data.platform_roles.some(a => a.role_template_id === p.id && data.users.some(u => u.id === a.user_profile_id && u.protected));
     function cacheCards() {
         for (const id of ['card-tax-categories', 'card-economic-activities', 'card-iibb-rates', 'card-iva-rates']) {
             if (!categorizationCards.has(id)) {
@@ -221,27 +225,99 @@ export function createAdministrationView(root, store, service = administrationSe
     }
 
     function renderCompanyDetailModal(o) {
-        const modal = el('dialog', null, { className: 'mica-company-detail-card' });
-        const title = el('h3', o.name || 'Detalle de la empresa');
-        const closeBtn = el('button', '×', { type: 'button', className: 'mica-modal-close' });
-        closeBtn.onclick = () => modal.remove();
-        
+        const editor = openEditor(o.name || 'Detalle de la empresa');
         const detailsList = el('dl', null, { className: 'mica-company-detail-list' });
         const fields = [
+            ['Empresa', o.name || '—'],
             ['Razón Social', o.legal_name || o.name || '—'],
             ['CUIT', o.tax_id || '—'],
             ['Teléfono', o.phone || '—'],
             ['Email', o.email || '—'],
             ['Contacto', o.contact_person || '—'],
             ['Website', o.website || '—'],
-            ['Domicilio', o.address || '—']
+            ['Domicilio', o.address || '—'],
+            ['Estado', o.is_active ? 'Activa' : 'Inactiva']
         ];
         fields.forEach(([label, val]) => {
             detailsList.append(el('dt', label), el('dd', val));
         });
-        modal.append(closeBtn, title, detailsList);
-        root.append(modal);
-        if (modal.showModal) modal.showModal();
+        editor.append(detailsList);
+    }
+
+    async function openAccessEditor(data, existing = null) {
+        const editor = openEditor(existing ? 'Cambiar rol / perfil' : 'Invitar / asignar usuario');
+        const status = el('p', 'Cargando empresas y roles autorizados…', { role: 'status' }); editor.append(status);
+        const token = epoch;
+        try {
+            if (!service.platformAccess) throw Error('Este flujo requiere la migración 041.');
+            const access = await service.platformAccess('options');
+            if (token !== epoch || !root.contains(editor)) return;
+            status.textContent = '';
+            const platformRoles = access.platform_roles || [];
+            if (!access.organizations.length && !platformRoles.length) { status.textContent='No hay empresas ni roles compatibles para asignar.'; return; }
+            const f = form(editor, 'Acceso de usuario', fd => service.platformAccess('save',
+                fd.get('access-type') === 'ORGANIZATION' ? fd.get('access-company') : null,
+                { email: fd.get('email'), role_template_id: fd.get('access-role'), is_active: true }));
+            const email = field(f, 'email', 'Email', existing?.email || ''); email.type = 'email'; email.required = true;
+            const canCompany = access.organizations.length > 0;
+            const type = field(f, 'access-type', 'Tipo de acceso', canCompany && (managementOrg() || !platformRoles.length) ? 'ORGANIZATION' : 'PLATFORM',
+                [...(canCompany ? [['ORGANIZATION','Empresa']] : []), ...(platformRoles.length ? [['PLATFORM','Plataforma']] : [])]);
+            const company = field(f, 'access-company', 'Empresa', access.organizations.some(o=>o.id===managementOrg()) ? managementOrg() : access.organizations[0]?.id || '', options(access.organizations));
+            const role = field(f, 'access-role', 'Rol / Perfil', '', []);
+            const draw = () => {
+                company.closest?.('label')?.toggleAttribute?.('hidden', type.value !== 'ORGANIZATION');
+                company.required = type.value === 'ORGANIZATION';
+                const roles = type.value === 'ORGANIZATION' ? access.organizations.find(o => o.id === company.value)?.roles || [] :
+                    platformRoles;
+                role.replaceChildren(...roles.map(p => el('option', p.name, { value: p.id })));
+                role.value = roles.some(p => p.id === existing?.role_template_id) ? existing.role_template_id : roles[0]?.id || '';
+                f.querySelector?.('button[type=submit]')?.toggleAttribute?.('disabled', !roles.length);
+            };
+            type.onchange = company.onchange = draw; draw();
+            f.append(el('p', 'Si el email ya existe, se asigna esa cuenta. Si es nuevo, queda pendiente de autenticación y confirmación; no se crea una cuenta duplicada ni se envía un email automático.'));
+        } catch (error) { if (token === epoch && root.contains(editor)) status.textContent = error.message; }
+    }
+
+    function renderPlatformCompanyUsers(parent, data, org) {
+        const region = el('div', null, { className: 'mica-company-users' }); parent.append(region);
+        const status = el('p', 'Cargando accesos de empresa…', { role: 'status' }); region.append(status);
+        const token = epoch;
+        const current = () => token === epoch && managementOrg() === org && root.contains(region);
+        const invite = el('button', '+ Invitar / asignar usuario', { type: 'button', className: 'btn-primary' });
+        invite.onclick = () => openAccessEditor(data); parent.actionHeader.append(invite);
+        Promise.resolve().then(() => {
+            if (!service.platformAccess) throw Error('La administración de accesos de empresa requiere la migración 041.');
+            return service.platformAccess('list', org);
+        }).then(access => {
+            if (!current()) return; region.replaceChildren();
+            if (!access.users.length) region.append(el('p', 'No hay usuarios asignados a esta empresa.'));
+            table(region, access.users, [['Usuario',u=>u.name || u.email.split('@')[0]],['Email',u=>u.email],
+                ['Rol / Perfil',u=>u.role_name],['Estado',u=>u.member_active ? (u.pending ? 'Pendiente de activación' : 'Activo') : 'Inactivo']], user => {
+                const actions = el('div', null, { className: 'mica-action-btn-group' });
+                if (user.protected) { actions.append(el('span','Cuenta protegida')); return actions; }
+                const change = el('button','Cambiar rol',{type:'button'}); change.onclick=()=>openAccessEditor(data,user); actions.append(change);
+                if(user.member_active) {
+                    const remove=el('button','Quitar acceso',{type:'button'});
+                    remove.onclick=async()=>{
+                        if(!confirm('¿Desactivar el acceso de '+user.email+' a esta empresa?')) return;
+                        try { await service.platformAccess('remove',org,{user_profile_id:user.id}); if(current()) render(data); }
+                        catch(error) { if(current()) region.append(el('p',error.message,{role:'status'})); }
+                    }; actions.append(remove);
+                }
+                return actions;
+            },true);
+            for(const invitation of access.invitations) {
+                const row=el('p',invitation.email+' · Pendiente de autenticación');
+                if(invitation.user_profile_id) {
+                    const confirmButton=el('button','Confirmar acceso',{type:'button'});
+                    confirmButton.onclick=async()=>{
+                        try { await service.platformAccess('confirm',org,{id:invitation.id,user_profile_id:invitation.user_profile_id}); if(current()) render(data); }
+                        catch(error) { if(current()) region.append(el('p',error.message,{role:'status'})); }
+                    }; row.append(confirmButton);
+                }
+                region.append(row);
+            }
+        }).catch(error=>{if(current()) status.textContent=error.message;});
     }
 
     function editCompanyForm(o = {}) {
@@ -319,6 +395,9 @@ export function createAdministrationView(root, store, service = administrationSe
         // SECTION 2: USUARIOS
         if (activeSection === 'Usuarios') {
             renderAdvancedEntry(s, data);
+            if (store.contextState === 'PLATFORM_READY' && org && r.global_users && service.platformAccess) {
+                renderPlatformCompanyUsers(s, data, org); return;
+            }
             if (!org) {
                 s.append(el('p', 'Seleccioná una empresa gestionada para ver y gestionar sus usuarios.'));
                 return;
@@ -435,7 +514,8 @@ export function createAdministrationView(root, store, service = administrationSe
                 if (refreshCatalog) refreshCatalogData(() => store.loadEconomicActivities?.(), catContainer);
             } else if (activeCategorizationSubSection === 'Impuestos') {
                 if (!platform && iibbCard) catContainer.append(iibbCard);
-                if (platform) catContainer.append(el('p', 'La gestión de tasas IIBB requiere el contexto operativo de la empresa. La selección de empresa gestionada no cambia ese contexto.'));
+                if (platform && store.hasCapability?.('RATE_MANAGE_ANY_ORG',{scope:'PLATFORM'})) renderPlatformRates(catContainer,store,service,adminTargetOrg,openEditor);
+                else if (platform) catContainer.append(el('p', 'La administración global de tasas requiere el permiso de administrar tasas de empresas.'));
                 if (ivaCard) catContainer.append(ivaCard);
                 if (refreshCatalog && !platform) refreshCatalogData(() => store.loadIibbRates?.(), catContainer);
             }
@@ -476,19 +556,19 @@ export function createAdministrationView(root, store, service = administrationSe
     }
     function renderAdvanced(data, advancedContent) {
         const { rights: r, organizations, users, presets, capabilities } = data;
-        const available = [[r.users && r.global_users,'Usuarios'],[r.presets,'Roles y permisos'],[r.assignments,'Asignaciones']]
+        const available = [[r.users && r.global_users,'Usuarios'],[r.presets,'Roles'],[r.assignments,'Accesos']]
             .filter(([allowed])=>allowed).map(([,title])=>title);
         if (!available.includes(advancedSection)) advancedSection = available[0];
         const nav = el('nav', null, { className: 'mica-admin-advanced-nav', ariaLabel: 'Herramientas avanzadas' });
         for (const title of available) {
-            const button = el('button', title === 'Usuarios' ? 'Usuarios de plataforma' : title, { type: 'button', ariaPressed: String(title === advancedSection) });
+            const button = el('button', title, { type: 'button', ariaPressed: String(title === advancedSection) });
             button.onclick = () => { advancedSection = title; render(data); };
             nav.append(button);
         }
         advancedContent.append(nav);
         if (r.users && advancedSection === 'Usuarios') {
-            const s = section('Usuarios de plataforma', advancedContent);
-            s.append(el('p', 'El usuario se registra con el acceso habitual. La cuenta nueva queda pendiente; asigná un preset y ámbito antes de aprobarla.'));
+            const s = section('Usuarios', advancedContent);
+            s.append(el('p', 'El usuario se registra con el acceso habitual. La cuenta nueva queda pendiente; asigná un rol / perfil y ámbito antes de aprobarla.'));
             const sf = el('form',null,{className:'mica-admin-search'});
             const q = field(sf, 'search', 'Buscar email', search);
             sf.append(el('button', 'Buscar', { type: 'submit' }));
@@ -497,6 +577,7 @@ export function createAdministrationView(root, store, service = administrationSe
             if (service.invitation && mayInvite(r)) {
                 const invite = el('button','+ Invitar usuario',{type:'button'});
                 invite.onclick = () => {
+                    if (store.contextState === 'PLATFORM_READY' && service.platformAccess) { openAccessEditor(data); return; }
                     editor = openEditor('Invitar usuario');
                     const f = form(editor,'Invitar usuario',fd => service.invitation('create',
                         fd.get('scope') === 'PLATFORM' ? null : tenantOrg(),
@@ -504,7 +585,7 @@ export function createAdministrationView(root, store, service = administrationSe
                     const email = field(f,'email','Email'); email.type='email'; email.required=true;
                     const scope=field(f,'scope','Tipo',tenantOrg()?'ORGANIZATION':'PLATFORM',[
                         ...(tenantOrg() ? [['ORGANIZATION',SCOPE_LABELS.ORGANIZATION]] : []),...(r.global_users ? [['PLATFORM',SCOPE_LABELS.PLATFORM]] : [])]);
-                    const preset=field(f,'preset','Preset','',[]);
+                    const preset=field(f,'preset','Rol / Perfil','',[]);
                     const draw=()=>{preset.replaceChildren(...presets.filter(p=>p.is_active&&p.scope===scope.value&&
                         (!p.organization_id||p.organization_id===managementOrg())).map(p=>el('option',p.name,{value:p.id})));};
                     scope.onchange=draw; draw();
@@ -514,9 +595,9 @@ export function createAdministrationView(root, store, service = administrationSe
                 list(disclosure(s,'Invitaciones pendientes'),data.invitations||[],i=>i.email+' · '+(i.assigned_at?'Asignada · activar desde Usuarios':i.user_profile_id?'Pendiente de confirmación':'Pendiente de autenticación'),i=>{
                     editor = openEditor();
                     if (!i.user_profile_id || i.assigned_at) { editor.append(el('p','La cuenta debe autenticarse antes de confirmar. Las asignaciones ya confirmadas se administran desde Usuarios y Asignaciones.')); return; }
-                    form(editor,'Confirmar preset y organización para '+i.email,()=>service.invitation('assign',i.organization_id,
+                    form(editor,'Confirmar rol y empresa para '+i.email,()=>service.invitation('assign',i.organization_id,
                         {id:i.id,user_profile_id:i.user_profile_id}));
-                    editor.append(el('p','Esta confirmación asigna el preset; la cuenta continúa inactiva hasta que la actives en Usuarios.'));
+                    editor.append(el('p','Esta confirmación asigna el rol / perfil; la cuenta continúa inactiva hasta que la actives en Usuarios.'));
                 });
             }
             const filters=el('div',null,{className:'mica-admin-filters'}); s.append(filters);
@@ -524,13 +605,15 @@ export function createAdministrationView(root, store, service = administrationSe
             const organization=field(filters,'user-org','Organización',userOrg,[['','Todas'],...options(organizations)]); organization.value=userOrg;
             const listing=el('div'); s.append(listing);
             const assignments = user => [...data.platform_roles,...data.memberships].filter(a=>a.user_profile_id===user.id);
-            const roleName = user => assignments(user).map(a=>presets.find(p=>p.id===a.role_template_id)?.name||'Preset histórico').join(' · ')||'Sin asignación';
+            const roleName = user => assignments(user).map(a=>presets.find(p=>p.id===a.role_template_id)?.name||'Rol histórico').join(' · ')||'Sin asignación';
             const status = user => user.protected?'Root protegido':user.pending?'Pendiente':user.is_active?'Activo':'Inactivo';
             const drawUsers=()=>{ listing.replaceChildren(); table(listing,users.filter(u=>
                 (!userState || (userState==='pending'?u.pending:userState==='active'?u.is_active&&!u.pending:!u.is_active&&!u.pending)) &&
                 (!userOrg || [...data.memberships,...data.scopes].some(a=>a.user_profile_id===u.id&&a.organization_id===userOrg))),
                 [['Usuario',u=>u.name||u.email.split('@')[0]],['Email',u=>u.email],
-                 ['Ámbito',u=>data.platform_roles.some(a=>a.user_profile_id===u.id)?'Plataforma':'Organización'],['Preset / Rol',roleName],['Estado',status]],user=>{
+                 ['Tipo',u=>data.platform_roles.some(a=>a.user_profile_id===u.id)?'Plataforma':'Empresa'],
+                 ['Empresa(s)',u=>[...data.memberships,...data.scopes].filter(a=>a.user_profile_id===u.id&&a.is_active).map(a=>organizations.find(o=>o.id===a.organization_id)?.name||'Empresa').join(' · ')||'—'],
+                 ['Rol / Perfil',roleName],['Estado',status]],user=>{
                     editor=openEditor(user.email);
                     editor.append(el('p',roleName(user)),el('p',status(user)));
                     const scopes=[...data.memberships,...data.scopes].filter(a=>a.user_profile_id===user.id);
@@ -539,24 +622,24 @@ export function createAdministrationView(root, store, service = administrationSe
                     if(r.global_users) { const f=form(editor,'Estado de la cuenta',fd=>service.apply('user',{
                         user_profile_id:user.id,organization_id:tenantOrg(),is_active:fd.get('active')==='true'
                     }));choice(f,'active','Estado',user.is_active); }
-                    if(r.assignments) {const assign=el('button','Preset y permisos',{type:'button'});
-                        assign.onclick=()=>{selectedUser=user.id;advancedSection='Asignaciones';render(data);};editor.append(assign);}
+                    if(r.assignments) {const assign=el('button','Accesos y permisos',{type:'button'});
+                        assign.onclick=()=>{selectedUser=user.id;advancedSection='Accesos';render(data);};editor.append(assign);}
                 }); };
             state.onchange=()=>{userState=state.value;drawUsers();};organization.onchange=()=>{userOrg=organization.value;drawUsers();};drawUsers();
             if (users.length === 200) s.append(el('p', 'Se muestran 200 usuarios. Refiná la búsqueda.'));
         }
-        if (r.presets && advancedSection === 'Roles y permisos') {
-            const s = section('Roles y permisos', advancedContent);
-            s.append(el('p', 'Presets MICA reutilizables. Los templates históricos no se editan desde esta pantalla.'));
-            const split=el('div',null,{className:'mica-preset-split'}), master=el('div',null,{className:'mica-preset-list'}), editor=el('div',null,{className:'mica-admin-editor'});
-            split.append(master,editor);s.append(split);
+        if (r.presets && advancedSection === 'Roles') {
+            const s = section('Roles', advancedContent);
+            s.append(el('p', 'Roles MICA reutilizables. Los templates históricos no se editan desde esta pantalla.'));
+            const master=el('div',null,{className:'mica-preset-list'}); s.append(master);
+            let editor;
             function edit(row = {}) {
-                editor.replaceChildren();
+                editor = openEditor(row.id ? 'Editar rol: ' + row.name : 'Nuevo rol');
                 if (row.organization_id && row.organization_id !== tenantOrg()) {
-                    editor.append(el('p', 'La edición de este preset requiere el contexto operativo de su empresa.'));
+                    editor.append(el('p', 'La edición de este rol requiere el contexto operativo de su empresa.'));
                     return;
                 }
-                const f = form(editor, row.id ? 'Editar preset' : 'Crear preset', fd => service.apply('preset', {
+                const f = form(editor, row.id ? 'Editar rol' : 'Crear rol', fd => service.apply('preset', {
                     id: row.id || null, organization_id: row.id ? row.organization_id : (r.global_presets ? null : tenantOrg()),
                     name: fd.get('name'), scope: fd.get('scope'), is_active: fd.get('active') === 'true',
                     capabilities: fd.getAll('capabilities'), bridge: fd.getAll('bridge'),
@@ -619,16 +702,15 @@ export function createAdministrationView(root, store, service = administrationSe
             const selected=visiblePresets.find(p=>p.id===selectedPreset)||visiblePresets[0];
             selectedPreset=selected?.id||'';
             for(const preset of visiblePresets) {
-                const button=el('button',preset.name,{type:'button',ariaPressed:String(selectedPreset===preset.id)});
+                const button=el('button',preset.name+' · '+(preset.scope==='PLATFORM'?'Plataforma':'Empresa')+' · '+(preset.is_active?'Activo':'Inactivo')+' · '+(preset.recipients||0)+' usuarios',{type:'button',ariaPressed:String(selectedPreset===preset.id)});
                 button.onclick=()=>{selectedPreset=preset.id;for(const child of master.children)child.ariaPressed=String(child===button);edit(preset);};master.append(button);
             }
-            const add=el('button','Nuevo preset',{type:'button',className:'btn-primary'});add.onclick=()=>{selectedPreset='';for(const child of master.children)child.ariaPressed='false';edit();};master.append(add);
-            if(selected) {selectedPreset=selected.id;edit(selected);}
-            else editor.append(el('p','Creá un preset para definir sus permisos.'));
+            const add=el('button','Nuevo rol',{type:'button',className:'btn-primary'});add.onclick=()=>{selectedPreset='';for(const child of master.children)child.ariaPressed='false';edit();};master.append(add);
+            if(!selected) master.append(el('p','Creá un rol para definir sus permisos.'));
 
         }
-        if (r.assignments && advancedSection === 'Asignaciones') {
-            const s = section('Asignaciones', advancedContent);
+        if (r.assignments && advancedSection === 'Accesos') {
+            const s = section('Accesos', advancedContent);
             const candidates=users.filter(u=>!u.protected);
             if(!candidates.some(u=>u.id===selectedUser)) selectedUser='';
             table(s,candidates,[['Usuario',u=>u.email],['Estado',u=>u.is_active?'Activo':'Inactivo']],user=>{selectedUser=user.id;drawAssignment();});
@@ -637,24 +719,29 @@ export function createAdministrationView(root, store, service = administrationSe
             const editable = candidates.filter(u=>u.id===selectedUser);
             if (!editable.length) { panel.append(el('p', 'Buscá un usuario administrable.')); return; }
             const org = tenantOrg();
-            const available = presets.filter(p => p.is_active);
-            const presetName = id => presets.find(p => p.id === id)?.name || 'Preset histórico (no editable)';
+            const available = presets.filter(p => assignableRole(data,p));
+            const presetName = id => presets.find(p => p.id === id)?.name || 'Rol histórico (no editable)';
+            panel.append(el('h4','Acceso a plataforma'));
             list(panel, data.platform_roles.filter(p => p.user_profile_id === selectedUser), p =>
                 'Plataforma · ' + presetName(p.role_template_id) + ' · ' + (p.is_active ? 'Activo' : 'Inactivo'));
+            panel.append(el('h4','Acceso a empresas'));
             list(panel, data.memberships.filter(m => m.user_profile_id === selectedUser), m =>
-                presetName(m.role_template_id) + ' · ' +
-                (organizations.find(o => o.id === m.organization_id)?.name || m.organization_id) + ' · ' + (m.is_active ? 'Activa' : 'Inactiva'));
+                (organizations.find(o => o.id === m.organization_id)?.name || 'Empresa') + ' → ' + presetName(m.role_template_id) + ' · ' + (m.is_active ? 'Activo' : 'Inactivo'));
+            if (store.contextState === 'PLATFORM_READY' && r.global_users && service.platformAccess) {
+                const addAccess = el('button','Agregar acceso de empresa',{type:'button'});
+                addAccess.onclick=()=>openAccessEditor(data,users.find(u=>u.id===selectedUser)); panel.append(addAccess);
+            }
             if (r.memberships) {
-            const f = form(disclosure(panel, 'Preset y organización'), 'Asignar preset', fd => {
+            const f = form(disclosure(panel, 'Rol y empresa'), 'Asignar rol / perfil', fd => {
                 const preset = available.find(p => p.id === fd.get('preset'));
-                if (!preset) throw new Error('Seleccioná un preset.');
+                if (!preset) throw new Error('Seleccioná un rol / perfil.');
                 return service.apply(preset.scope === 'PLATFORM' ? 'platform_role' : 'membership', {
                     user_profile_id: fd.get('user'), role_template_id: preset.id,
                     organization_id: preset.scope === 'PLATFORM' ? null : org, is_active: fd.get('active') === 'true'
                 });
             });
             field(f, 'user', 'Usuario', '', options(editable, 'email'));
-            field(f, 'preset', 'Preset', '', options(available.filter(p => p.scope === 'PLATFORM' ? r.global_users : !!org)));
+            field(f, 'preset', 'Rol / Perfil', '', options(available.filter(p => p.scope === 'PLATFORM' ? r.global_users : !!org)));
             choice(f, 'active', 'Estado', true);
             }
             if (!org) panel.append(el('p', 'Las membresías requieren el contexto operativo de la empresa.'));
@@ -669,7 +756,7 @@ export function createAdministrationView(root, store, service = administrationSe
                 list(scopesPanel, data.scopes.filter(row=>row.user_profile_id===selectedUser), row => (users.find(u => u.id === row.user_profile_id)?.email || '') + ' · ' +
                     (organizations.find(o => o.id === row.organization_id)?.name || row.organization_id) + ' · ' + (row.is_active ? 'Ámbito activo' : 'Ámbito inactivo'));
             }
-            const overridePanel = disclosure(panel, 'Personalizar permisos');
+            const overridePanel = disclosure(panel, 'Excepciones avanzadas');
             list(overridePanel, data.overrides.filter(o => o.user_profile_id === selectedUser), o =>
                 capabilityPresentation({code:o.capability}).label + ' · ' + PERMISSION_STATES[o.effect] + ' · ' +
                 (organizations.find(org => org.id === o.organization_id)?.name || o.organization_id || 'Plataforma'));
@@ -679,14 +766,14 @@ export function createAdministrationView(root, store, service = administrationSe
             }));
             const who = field(of, 'user', 'Usuario', '', options(editable, 'email'));
             const kind = field(of, 'kind', 'Tipo', '', r.global_users ?
-                [['platform', 'Plataforma'], ...(org ? [['membership', 'Membership']] : []), ...(managementOrg() ? [['platform_org', 'Plataforma en organización']] : [])] : [['membership', 'Membership']]);
+                [['platform', 'Plataforma'], ...(org ? [['membership', 'Acceso de empresa']] : []), ...(managementOrg() ? [['platform_org', 'Plataforma en empresa']] : [])] : [['membership', 'Acceso de empresa']]);
             const cap = field(of, 'capability', 'Permiso', '', []);
             field(of, 'effect', 'Excepción individual', 'INHERITED', Object.entries(PERMISSION_STATES));
             const preview = el('p'); of.append(preview);
             function showPreview() {
                 const state = assignmentPermissionPreview(data, who.value, kind.value === 'platform_org' ? managementOrg() : org,
                     {code: cap.value, scope: kind.value === 'platform' ? 'PLATFORM' : 'ORGANIZATION'});
-                preview.textContent = state.unknown ? 'Preset histórico: estado efectivo no calculado.' :
+                preview.textContent = state.unknown ? 'Rol histórico: estado efectivo no calculado.' :
                     'Estado guardado · Base: ' + (state.inherited ? 'Permitido' : 'sin permiso') + ' · Excepción: ' + PERMISSION_STATES[state.effect] +
                     ' · Efectivo: ' + (state.effective ? 'Permitido' : 'Denegado');
             }
