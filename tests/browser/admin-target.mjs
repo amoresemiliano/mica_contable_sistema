@@ -17,6 +17,7 @@ const html=`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="vie
 <script type="module">
 import {OperationalGrid} from '/src/js/core/operationalGrid.js';
 import {createAdministrationView} from '/src/js/components/administration.js';
+import {createAdministrationService} from '/src/js/core/services/administrationService.js';
 import {MICA_PERMISSION_CATALOG as capabilities,MICA_PRESET_DEFINITIONS,presetCapabilities} from '/src/js/core/micaPermissionContract.js';
 const presets=Object.entries(MICA_PRESET_DEFINITIONS).filter(([code])=>code!=='ROOT_TECHNICAL_MICA').map(([id,p])=>({...p,id,name:p.label,is_active:true,organization_id:null,recipients:1,capabilities:presetCapabilities(id,p.scope),bridge:p.scope==='PLATFORM'?presetCapabilities(id,'ORGANIZATION'):[]}));
 const data={rights:{organizations:true,create_organization:true,update_organization:true,archive_organization:true,users:true,global_users:true,presets:true,global_presets:true,assignments:true,memberships:true},
@@ -36,9 +37,15 @@ const taxCategoriesGrid=new OperationalGrid({moduleId:'tax'}),economicActivities
 const UIManager=class {static closeModal(){} ${methods} };window.UIManager=UIManager;
 ${handlers}
 for(const method of ['assignTaxCategoryToOrg','unassignTaxCategoryFromOrg','bulkAssignTaxCategories','bulkUnassignTaxCategories','assignEconomicActivityToOrg','unassignEconomicActivityFromOrg','bulkAssignEconomicActivitiesToOrg','bulkUnassignEconomicActivitiesFromOrg'])store[method]=async(...args)=>{window.assignments.push([method,...args]);};
-store.loadTaxCategories=store.loadEconomicActivities=store.loadIibbRates=async()=>UIManager.renderSettings();
-window.view=
-createAdministrationView(document.getElementById('mica-administration'),store,{read:async()=>data,apply:async(...args)=>{window.saved.push(args);return 'saved';},invitation:async(action)=>action==='list'?[]:{}});await window.view.load({section:'Categorización'});
+window.catalogLoads=0;
+store.loadTaxCategories=store.loadEconomicActivities=store.loadIibbRates=async()=>{window.catalogLoads++;UIManager.renderSettings();};
+window.rpcCalls=[];
+const service=createAdministrationService({rpc:async(name,args)=>{
+window.rpcCalls.push([name,args]);
+if((name==='mica_admin_read'||name==='mica_invitation')&&args.p_org&&args.p_org!==store.activeOrganizationId)return {error:{message:'Tenant administration denied: confirmed context and action required'}};
+return {data:name==='mica_admin_read'?data:name==='mica_invitation'?[]:{}};
+}});
+window.view=createAdministrationView(document.getElementById('mica-administration'),store,service);await window.view.load({section:'Categorización'});
 window.ready=true;
 </script></html>`;
 const server=http.createServer((req,res)=>{
@@ -73,6 +80,9 @@ try {
     await assert("!document.querySelector('#table-tax-categories-body button[onclick*=toggleSingle]')",'Assignments enabled without target');
     const choose=async org=>evaluate("document.querySelector('[name=administration-target]').value="+JSON.stringify(org)+";document.querySelector('[name=administration-target]').onchange()");
     await choose('sur');
+    await assert('window.catalogLoads===1','Target reloaded catalog instead of local assignment state');
+    await assert("window.rpcCalls.length===2&&window.rpcCalls.every(call=>call[1].p_org===null)",'Target invoked administration/invitation RPC');
+    await assert("!document.querySelector('#mica-administration').textContent.includes('administration denied')",'Denied screen');
     await assert("window.store.activeOrganizationId===null&&window.store.contextState==='PLATFORM_READY'",'Platform became tenant');
     await assert("document.querySelector('#target-org-tax-categories-container').style.display==='none'",'Duplicate target');
     await evaluate("window.toggleSingleTaxCategoryAssignment('category');");

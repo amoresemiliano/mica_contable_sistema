@@ -205,6 +205,7 @@ test('administration target never switches the platform operational context', as
     expect(store.activeOrganizationId).toBeNull();
     expect(store.contextState).toBe('PLATFORM_READY');
     expect(read).toHaveBeenLastCalledWith(null, '');
+    expect(read).toHaveBeenCalledTimes(1);
     expect(walk(root).find(n => n.name === 'administration-target').value).toBe('sur');
     expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
 });
@@ -255,4 +256,64 @@ test('tenant context identity change resets managed target and keeps the real ca
     expect(walk(root).some(n => n.name === 'administration-target')).toBe(false);
     expect(walk(root).some(n => n.textContent === 'Contexto: Empresa Sur')).toBe(true);
     expect(walk(root).find(n => n.id === 'mica-categorizacion-subview').children).toContain(card);
+});
+
+test('Platform target selection never loads tenant invitations or destroys the shell', async () => {
+    const root = node('root'), snapshot = data(), store = storeFixture(null);
+    snapshot.rights = { ...platformRights };
+    const read = jest.fn(async org => {
+        if (org) throw Error('Tenant administration denied: confirmed context and action required');
+        return snapshot;
+    });
+    const invitation = jest.fn(async (_action, org) => {
+        if (org) throw Error('Tenant administration denied: confirmed context and action required');
+        return [];
+    });
+    const view = createAdministrationView(root, store, { read, invitation });
+    await view.load({ section: 'Categorización' });
+    const selector = walk(root).find(n => n.name === 'administration-target');
+    selector.value = 'sur'; await selector.onchange();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(invitation).toHaveBeenCalledTimes(1);
+    expect(invitation).toHaveBeenCalledWith('list', null);
+    expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
+    expect(store.activeOrganizationId).toBeNull();
+    expect(store.contextState).toBe('PLATFORM_READY');
+    click(root, 'Usuarios');
+    expect(walk(root).some(n => n.title === 'Cambiar rol' || n.textContent === '+ Invitar usuario')).toBe(false);
+    expect(walk(root).some(n => n.textContent === 'Permisos avanzados')).toBe(true);
+});
+
+test('secondary invitation denial remains visible without replacing the administration shell', async () => {
+    const root = node('root'), snapshot = data(); snapshot.rights = { ...platformRights };
+    await createAdministrationView(root, storeFixture(null), {
+        read: async () => snapshot,
+        invitation: async () => { throw Error('Platform administration denied'); }
+    }).load();
+    expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
+    expect(walk(root).some(n => n.textContent === 'Invitaciones: Platform administration denied')).toBe(true);
+});
+
+test('tenant invitations still use the confirmed tenant and admin read denials still block entry', async () => {
+    const snapshot = data(), root = node('root'); snapshot.rights = { ...platformRights };
+    const invitation = jest.fn(async () => []), read = jest.fn(async () => snapshot);
+    await createAdministrationView(root, storeFixture('norte'), { read, invitation }).load();
+    expect(read).toHaveBeenCalledWith('norte', '');
+    expect(invitation).toHaveBeenCalledWith('list', 'norte');
+    const denied = node('root');
+    await createAdministrationView(denied, storeFixture(null), {
+        read: async () => { throw Error('Platform administration denied'); }
+    }).load();
+    expect(primaryTabs(denied)).toEqual([]);
+    expect(walk(denied).some(n => n.textContent === 'Platform administration denied')).toBe(true);
+});
+
+test('catalog refresh rejection is shown inside categorization without removing its cards', async () => {
+    const root = node('root'), store = storeFixture(null), snapshot = data(); snapshot.rights = { ...platformRights };
+    store.loadTaxCategories = async () => { throw Error('Catalog access denied'); };
+    await createAdministrationView(root, store, { read: async () => snapshot }).load({ section: 'Categorización' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(primaryTabs(root)).toEqual(['Empresas', 'Usuarios', 'Categorización']);
+    expect(walk(root).some(n => n.id === 'mica-categorizacion-subview')).toBe(true);
+    expect(walk(root).some(n => n.textContent === 'Catalog access denied')).toBe(true);
 });
