@@ -19,8 +19,7 @@ import { createSheetJsAdapter } from './core/adapters/sheetJsAdapter.js';
 import { parseDelimitedText } from './adapters/textAdapter.js';
 import { createBrowserFingerprintProvider } from './adapters/browserFingerprintProvider.js';
 import { parseArcaRows } from './core/parsers/arcaParser.js';
-import { parseArbaText } from './core/parsers/arbaParser.js';
-import { parseIvaPerceptions } from './core/parsers/ivaPerceptionParser.js';
+import { parsePerceptionInput } from './core/parsers/perceptionFormats.js';
 import { parseBankRows } from './core/parsers/bankParser.js';
 import { parseSalaryRows } from './core/parsers/salaryParser.js';
 import { stageImport } from './core/services/importService.js';
@@ -1346,11 +1345,15 @@ export class UIManager {
         try {
             const buffer = await readFileAsArrayBuffer(file);
             if (!validContext()) return;
-            const text = await readFileAsText(file).catch(() => '');
+            let text = await readFileAsText(file).catch(() => '');
+            if (text.includes('\uFFFD')) text = new TextDecoder('windows-1252').decode(buffer);
             if (!validContext()) return;
             const formatInfo = detectFileFormat({ arrayBuffer: buffer, text, fileName: file.name, mimeType: file.type });
             
-            const isExcelFormat = formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF' || file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx');
+            const isExcelFormat = formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF';
+            const formatWarning = !isExcelFormat && /\.xlsx?$/i.test(file.name)
+                ? 'El archivo tiene extensión Excel pero contiene una exportación de texto compatible; se procesará como archivo de texto.' : null;
+            if (formatWarning) alert(formatWarning);
 
             let rows = [];
             if (isExcelFormat) {
@@ -1389,26 +1392,10 @@ export class UIManager {
                     UIManager.render();
                 });
             } else if (type === 'percepcion') {
-                const ext = file.name.split('.').pop().toLowerCase();
-                let sourceType = null;
-
-                if (isExcelFormat) {
-                    if (!['xls', 'xlsx', 'csv'].includes(ext)) {
-                        alert(`Contradicción detectada: El contenido parece Excel/CSV pero la extensión es .${ext}. Importación rechazada.`);
-                        return;
-                    }
-                    context.jurisdiccion = 'IVA';
-                    parsedItems = parseIvaPerceptions(rows, context);
-                    sourceType = 'PERCEPCIONES_IVA';
-                } else {
-                    if (ext !== 'txt') {
-                        alert(`Contradicción detectada: El contenido parece ARBA TXT pero la extensión es .${ext}. Importación rechazada.`);
-                        return;
-                    }
-                    context.jurisdiccion = 'ARBA';
-                    parsedItems = parseArbaText(text, context);
-                    sourceType = 'PERCEPCIONES_ARBA';
-                }
+                const perception = parsePerceptionInput({ text: isExcelFormat ? undefined : text, rows }, context);
+                parsedItems = perception.items;
+                if (formatWarning) parsedItems.forEach(r => r.warnings.push(formatWarning));
+                const sourceType = perception.format.sourceType;
                 
                 const validPerceptions = parsedItems.filter(r => r.normalizedData !== null).map(r => r.normalizedData);
                 const invalidRows = parsedItems.filter(r => r.normalizedData === null);
@@ -1427,7 +1414,7 @@ export class UIManager {
                             const hashHex = await persistenceService.sha256File(file);
                             if (!validContext()) return;
                             
-                            const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            const checkResult = await persistenceService.checkFileImportable(hashHex, { resumable: parsedItems.length > 500 });
                             if (!validContext()) return;
                             if (checkResult && checkResult.importable === false) {
                                 await showExistingImport(checkResult, 'percepcion', validContext);
@@ -1435,7 +1422,9 @@ export class UIManager {
                             }
                             
                             let importInfo;
-                            if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                            if (checkResult?.resume_import) {
+                                importInfo = checkResult.resume_import;
+                            } else if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
                                 importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
                                 if (!validContext()) return;
                             } else {
@@ -1457,7 +1446,7 @@ export class UIManager {
                             try {
                                 persisted = await persistenceService.persistPerceptionsBatch({
                                     importId: importInfo.import_id,
-                                    fileInfo: {
+                                    fileInfo: importInfo.file_info || {
                                         original_name: file.name,
                                         storage_path: uploadResult.path,
                                         mime_type: uploadResult.mimeType,
@@ -1468,7 +1457,7 @@ export class UIManager {
                                 });
                                 if (!validContext()) return;
                             } catch (persistErr) {
-                                if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!uploadResult.reused && !persistErr.preserveSourceFile) await persistenceService.cleanupStorageFile(uploadResult.path);
                                 if (!validContext()) return;
                                 throw persistErr;
                             }
@@ -1508,7 +1497,7 @@ export class UIManager {
                             const hashHex = await persistenceService.sha256File(file);
                             if (!validContext()) return;
                             
-                            const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            const checkResult = await persistenceService.checkFileImportable(hashHex, { resumable: result.length > 500 });
                             if (!validContext()) return;
                             if (checkResult && checkResult.importable === false) {
                                 await showExistingImport(checkResult, 'banco', validContext);
@@ -1516,7 +1505,9 @@ export class UIManager {
                             }
                             
                             let importInfo;
-                            if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                            if (checkResult?.resume_import) {
+                                importInfo = checkResult.resume_import;
+                            } else if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
                                 importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
                                 if (!validContext()) return;
                             } else {
@@ -1538,7 +1529,7 @@ export class UIManager {
                             try {
                                 persisted = await persistenceService.persistFinancialMovementsBatch({
                                     importId: importInfo.import_id,
-                                    fileInfo: {
+                                    fileInfo: importInfo.file_info || {
                                         original_name: file.name,
                                         storage_path: uploadResult.path,
                                         mime_type: uploadResult.mimeType,
@@ -1549,7 +1540,7 @@ export class UIManager {
                                 });
                                 if (!validContext()) return;
                             } catch (persistErr) {
-                                if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!uploadResult.reused && !persistErr.preserveSourceFile) await persistenceService.cleanupStorageFile(uploadResult.path);
                                 if (!validContext()) return;
                                 throw persistErr;
                             }

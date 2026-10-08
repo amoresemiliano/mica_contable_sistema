@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient.js';
 import { isMicaCapability } from '../micaCapabilities.js';
 import { validateImportEnvelope } from '../importEnvelope.js';
 import { persistedClassification } from '../classification.js';
+import { persistImportChunks } from './importChunks.js';
 
 /**
  * Servicio de Persistencia para MICA (Fase 2 - Supabase Staging)
@@ -123,7 +124,12 @@ export class PersistenceService {
     /**
      * Pre-check RPC para verificar si un archivo con el mismo Hash SHA-256 ya fue importado.
      */
-    async checkFileImportable(hashHex) {
+    async checkFileImportable(hashHex, { resumable = false } = {}) {
+        if (resumable) {
+            const { data, error } = await supabase.rpc('get_resumable_import', { p_sha256_hash: hashHex });
+            if (error) throw new Error(`Error al consultar importación reanudable: ${error.message}`);
+            if (data) return { importable: true, resume_import: validateImportEnvelope(data) };
+        }
         const { data, error } = await supabase.rpc('check_file_importable', {
             p_sha256_hash: hashHex
         });
@@ -271,6 +277,9 @@ export class PersistenceService {
             warnings: r.warnings || []
         }));
 
+        if (p_staged_rows.length > 500) return persistImportChunks(supabase.rpc.bind(supabase), {
+            importId, fileInfo: p_file_info, stagedRows: p_staged_rows, kind: 'PERCEPCION'
+        });
         const { data, error } = await supabase.rpc('persist_perceptions_batch', {
             p_import_id: importId,
             p_file_info: p_file_info,
@@ -304,6 +313,9 @@ export class PersistenceService {
             warnings: r.warnings || []
         }));
 
+        if (p_staged_rows.length > 500) return persistImportChunks(supabase.rpc.bind(supabase), {
+            importId, fileInfo: p_file_info, stagedRows: p_staged_rows, kind: 'FINANCIAL'
+        });
         const { data, error } = await supabase.rpc('persist_financial_movements_batch', {
             p_import_id: importId,
             p_file_info: p_file_info,
@@ -444,7 +456,7 @@ export class PersistenceService {
                     amount: typeof r.total === 'number' ? r.total : (d.amount || d.monto || 0),
                     jurisdiction: d.jurisdiction || (String(r.record_type).includes('ARBA') || r.record_type === 'ARBA' ? 'ARBA' : 'NACIONAL (IVA)'),
                     fuente: d.fuente || (String(r.record_type).includes('ARBA') || r.record_type === 'ARBA' ? 'ARBA' : 'IVA'),
-                    tipo: 'percepcion',
+                    tipo: d.tipo || 'percepcion',
                     ...persistedClassification(r),
                     rawRecord: d
                 };
