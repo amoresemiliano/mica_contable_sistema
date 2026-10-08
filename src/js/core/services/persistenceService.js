@@ -702,6 +702,25 @@ export class PersistenceService {
         }
     }
 
+    async switchMyOrganizationContext(orgId) {
+        const { error } = await supabase.rpc('switch_my_organization_context', { p_org_id: orgId || null });
+        if (error) throw new Error(error.message);
+    }
+
+    async listMyOrganizationContexts() {
+        const rows = [];
+        for (let offset = 0; ; offset += 500) {
+            const { data, error } = await supabase.rpc('list_my_organization_contexts').range(offset, offset + 499);
+            if (error) throw new Error(error.message);
+            if (!Array.isArray(data) || data.some(r => !r.organization_id || typeof r.organization_name !== 'string' ||
+                r.context_type !== 'ORGANIZATION' || !r.role_template_id || typeof r.role_name !== 'string')) {
+                throw new Error('Invalid membership contexts response');
+            }
+            rows.push(...data);
+            if (data.length === 0) return rows;
+        }
+    }
+
     async getOperationalContext() {
         const { data, error } = await supabase.rpc('get_my_operational_context');
         if (error) throw new Error(error.message);

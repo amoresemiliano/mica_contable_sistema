@@ -19,6 +19,9 @@ import {OperationalGrid} from '/src/js/core/operationalGrid.js';
 import {createAdministrationView} from '/src/js/components/administration.js';
 import {createAdministrationService} from '/src/js/core/services/administrationService.js';
 import {MICA_PERMISSION_CATALOG as capabilities,MICA_PRESET_DEFINITIONS,presetCapabilities} from '/src/js/core/micaPermissionContract.js';
+import {AppStore} from '/src/js/store.js';
+import {mountOperationalOrgSelectors,renderOperationalHeader} from '/src/js/components/operationalOrgSelector.js';
+window.AppStore=AppStore;window.mountOperationalOrgSelectors=mountOperationalOrgSelectors;window.renderOperationalHeader=renderOperationalHeader;
 const presets=Object.entries(MICA_PRESET_DEFINITIONS).filter(([code])=>code!=='ROOT_TECHNICAL_MICA').map(([id,p])=>({...p,id,code:id,name:p.label,is_active:true,organization_id:null,recipients:1,capabilities:presetCapabilities(id,p.scope),bridge:p.scope==='PLATFORM'?presetCapabilities(id,'ORGANIZATION'):[]}));
 presets.push({id:'operativa',code:'ADMINISTRACION_OPERATIVA_MICA',name:'Administración operativa',scope:'PLATFORM',is_active:true,capabilities:[],bridge:[]});
 const data={rights:{organizations:true,create_organization:true,update_organization:true,archive_organization:true,users:true,global_users:true,presets:true,global_presets:true,assignments:true,memberships:true},
@@ -44,6 +47,7 @@ store.loadIibbRates=async()=>{store.iibbRates=window.rateDefinitions.filter(r=>(
 window.rpcCalls=[];
 window.companyUsers=[];window.accessWrites=[];window.rateWrites=[];
 window.rateDefinitions=[{id:'rate1',activity_id:'activity',activity_name:'Real activity',jurisdiction:'CABA',rate:3,valid_from:'2026-01-01',valid_to:null,is_active:true,assigned:false}];
+window.rateActivityAssigned=true;
 const service=createAdministrationService({rpc:async(name,args)=>{
 window.rpcCalls.push([name,args]);
 if((name==='mica_admin_read'||name==='mica_invitation')&&args.p_org&&args.p_org!==store.activeOrganizationId)return {error:{message:'Tenant administration denied: confirmed context and action required'}};
@@ -63,7 +67,8 @@ if(name==='mica_platform_access') {
 }
 if(name==='mica_platform_iibb') {
  if(store.contextState!=='PLATFORM_READY')return {error:{message:'Confirmed Platform administration authority required'}};
- if(args.p_action==='list')return {data:{definitions:window.rateDefinitions.map(r=>({...r,assigned:(r.assignedOrganizations||[]).includes(args.p_org)})),organizations:data.organizations,activities:[{id:'activity',name:'Real activity'}]}};
+ if(args.p_action==='list')return {data:{definitions:window.rateDefinitions.map(r=>({...r,activity_assigned:window.rateActivityAssigned,assigned:(r.assignedOrganizations||[]).includes(args.p_org)})),organizations:data.organizations,activities:[{id:'activity',name:'Real activity'}]}};
+ if(args.p_action==='assign'&&!window.rateActivityAssigned)return {error:{message:'Primero asigná la actividad económica Real activity a esta empresa.'}};
  window.rateWrites.push(args);
  const rate=window.rateDefinitions.find(r=>r.id===args.p_data.id);
  if(args.p_action==='assign')rate.assignedOrganizations=[...new Set([...(rate.assignedOrganizations||[]),args.p_org])];
@@ -79,7 +84,7 @@ window.ready=true;
 </script></html>`;
 const server=http.createServer((req,res)=>{
     if(req.url==='/'){res.setHeader('Content-Type','text/html; charset=utf-8');return res.end(html);}
-    if(req.url==='/src/js/core/services/supabaseClient.js'){res.setHeader('Content-Type','application/javascript');return res.end('export const supabase={};');}
+    if(req.url==='/src/js/core/services/supabaseClient.js'){res.setHeader('Content-Type','application/javascript');return res.end('export const supabase={rpc:(...args)=>window.contextRpc(...args)};');}
     const file=path.resolve(root,'.'+decodeURIComponent(req.url.split('?')[0]));
     if(!file.startsWith(root+path.sep)||!fs.existsSync(file)){res.statusCode=404;return res.end();}
     res.setHeader('Content-Type',file.endsWith('.css')?'text/css':'application/javascript');res.end(fs.readFileSync(file));
@@ -138,14 +143,20 @@ try {
     await choose('norte');
     await assert("document.querySelector('#mica-categorizacion-subview #table-tax-categories-body').textContent.includes('Real category')",'Target change emptied cards');
     await choose('sur');
-    await evaluate("[...document.querySelectorAll('.mica-admin-subnav-btn')].find(n=>n.textContent==='Impuestos').click()");
+    await evaluate("window.rateActivityAssigned=false;[...document.querySelectorAll('.mica-admin-subnav-btn')].find(n=>n.textContent==='Impuestos').click()");
     for(let i=0;i<20&&!await evaluate("!!document.querySelector('[data-definition-id=rate1]')");i++)await new Promise(r=>setTimeout(r,50));
     await assert("document.querySelector('[data-definition-id=rate1]').textContent.includes('CABA')",'Global IIBB version missing');
+    await assert("document.querySelector('[data-definition-id=rate1]').textContent.includes('Primero asigná la actividad económica Real activity a esta empresa.')&&[...document.querySelector('[data-definition-id=rate1]').querySelectorAll('button')].find(n=>n.textContent==='Asignar').disabled",'Missing activity prerequisite not actionable');
+    await evaluate("window.rateActivityAssigned=true;[...document.querySelectorAll('.mica-admin-subnav-btn')].find(n=>n.textContent==='Impuestos').click()");
+    await new Promise(r=>setTimeout(r,100));
+    await assert("document.querySelector('[data-definition-id=rate1]').textContent.includes('No asignada')",'Initial assignment state missing');
     await evaluate("[...document.querySelector('[data-definition-id=rate1]').querySelectorAll('button')].find(n=>n.textContent==='Asignar').click()");
     await new Promise(r=>setTimeout(r,100));
-    await evaluate("[...document.querySelector('[data-definition-id=rate1]').querySelectorAll('button')].find(n=>n.textContent==='Quitar asignación').click()");
+    await assert("document.querySelector('[data-definition-id=rate1]').textContent.includes('Asignada')",'Assigned state not refreshed');
+    await evaluate("[...document.querySelector('[data-definition-id=rate1]').querySelectorAll('button')].find(n=>n.textContent==='Desasignar').click()");
     await new Promise(r=>setTimeout(r,100));
     await assert("window.rateWrites.length===2&&window.rateWrites.every(c=>c.p_org==='sur')&&window.store.activeOrganizationId===null",'Rate target forwarding/context');
+    await assert("document.querySelector('[data-definition-id=rate1]').textContent.includes('No asignada')&&document.querySelector('[name=administration-target]').value==='sur'",'Unassigned state/target not retained');
     await evaluate("[...document.querySelectorAll('button')].find(n=>n.textContent==='+ Nueva definición IIBB').click()");
     await evaluate("document.querySelector('[name=jurisdiction]').value='ARBA';document.querySelector('[name=rate]').value='1.25';document.querySelector('[name=valid_from]').value='2026-01-01';document.querySelector('dialog form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))");
     await new Promise(r=>setTimeout(r,100));
@@ -218,7 +229,49 @@ try {
         await cdp('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:width<640});
         await assert('document.documentElement.scrollWidth<=window.innerWidth','Mobile overflow '+width);
     }
+    // Real session store, selectors, header and module rules, with a local membership RPC fixture.
+    await evaluate(`document.body.replaceChildren();
+      document.body.innerHTML='<header id="user-header-info"></header><span id="current-entity-label"></span><nav><a data-tab="tab-bancos">Bancos</a><a data-tab="tab-categorizacion">Categorización</a></nav><section id="tab-bancos" class="tab-content"><p id="multi-records"></p></section><section id="tab-categorizacion" class="tab-content"><p id="multi-rates"></p></section>';
+      window.multiServerOrg='A';window.multiAllowed=['A','B'];window.multiCalls=[];
+      window.contextRpc=(name,args={})=>{
+        window.multiCalls.push([name,args]);const org=window.multiServerOrg;
+        if(name==='get_my_operational_context')return Promise.resolve({data:{organization_id:org,organization_name:'Empresa '+org,profile_name:org==='A'?'Auditor':'Contador',can_switch_platform_context:false,can_switch_organization_context:true}});
+        if(name==='list_my_organization_contexts')return {range:async offset=>({data:offset?[]:window.multiAllowed.map(id=>({organization_id:id,organization_name:'Empresa '+id,context_type:'ORGANIZATION',role_template_id:'role-'+id,role_name:id==='A'?'Auditor':'Contador'}))})};
+        if(name==='switch_my_organization_context'){
+          if(!window.multiAllowed.includes(args.p_org_id))return Promise.resolve({error:{message:'Active organization membership required'}});
+          window.multiServerOrg=args.p_org_id;return Promise.resolve({error:null});
+        }
+        if(name==='get_my_effective_capabilities')return Promise.resolve({data:(org==='A'?['RECORD_VIEW','ORG_VIEW','CATALOG_ORG_VIEW']:['ORG_VIEW','CATALOG_ORG_VIEW']).map(code=>({code,scope:'ORGANIZATION',organization_id:org}))});
+        if(name==='get_operational_snapshot')return Promise.resolve({data:{organization_id:org,categories:[],activities:[],rates:[{id:'rate-'+org,organization_id:org,rate:3}]}});
+        if(name==='get_operational_records_page')return Promise.resolve({data:args.p_after_id?[]:[{id:org+'-record',organization_id:org,record_type:'ARCA_RECIBIDOS',total:20}]});
+        if(name==='get_operational_financials_page')return Promise.resolve({data:[]});
+        throw Error('Unexpected membership fixture RPC '+name);
+      };
+      window.multiStore=new window.AppStore();
+      window.mountOperationalOrgSelectors(window.multiStore,document);
+      window.multiStore.subscribe(()=>{
+        window.renderOperationalHeader(window.multiStore,document);
+        document.querySelector('#multi-records').textContent=window.multiStore.items.map(r=>r.id).join(',');
+        document.querySelector('#multi-rates').textContent=window.multiStore.iibbRates.map(r=>r.id).join(',');
+        for(const link of document.querySelectorAll('[data-tab]'))link.hidden=!window.multiStore.canVisitModule(link.dataset.tab);
+      });
+      window.multiStore.initializeSession({id:'multi-member',email:'member@example.invalid'});`);
+    for(let i=0;i<40&&!await evaluate("window.multiStore.contextState==='TENANT_READY'");i++)await new Promise(r=>setTimeout(r,50));
+    await assert("[...document.querySelector('.operational-org-select').options].map(o=>o.value).join(',')==='A,B'&&document.querySelector('#user-header-info').textContent.includes('Empresa A · Auditor')",'Normal membership selector/header missing');
+    await assert("!document.querySelector('[data-tab=tab-bancos]').hidden&&document.querySelector('#multi-records').textContent==='A-record'",'A initial permissions/data');
+    await evaluate("window.multiStore.manualMovements=window.multiStore.ocrHistory=window.multiStore.importIssues=[{id:'A-residue'}];const multiSelect=document.querySelector('.operational-org-select');multiSelect.value='B';multiSelect.onchange()");
+    await assert("document.querySelector('#user-header-info').textContent==='member@example.invalid · Empresa B · Contador'&&[...document.querySelectorAll('.operational-org-select')].every(s=>s.value==='B')",'B role/context not updated');
+    await assert("document.querySelector('[data-tab=tab-bancos]').hidden&&!document.querySelector('[data-tab=tab-categorizacion]').hidden&&document.querySelector('#multi-records').textContent===''&&document.querySelector('#multi-rates').textContent==='rate-B'",'B module permissions or data residue');
+    await assert("['manualMovements','ocrHistory','importIssues'].every(key=>window.multiStore[key].length===0)",'Local tenant cache residue');
+    await evaluate("document.querySelector('.operational-org-select').value='A';document.querySelector('.operational-org-select').onchange()");
+    await assert("document.querySelector('#user-header-info').textContent.includes('Empresa A · Auditor')&&document.querySelector('#multi-records').textContent==='A-record'&&window.multiStore.sessionUserId==='multi-member'",'Return to A required login or lost role');
+    await assert("window.multiCalls.every(([name])=>!['switch_superadmin_org_context','list_operational_org_targets'].includes(name))",'Tenant used Platform contract');
+    await assert("window.multiStore.switchOrganizationContext('C').then(()=>false,error=>error.message.includes('membership'))",'Unauthorized membership target accepted');
+    for(const width of [1440,390]) {
+        await cdp('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:width<640});
+        await assert('document.documentElement.scrollWidth<=window.innerWidth','Multi-org selector overflow '+width);
+    }
     if(errors.length)throw Error(errors.join(', '));
-    console.log('PASS: real cards/catalog handlers, 8 assignment actions, Platform preserved, global IIBB creation/assignment/unassignment, company/new/existing/Platform access, role filtering, Usuarios/Roles/Accesos, native drawer above sidebar at 1440/390px, tenant read-only rates, mobile overflow. Local RPC fixtures only; no SQL.');
+    console.log('PASS: Administration, IIBB prerequisite/assignment/unassignment/target retention, modal/mobile regression; real multi-org store + selector A -> B -> A, membership-specific role, module access, cache reset, no Platform tenant option, no relogin, unauthorized target rejection. Local RPC fixtures only; no SQL.');
     await cdp('Browser.close').catch(()=>{});
 } finally {ws?.close();browser.kill();server.close();}

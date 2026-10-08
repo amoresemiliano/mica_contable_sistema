@@ -16,7 +16,10 @@ export function mountOperationalOrgSelectors(store, document) {
         retry.className = 'btn-secondary';
         retry.textContent = 'Reintentar carga';
         retry.onclick = () => store.reloadOperationalContext().catch(() => {});
-        select.onchange = () => store.switchOrganizationContext(select.value).catch(() => {});
+        select.onchange = async () => {
+            try { await store.switchOrganizationContext(select.value); }
+            catch (error) { status.textContent = error.message; select.value = store.activeOrganizationId || ''; }
+        };
         toolbar.append(label, status, retry);
         const body = document.createElement('div');
         body.className = 'operational-module-body';
@@ -31,10 +34,7 @@ export function mountOperationalOrgSelectors(store, document) {
             view.label.hidden = !store.canSwitchOperationalContext();
             view.select.disabled = busy;
             view.select.replaceChildren();
-            const choices = [{ organization_id: '', organization_name: 'MICA / Plataforma' }, ...store.operationalOrgTargets];
-            if (store.activeOrganizationId && !choices.some(o => o.organization_id === store.activeOrganizationId)) {
-                choices.push({ organization_id: store.activeOrganizationId, organization_name: store.getActiveOrganizationName() });
-            }
+            const choices = [...(store.canSelectPlatformContext() ? [{ organization_id: '', organization_name: 'MICA / Plataforma' }] : []), ...store.operationalOrgTargets];
             for (const choice of choices) {
                 const option = document.createElement('option');
                 option.value = choice.organization_id;

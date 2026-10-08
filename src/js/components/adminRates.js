@@ -14,11 +14,14 @@ export function renderPlatformRates(container, store, service, target, openEdito
         if (options) for (const row of options) n.append(el('option', row.name, { value: row.id }));
         wrap.append(n); form.append(wrap); return n;
     }
-    async function perform(action, payload) {
+    async function perform(action, payload, rate = null) {
         if (busy || !current()) return;
         busy = true; status.textContent = 'Guardando…';
         try { await service.platformRates(action, ['assign','unassign'].includes(action) ? target : null, payload); if (current()) await load(); }
-        catch (error) { if (current()) status.textContent = error.message; }
+        catch (error) {
+            if (current()) status.textContent = error.message === 'Active definition and activity assignment required' && rate
+                ? `Primero asigná la actividad económica ${rate.activity_name} a esta empresa.` : error.message;
+        }
         finally { busy = false; }
     }
     function draw() {
@@ -43,16 +46,19 @@ export function renderPlatformRates(container, store, service, target, openEdito
         if (!target) body.append(el('p', 'Seleccioná una empresa para asignar o quitar tasas.'));
         else if (!model.organizations.some(o => o.id === target)) { body.append(el('p', 'La empresa no está dentro de tu alcance para administrar tasas.')); return; }
         const table = el('table', '', { className: 'mica-admin-table' });
-        const tr = el('tr'); for (const title of ['Actividad','Jurisdicción','Tasa %','Desde','Hasta','Estado','Empresa','Acciones']) tr.append(el('th', title, { scope: 'col' }));
+        const tr = el('tr'); for (const title of ['Actividad','Jurisdicción','Tasa %','Desde','Hasta','Estado global','Empresa gestionada','Acciones']) tr.append(el('th', title, { scope: 'col' }));
         const head = el('thead'); head.append(tr); table.append(head);
         const tbody = el('tbody'); table.append(tbody);
         for (const rate of model.definitions) {
             const row = el('tr'); row.dataset ||= {}; row.dataset.definitionId = rate.id;
-            for (const value of [rate.activity_name,rate.jurisdiction,rate.rate,rate.valid_from || 'Sin límite',rate.valid_to || 'Sin límite',rate.is_active ? 'Activa' : 'Inactiva', target ? rate.assigned ? 'Asignada' : 'Sin asignar' : 'Elegí empresa']) row.append(el('td', String(value)));
+            for (const value of [rate.activity_name,rate.jurisdiction,rate.rate,rate.valid_from || 'Sin límite',rate.valid_to || 'Sin límite',rate.is_active ? 'Activa' : 'Inactiva', target ? rate.assigned ? 'Asignada' : 'No asignada' : 'Elegí empresa']) row.append(el('td', String(value)));
             const actions = el('td');
             if (target && (rate.is_active || rate.assigned)) {
-                const assign = el('button', rate.assigned ? 'Quitar asignación' : 'Asignar', { type: 'button' });
-                assign.onclick = () => perform(rate.assigned ? 'unassign' : 'assign', { id: rate.id }); actions.append(assign);
+                const assign = el('button', rate.assigned ? 'Desasignar' : 'Asignar', { type: 'button' });
+                // The server supplies this prerequisite; unknown state on 041 still reaches its guard.
+                assign.disabled = !rate.assigned && rate.activity_assigned === false;
+                assign.onclick = () => perform(rate.assigned ? 'unassign' : 'assign', { id: rate.id }, rate); actions.append(assign);
+                if (assign.disabled) actions.append(el('p', `Primero asigná la actividad económica ${rate.activity_name} a esta empresa.`, { role: 'status' }));
             }
             const toggle = el('button', rate.is_active ? 'Desactivar definición' : 'Activar definición', { type: 'button' });
             toggle.onclick = () => perform('set_active', { id: rate.id, is_active: !rate.is_active }); actions.append(toggle); row.append(actions); tbody.append(row);
