@@ -1,4 +1,4 @@
-import { unresolvedPurchases, purchaseCategoryTotals } from './core/classification.js';
+import { mountReporting } from './components/managementReporting.js';
 import { saveClassificationControl } from './components/classificationControl.js';
 import { initializeWithSessionRecovery } from './core/sessionRecovery.js';
 import { validateImportEnvelope, refreshDuplicateImport, assertImportResult } from './core/importEnvelope.js';
@@ -535,8 +535,9 @@ export function switchTab(tabId) {
         openAdministration(appStore, { section: 'Empresas' });
     }
     else if (tabId === 'tab-client-dashboard') {
-        renderClientDashboard();
+        renderClientDashboard({refresh:true});
     }
+    else if (tabId === 'tab-reports') { mountReporting(appStore, 'reports', {refresh:true}); }
     else if (tabId === 'tab-access') titleElement.innerText = "Acceso MICA";
     return true;
 }
@@ -554,122 +555,8 @@ export function toggleMobileMoreSheet(show) {
 }
 
 // CONTROLADOR DE MÉTRICAS OPERATIVAS PARA EL GERENTE (DASHBOARD)
-export function renderClientDashboard() {
-    const items = appStore.items;
-    const manualMovs = appStore.manualMovements.filter(m => m.origen === 'manual-interno');
+export function renderClientDashboard(options) { mountReporting(appStore, 'management', options); }
 
-    // Ventas Brutas (Emitidos + Ingresos manuales internos)
-    const salesARCA = items.filter(i => i.tipo === 'emitido').reduce((sum, i) => sum + i.total, 0);
-    const salesManual = manualMovs.filter(m => m.tipo === 'Ingreso').reduce((sum, m) => sum + m.importe, 0);
-    const sales = salesARCA + salesManual;
-
-    // Compras (Recibidos + Egresos manuales internos)
-    const purchasesARCA = items.filter(i => i.tipo === 'recibido').reduce((sum, i) => sum + i.total, 0);
-    const purchasesManual = manualMovs.filter(m => m.tipo === 'Gasto').reduce((sum, m) => sum + m.importe, 0);
-    const purchases = purchasesARCA + purchasesManual;
-
-    const netBalance = sales - purchases;
-
-    // Actualización de valores principales
-    const salesValEl = document.getElementById('client-sales-val');
-    const purchasesValEl = document.getElementById('client-purchases-val');
-    const netEl = document.getElementById('client-net-val');
-    const ivaValEl = document.getElementById('client-iva-val');
-    const iibbValEl = document.getElementById('client-iibb-val');
-    const laborValEl = document.getElementById('client-labor-val');
-
-    if (salesValEl) salesValEl.innerText = `$ ${sales.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-    if (purchasesValEl) purchasesValEl.innerText = `$ ${purchases.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-    
-    if (netEl) {
-        netEl.innerText = `$ ${netBalance.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-        netEl.style.color = netBalance >= 0 ? 'var(--success)' : 'var(--warning)';
-    }
-
-    // IVA: Utilizar únicamente valores fiscales reales importados (Débito - Crédito)
-    const emittedItems = items.filter(i => i.tipo === 'emitido' || i.type === 'emitido');
-    const receivedItems = items.filter(i => i.tipo === 'recibido' || i.type === 'recibido');
-
-    const hasRealIvaEmitted = emittedItems.some(i => parseFloat(i.iva || i.importeIva || i.imp_iva) > 0);
-    const hasRealIvaReceived = receivedItems.some(i => parseFloat(i.iva || i.importeIva || i.imp_iva) > 0);
-
-    if (ivaValEl) {
-        if (hasRealIvaEmitted || hasRealIvaReceived) {
-            const totalIvaDebito = emittedItems.reduce((sum, i) => sum + (parseFloat(i.iva || i.importeIva || i.imp_iva) || 0), 0);
-            const totalIvaCredito = receivedItems.reduce((sum, i) => sum + (parseFloat(i.iva || i.importeIva || i.imp_iva) || 0), 0);
-            const netIva = totalIvaDebito - totalIvaCredito;
-            ivaValEl.innerText = `$ ${Math.max(0, netIva).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-        } else {
-            ivaValEl.innerText = "Pendiente de determinación";
-        }
-    }
-
-    // IIBB: Sin tasa hardcoded 3%. Estado neutro hasta motor de determinación
-    if (iibbValEl) {
-        iibbValEl.innerText = "Pendiente de determinación";
-    }
-
-    // Costo Laboral del Mes (usa modelo validado de Sueldos sin DOM form inputs ni anticipos desajustados)
-    let costLabor = 0;
-    if (appStore.salaries) {
-        const sal = appStore.salaries;
-        costLabor = sal.costoLaboralReal !== undefined 
-            ? sal.costoLaboralReal 
-            : ((sal.sueldoBrutoCalculado || sal.sueldoBruto || sal.remunerativo || 0) + (sal.noRemunerativo || 0));
-    }
-    if (laborValEl) laborValEl.innerText = `$ ${costLabor.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-
-    // Alertas de comprobantes sin categorizar / saldo pendiente por explicar
-    const alertUnresolved = document.getElementById('alert-unresolved-taxes');
-    const alertNoIssues = document.getElementById('alert-no-issues');
-    if (alertUnresolved) {
-        const pendingCount = unresolvedPurchases(items);
-        if (pendingCount > 0) {
-            alertUnresolved.innerHTML = `⚠️ <strong>Atención:</strong> Tenés ${pendingCount} comprobantes de compras sin categorizar o con saldo pendiente por explicar.`;
-            alertUnresolved.classList.remove('hidden');
-            alertUnresolved.style.display = 'block';
-            if (alertNoIssues) alertNoIssues.style.display = 'none';
-        } else {
-            alertUnresolved.classList.add('hidden');
-            alertUnresolved.style.display = 'none';
-            if (alertNoIssues) alertNoIssues.style.display = 'block';
-        }
-    }
-
-    // Desglose de Gastos
-    const categoryChartContainer = document.getElementById('client-category-chart');
-    if (!categoryChartContainer) return;
-
-    const purchaseItems = items.filter(i => i.tipo === 'recibido');
-    if (purchaseItems.length === 0 && purchasesManual === 0) {
-        categoryChartContainer.innerHTML = `<li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">No hay datos de compras disponibles.</li>`;
-        return;
-    }
-
-    const catTotals = purchaseCategoryTotals(purchaseItems, appStore.taxCategories);
-    if (purchasesManual > 0) {
-        catTotals.push({label:'Gastos Caja Chica (Manual)',amount:purchasesManual});
-    }
-
-    const sortedCategories = catTotals.sort((a,b) => b.amount - a.amount);
-    categoryChartContainer.innerHTML = sortedCategories.map(({label, amount}) => {
-        const category = String(label).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        const pct = Math.round((amount / (purchases || 1)) * 100);
-        return `
-            <li class="progress-item">
-                <div class="progress-item-labels">
-                    <span>${category}</span>
-                    <span>$ ${amount.toLocaleString('es-AR', {maximumFractionDigits: 0})} (${pct}%)</span>
-                </div>
-                <div class="progress-track">
-                    <div class="progress-bar" style="width: ${pct}%;"></div>
-                </div>
-            </li>
-        `;
-    }).join('');
-}
-
-// BÚSQUEDA DE COMISIONES Y TRANSACCIONES BANCARIAS
 export function renderBancosGrid() { UIManager.renderBankTable(); }
 
 window.saveMicaClassification = (control, method, id) => {
@@ -3109,7 +2996,9 @@ appStore.subscribe(() => {
     }
     requestOperationalData(appStore, document, document.querySelector('.tab-content:not(.hidden)')?.id);
     updateSalaryFormFields();
-    if (appStore.canVisitModule('tab-client-dashboard')) renderClientDashboard();
+    const reportingTab = document.querySelector('.tab-content:not(.hidden)')?.id;
+    if (reportingTab === 'tab-client-dashboard') renderClientDashboard();
+    if (reportingTab === 'tab-reports') mountReporting(appStore, 'reports');
     if (appStore.canVisitModule('tab-movimientos-manuales')) renderOcrHistory();
     if (appStore.canVisitModule('tab-movimientos-manuales')) renderResolucionManual();
     if (appStore.canVisitModule('tab-categorizacion')) UIManager.renderCategorization();

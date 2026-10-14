@@ -1,140 +1,38 @@
-import { jest } from '@jest/globals';
-
-const elements = {};
-function createMockElement() {
-    return {
-        innerText: '',
-        style: {},
-        innerHTML: '',
-        classList: { 
-            toggle: jest.fn(), 
-            add: jest.fn(), 
-            remove: jest.fn(), 
-            contains: jest.fn() 
-        },
-        addEventListener: jest.fn()
-    };
-}
-
-if (typeof global.window === 'undefined') {
-    global.window = global;
-}
-if (typeof global.window.location === 'undefined') {
-    global.window.location = { origin: 'http://localhost', pathname: '/' };
-}
-
-if (typeof global.document === 'undefined') {
-    global.document = {
-        getElementById: (id) => {
-            if (!elements[id]) elements[id] = createMockElement();
-            return elements[id];
-        },
-        querySelectorAll: () => [],
-        querySelector: () => createMockElement(),
-        addEventListener: jest.fn()
-    };
-}
-
-// Mock Supabase client
-jest.unstable_mockModule('../../src/js/core/services/supabaseClient.js', () => ({
-    supabase: {
-        rpc: jest.fn(),
-        auth: {
-            onAuthStateChange: jest.fn(),
-            getSession: jest.fn().mockResolvedValue({ data: { session: null } })
-        }
-    }
-}));
-
-const { appStore } = await import('../../src/js/store.js');
-const { renderClientDashboard } = await import('../../src/js/ui.js');
-
-describe('Panel Gerencial Complete Restoration & Strict Fiscal Determination Tests', () => {
-    beforeEach(() => {
-        appStore.items = [];
-        appStore.salaries = null;
-        appStore.manualMovements = [];
-
-        // Reset innerText for all mock elements
-        ['client-sales-val', 'client-purchases-val', 'client-net-val', 'client-labor-val', 'client-iva-val', 'client-iibb-val'].forEach(id => {
-            elements[id] = createMockElement();
-        });
-        elements['alert-unresolved-taxes'] = createMockElement();
-        elements['alert-no-issues'] = createMockElement();
-        elements['client-category-chart'] = createMockElement();
-    });
-
-    test('todos los elementos históricos del dashboard existen (incluyendo client-labor-val y alert-unresolved-taxes)', () => {
-        const laborEl = document.getElementById('client-labor-val');
-        const alertEl = document.getElementById('alert-unresolved-taxes');
-        const salesEl = document.getElementById('client-sales-val');
-        const purchasesEl = document.getElementById('client-purchases-val');
-        const netEl = document.getElementById('client-net-val');
-        const ivaEl = document.getElementById('client-iva-val');
-        const iibbEl = document.getElementById('client-iibb-val');
-
-        expect(laborEl).toBeDefined();
-        expect(alertEl).toBeDefined();
-        expect(salesEl).toBeDefined();
-        expect(purchasesEl).toBeDefined();
-        expect(netEl).toBeDefined();
-        expect(ivaEl).toBeDefined();
-        expect(iibbEl).toBeDefined();
-    });
-
-    test('NO calcula IVA con total * 0.21 ni IIBB con alícuota hardcodeada 0.03', () => {
-        appStore.items = [
-            { id: '1', tipo: 'emitido', total: 10000.00, iva: 0 },
-            { id: '2', tipo: 'recibido', total: 5000.00, iva: 0 }
-        ];
-
-        renderClientDashboard();
-
-        const ivaEl = document.getElementById('client-iva-val');
-        const iibbEl = document.getElementById('client-iibb-val');
-
-        // IVA no debe ser 1050 (10000*0.21 - 5000*0.21) sino neutro/pendiente
-        expect(ivaEl.innerText).not.toContain('1.050');
-        expect(ivaEl.innerText).toBe('Pendiente de determinación');
-
-        // IIBB no debe ser 300 (10000*0.03) sino pendiente de determinación
-        expect(iibbEl.innerText).not.toContain('300');
-        expect(iibbEl.innerText).toBe('Pendiente de determinación');
-    });
-
-    test('utiliza campos IVA fiscales reales si existen en los comprobantes importados', () => {
-        appStore.items = [
-            { id: '1', tipo: 'emitido', total: 12100.00, iva: 2100.00 },
-            { id: '2', tipo: 'recibido', total: 6050.00, iva: 1050.00 }
-        ];
-
-        renderClientDashboard();
-
-        const ivaEl = document.getElementById('client-iva-val');
-        // Débito (2100) - Crédito (1050) = 1050
-        expect(ivaEl.innerText).toContain('1.050,00');
-    });
-
-    test('la tarjeta de Costo Laboral utiliza el modelo validado actual de Sueldos', () => {
-        appStore.salaries = {
-            sueldoBrutoCalculado: 500000.00,
-            noRemunerativo: 50000.00
-        };
-
-        renderClientDashboard();
-
-        const laborEl = document.getElementById('client-labor-val');
-        expect(laborEl.innerText).toContain('550.000,00');
-    });
-
-    test('gestiona adecuadamente las alertas de comprobantes no explicados / no categorizados', () => {
-        appStore.items = [
-            { id: '1', tipo: 'recibido', total: 2000.00, saldoAExplicar: 2000.00, confirmada: false }
-        ];
-
-        renderClientDashboard();
-
-        const alertEl = document.getElementById('alert-unresolved-taxes');
-        expect(alertEl.innerHTML).toContain('Tenés 1 comprobantes de compras sin categorizar');
-    });
+import {jest} from '@jest/globals';
+import fs from 'node:fs';
+import {buildModel,buildReport} from '../../src/js/core/reporting/engine.js';
+import {reportingData} from '../fixtures/reporting.js';
+jest.unstable_mockModule('../../src/js/core/services/reportingService.js',()=>({reportingService:{}}));
+const {renderManagement,renderReport,comparisonPeriod,quickPeriod,createReportingController,metricTrace}=await import('../../src/js/components/managementReporting.js');
+test('all eight summary cards retain full-period source trace including comparison and fiscal carry',()=>{
+ const current=buildModel(reportingData()),previous=buildModel(reportingData({date_from:'2026-08-01',date_to:'2026-08-31'}));
+ for(const code of ['sales','sales_change','result','margin','purchases','bank_balance','taxes','bank_flow']){const trace=metricTrace(current,previous,code);expect(trace.formula).toBeTruthy();expect(Array.isArray(trace.sources)).toBe(true);}
+ expect(metricTrace(current,previous,'margin').unit).toBe('percent');expect(metricTrace(current,previous,'taxes').value).toBe(119500);
+});
+test('Gerencia renders eight analytical cards and accessible charts across five views',()=>{
+ const model=buildModel(reportingData());const html=renderManagement(model,model,'Resumen');expect((html.match(/class="mr-kpi /g)||[])).toHaveLength(8);expect(html).toContain('role="img"');expect(html).toContain('Ver datos del gráfico');
+ expect(renderManagement(model,model,'Tesorería')).toContain('Saldos observados por cuenta');expect(renderManagement(model,model,'Fiscal')).toContain('IVA mensual');expect(renderManagement(model,model,'Análisis')).toContain('cohorte mínima de 10');
+});
+test('one Gerencia and one Reportes section replace duplicate legacy panel IDs',()=>{
+ const html=fs.readFileSync('index.html','utf8');expect((html.match(/id="tab-client-dashboard"/g)||[])).toHaveLength(1);expect((html.match(/id="tab-reports"/g)||[])).toHaveLength(1);expect(html).not.toContain('id="client-sales-val"');
+});
+test('preview exposes drill-down and manual attribution without claiming review',()=>{
+ const html=renderReport(buildReport(buildModel(reportingData()),'IVA'));expect(html).toContain('BORRADOR');expect(html).toContain('data-report-line');expect(html).toContain('entrada manual');
+});
+test('comparison respects calendar months and leap years; YTD ends today',()=>{
+ expect(comparisonPeriod('2026-03-01','2026-03-31','previous')).toEqual({from:'2026-02-01',to:'2026-02-28'});
+ expect(comparisonPeriod('2024-02-01','2024-02-29','year')).toEqual({from:'2023-02-01',to:'2023-02-28'});
+ expect(quickPeriod('ytd',new Date(2026,9,15))).toEqual({from:'2026-01-01',to:'2026-10-15'});
+});
+test('organization switch invalidates pending response and clears sensitive UI',async()=>{
+ let resolve;const service={request:()=>new Promise(r=>{resolve=r;})},listeners=[];
+ const store={contextState:'TENANT_READY',activeOrganizationId:'org-a',contextGeneration:1,hasCapability:()=>true,tenantResetListeners:[],subscribe:f=>listeners.push(f)};
+ const root={innerHTML:'',addEventListener:jest.fn()},controller=createReportingController({store,root,mode:'management',service});
+ const pending=controller.load();store.activeOrganizationId='org-b';store.contextGeneration++;listeners.forEach(f=>f());expect(root.innerHTML).toBe('');
+ resolve({model:{organization:{name:'Secret A'},organization_id:'org-a'}});await pending;expect(controller.state.model).toBeNull();expect(root.innerHTML).not.toContain('Secret A');
+});
+test('REPORT_VIEW revocation clears results while RECORD_VIEW remains',async()=>{
+ let allowed=true;const listeners=[],store={contextState:'TENANT_READY',activeOrganizationId:'org-a',contextGeneration:1,hasCapability:c=>c!=='REPORT_VIEW'||allowed,tenantResetListeners:[],subscribe:f=>listeners.push(f)};
+ const root={innerHTML:'',addEventListener:jest.fn()},controller=createReportingController({store,root,mode:'reports',service:{request:async()=>({model:buildModel(reportingData())})}});
+ await controller.load();allowed=false;listeners.forEach(f=>f());expect(root.innerHTML).toBe('');expect(controller.state.model).toBeNull();
 });

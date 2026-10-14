@@ -7,6 +7,7 @@
     <!-- Estilos externalizados -->
     <link rel="stylesheet" href="src/css/styles.css">
     <link rel="stylesheet" href="src/css/administration.css">
+    <link rel="stylesheet" href="src/css/managementReporting.css">
     <!-- Biblioteca SheetJS para parsear planillas Excel (.xlsx/.xls) en el cliente -->
     <script src="src/js/vendor/xlsx.full.min.js"></script>
 </head>
@@ -73,7 +74,8 @@
             <li><a onclick="switchTab('tab-sueldos')">👥 <span class="nav-text">Sueldos</span></a></li>
             <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Carga manual y OCR</span></a></li>
             <li><a onclick="switchTab('tab-categorizacion')">🏷️ <span class="nav-text">Categorización</span></a></li>
-            <li><a onclick="switchTab('tab-client-dashboard')">📊 <span class="nav-text">Panel Gerencial</span></a></li>
+            <li><a onclick="switchTab('tab-client-dashboard')">📊 <span class="nav-text">Gerencia</span></a></li>
+            <li><a onclick="switchTab('tab-reports')"><span class="nav-text">Reportes</span></a></li>
             <li><a onclick="switchTab('tab-configuracion')">⚙️ <span class="nav-text">Configuración</span></a></li>
         </ul>
 
@@ -749,60 +751,10 @@
 
         <!-- SECCIÓN: PANEL GERENCIAL -->
         <section id="tab-client-dashboard" class="tab-content hidden">
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <h4>Ventas Brutas</h4>
-                    <div class="value" id="client-sales-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--warning);">
-                    <h4>Egresos / Gastos Totales</h4>
-                    <div class="value" id="client-purchases-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--success);">
-                    <h4>Resultado Operativo Neto</h4>
-                    <div class="value" id="client-net-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--primary);">
-                    <h4>Costo Laboral del Mes</h4>
-                    <div class="value" id="client-labor-val">$ 0,00</div>
-                </div>
-            </div>
-
-            <div class="metrics-grid" style="margin-top: 16px;">
-                <div class="metric-card">
-                    <h4>IVA Determinado</h4>
-                    <div class="value" id="client-iva-val" style="color: var(--warning);">Pendiente de determinación</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Saldo basado en Débito y Crédito fiscal importado</span>
-                </div>
-                <div class="metric-card">
-                    <h4>IIBB Estimado AGIP/ARBA</h4>
-                    <div class="value" id="client-iibb-val" style="color: var(--warning);">Pendiente de determinación</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Pendiente del motor de determinación impositiva</span>
-                </div>
-            </div>
-
-            <div class="grid-inputs" style="margin-top: 16px;">
-                <div class="card">
-                    <h3>Desglose de Gastos por Categoría</h3>
-                    <ul class="progress-list" id="client-category-chart">
-                        <li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">
-                            Sin datos disponibles. Cargá comprobantes recibidos para ver el desglose.
-                        </li>
-                    </ul>
-                </div>
-
-                <div class="card">
-                    <h3>Alertas Contables Recientes</h3>
-                    <div id="client-alerts-container" style="font-size: 13px; display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
-                        <div id="alert-unresolved-taxes" class="alert-box alert-warning hidden" style="padding: 10px; background-color: rgba(245, 158, 11, 0.15); border-radius: 6px; color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3);">
-                            ⚠️ <strong>Atención:</strong> Existen comprobantes de compras sin categorizar o con saldo pendiente por explicar.
-                        </div>
-                        <div id="alert-no-issues" style="font-size: 13px; color: var(--text-muted); padding: 8px 0;">
-                            ✓ Sin alertas críticas pendientes.
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div id="management-root" aria-live="polite"></div>
+        </section>
+        <section id="tab-reports" class="tab-content hidden">
+            <div id="reports-root" aria-live="polite"></div>
         </section>
 
         <!-- SECCIÓN: CATEGORIZACIÓN (CATÁLOGOS E IMPUESTOS) -->
@@ -981,62 +933,7 @@
         </section>
 
         <!-- SECCIÓN 7: HUB DE USUARIO - PANEL GERENCIAL (TABLERO UNIFICADO) -->
-        <section id="tab-client-dashboard" class="tab-content hidden">
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <h4>Ventas Brutas</h4>
-                    <div class="value" id="client-sales-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--warning);">
-                    <h4>Egresos / Gastos Totales</h4>
-                    <div class="value" id="client-purchases-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--success);">
-                    <h4>Resultado Operativo Neto</h4>
-                    <div class="value" id="client-net-val">$ 0,00</div>
-                </div>
-            </div>
 
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <h4>IVA Estimado Proximo Vencimiento</h4>
-                    <div class="value" id="client-iva-val" style="color: var(--warning);">$ 0,00</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Saldo estimado (Débito menos Crédito)</span>
-                </div>
-                <div class="metric-card">
-                    <h4>IIBB Estimado (ARBA/AGIP)</h4>
-                    <div class="value" id="client-iibb-val" style="color: var(--warning);">$ 0,00</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Calculado sobre Ventas brutas gravadas</span>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--danger);">
-                    <h4>Costo Laboral del Mes</h4>
-                    <div class="value" id="client-labor-val" style="color: var(--danger);">$ 0,00</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Sueldos + F931 + Sindicato</span>
-                </div>
-            </div>
-
-            <div class="grid-inputs">
-                <div class="card">
-                    <h3>Desglose de Gastos por Categoría</h3>
-                    <ul class="progress-list" id="client-category-chart">
-                        <li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">
-                            Sin datos disponibles. Cargá comprobantes recibidos para ver el desglose.
-                        </li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <h3>Alertas Contables Recientes</h3>
-                    <ul style="font-size: 13px; list-style: none; display: flex; flex-direction: column; gap: 10px;">
-                        <li style="padding: 10px; background-color: var(--warning-light); border-radius: 6px; color: var(--warning);" id="alert-unresolved-taxes">
-                            ⚠️ <strong>Atención:</strong> Tienes comprobantes de compra con "Otros Tributos" sin conciliar.
-                        </li>
-                        <li style="padding: 10px; background-color: var(--success-light); border-radius: 6px; color: var(--success);">
-                            ✓ <strong>Información:</strong> La última presentación de IVA cerró correctamente.
-                        </li>
-                    </ul>
-                </div>
-            </div>
-        </section>
 
 
     </div>
@@ -1152,6 +1049,9 @@
                 <button class="btn-close-sheet" onclick="toggleMobileMoreSheet(false)">✕</button>
             </div>
             <ul class="mobile-more-list">
+                <li>
+                    <a onclick="switchTab('tab-reports'); toggleMobileMoreSheet(false);"><span class="sheet-icon">📑</span><span class="sheet-text"><strong>Reportes</strong></span></a>
+                </li>
                 <li>
                     <a onclick="switchTab('tab-movimientos-manuales'); toggleMobileMoreSheet(false);">
                         <span class="sheet-icon">📝</span>
