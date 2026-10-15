@@ -1,4 +1,5 @@
 import { mountReporting } from './components/managementReporting.js';
+import { mountBusinessMetrics } from './components/businessMetrics.js';
 import { saveClassificationControl } from './components/classificationControl.js';
 import { initializeWithSessionRecovery } from './core/sessionRecovery.js';
 import { validateImportEnvelope, refreshDuplicateImport, assertImportResult } from './core/importEnvelope.js';
@@ -537,6 +538,7 @@ export function switchTab(tabId) {
     else if (tabId === 'tab-client-dashboard') {
         renderClientDashboard({refresh:true});
     }
+    else if (tabId === 'tab-metrics') { mountBusinessMetrics(appStore, {refresh:true}); }
     else if (tabId === 'tab-reports') { mountReporting(appStore, 'reports', {refresh:true}); }
     else if (tabId === 'tab-access') titleElement.innerText = "Acceso MICA";
     return true;
@@ -2999,6 +3001,7 @@ appStore.subscribe(() => {
     const reportingTab = document.querySelector('.tab-content:not(.hidden)')?.id;
     if (reportingTab === 'tab-client-dashboard') renderClientDashboard();
     if (reportingTab === 'tab-reports') mountReporting(appStore, 'reports');
+    if (reportingTab === 'tab-metrics') mountBusinessMetrics(appStore);
     if (appStore.canVisitModule('tab-movimientos-manuales')) renderOcrHistory();
     if (appStore.canVisitModule('tab-movimientos-manuales')) renderResolucionManual();
     if (appStore.canVisitModule('tab-categorizacion')) UIManager.renderCategorization();

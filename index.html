@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="src/css/styles.css">
     <link rel="stylesheet" href="src/css/administration.css">
     <link rel="stylesheet" href="src/css/managementReporting.css">
+    <link rel="stylesheet" href="src/css/businessMetrics.css">
     <!-- Biblioteca SheetJS para parsear planillas Excel (.xlsx/.xls) en el cliente -->
     <script src="src/js/vendor/xlsx.full.min.js"></script>
 </head>
@@ -75,6 +76,7 @@
             <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Carga manual y OCR</span></a></li>
             <li><a onclick="switchTab('tab-categorizacion')">🏷️ <span class="nav-text">Categorización</span></a></li>
             <li><a onclick="switchTab('tab-client-dashboard')">📊 <span class="nav-text">Gerencia</span></a></li>
+            <li><a onclick="switchTab('tab-metrics')">📈 <span class="nav-text">Métricas</span></a></li>
             <li><a onclick="switchTab('tab-reports')"><span class="nav-text">Reportes</span></a></li>
             <li><a onclick="switchTab('tab-configuracion')">⚙️ <span class="nav-text">Configuración</span></a></li>
         </ul>
@@ -750,6 +752,7 @@
         </section>
 
         <!-- SECCIÓN: PANEL GERENCIAL -->
+        <section id="tab-metrics" class="tab-content hidden"><div id="business-metrics-root"></div></section>
         <section id="tab-client-dashboard" class="tab-content hidden">
             <div id="management-root" aria-live="polite"></div>
         </section>
@@ -1050,6 +1053,7 @@
             </div>
             <ul class="mobile-more-list">
                 <li>
+                    <a onclick="switchTab('tab-metrics'); toggleMobileMoreSheet(false);"><span class="sheet-icon">📈</span><span class="sheet-text"><strong>Métricas</strong></span></a>
                     <a onclick="switchTab('tab-reports'); toggleMobileMoreSheet(false);"><span class="sheet-icon">📑</span><span class="sheet-text"><strong>Reportes</strong></span></a>
                 </li>
                 <li>

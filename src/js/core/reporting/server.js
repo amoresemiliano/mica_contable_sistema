@@ -1,4 +1,5 @@
 import { buildModel,buildReport,validateInput,REPORT_TYPES,ENGINE_VERSION,monthsBetween,alertEngine } from './engine.js';
+import {buildBusinessHealth,healthSourceRange} from '../metrics/engine.js';
 
 // Dependency injection keeps the exact trusted server path locally testable without DB execution.
 export function createReportingHandler({authenticate,userClient,serviceClient,allowedOrigins=[],now=()=>new Date().toISOString()}) {
@@ -23,6 +24,17 @@ export function createReportingHandler({authenticate,userClient,serviceClient,al
    const dataArgs={p_expected_org:org,p_from:from,p_to:to,p_export:['export','review','close','reopen'].includes(body.action)};
    let data=await rpc('mica_reporting_data',dataArgs);
    if(data.organization_id!==org)throw new Error('Respuesta de otra organización.');
+   if(body.action==='health') {
+    if(!['previous','year',undefined].includes(body.compare))throw new Error('Comparación inválida.');
+    const range=healthSourceRange(from,to,body.compare);
+    const opening=data.inputs.filter(i=>i.kind==='IVA_OPENING'&&i.period<=range.from.slice(0,7)).sort((a,b)=>b.period.localeCompare(a.period))[0];
+    if(opening){const start=`${opening.period}-01`;const distance=(Number(to.slice(0,4))-Number(start.slice(0,4)))*12+Number(to.slice(5,7))-Number(start.slice(5,7));if(distance<36)range.from=start;}
+    const history=await rpc('mica_reporting_data',{...dataArgs,p_from:range.from});
+    const compared=await rpc('mica_reporting_data',{...dataArgs,p_from:range.previous.from,p_to:range.previous.to});
+    if(history.organization_id!==org||compared.organization_id!==org)throw new Error('Respuesta de otra organización.');
+    const health=buildBusinessHealth({...history,selected:data,compared},{from,to,compare:body.compare});
+    return new Response(JSON.stringify({health}),{headers});
+   }
    if(body.action==='input') {
     validateInput(body.kind,body.period,body.payload);
     if(!Number.isInteger(body.revision)||body.revision<0)throw new Error('Revisión inválida.');

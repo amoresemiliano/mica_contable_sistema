@@ -167,6 +167,7 @@ export const MICA_MODULE_CONTRACT = Object.freeze({
     'tab-sueldos': {label:'Sueldos',any:['RECORD_VIEW'],datasets:['financials']},
     'tab-movimientos-manuales': {label:'Carga manual y OCR',any:['MANUAL_MOVEMENT_VIEW','RECORD_VIEW','DOCUMENTS_UPLOAD','DOCUMENTS_OCR_PROCESS','DOCUMENTS_OCR_VERIFY'],datasets:['records','financials']},
     'tab-client-dashboard': {label:'Gerencia',any:['REPORT_VIEW'],datasets:[]},
+    'tab-metrics': {label:'Métricas',any:['REPORT_VIEW'],datasets:[]},
     'tab-reports': {label:'Reportes',any:['REPORT_VIEW'],datasets:[]},
     'tab-categorizacion': {label:'Categorización impositiva',any:['ORG_VIEW','CATALOG_ORG_VIEW']}
 });
