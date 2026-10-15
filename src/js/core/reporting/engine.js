@@ -1,6 +1,8 @@
 // Canonical calculation layer, shared by the browser and the trusted Edge service.
 // Monetary inputs/outputs are integer ARS cents. No exchange rates or statutory scales inferred.
+import { normalizeReportingCurrency, isArsCurrency, currencyExclusions, currencyWarnings } from './currency.js';
 export const ENGINE_VERSION = 'management-v1';
+export const CALCULATION_REVISION = 'currency-scope-046';
 export const MIN_BENCHMARK_COHORT = 10;
 export const REPORT_TYPES = ['IVA','IIBB','RESULTADOS','GANANCIAS'];
 const integer = n => Number.isSafeInteger(n);
@@ -9,7 +11,7 @@ const add = values => values.reduce((a,b) => cents(a+cents(b)),0);
 const percent = (n,d) => d ? n/d*100 : null;
 export const change = (current,previous) => current == null || previous == null || previous===0 ? null : (current-previous)/Math.abs(previous)*100;
 const sum = (rows,key) => add(rows.map(r=>r[key]??0));
-const ars = r => r.currency==='PES' || r.currency==='ARS';
+const ars = isArsCurrency;
 const rateAmount = (base,rate,coefficient=1) => {
  cents(base);
  if(!Number.isFinite(Number(rate))||Number(rate)<0||!Number.isFinite(coefficient)||coefficient<0)throw new Error('Tasa/coeficiente inválido.');
@@ -28,11 +30,50 @@ export function monthsBetween(from,to) {
 }
 const latest = (data,kind,period) => data.inputs.find(i=>i.kind===kind && i.period===period);
 const payload = (data,kind,period) => latest(data,kind,period)?.payload;
-const ref = (r,field) => ({ source_type:r.source_type,count:r.count,field,filter:{month:r.month,kind:r.kind,category_id:r.category_id??null,activity_id:r.activity_id??null,supplier:r.supplier??null,currency:r.currency,...(r.tax_type?{tax_type:r.tax_type}:{}),...(r.tax_kind?{tax_kind:r.tax_kind}:{}),...(r.jurisdiction?{jurisdiction:r.jurisdiction}:{})} });
+export const reportingSource = (r,field) => ({ source_type:r.source_type,count:r.count,field,included_in_ars:ars(r),currency:normalizeReportingCurrency(r.currency),filter:{month:r.month,kind:r.kind,category_id:r.category_id??null,activity_id:r.activity_id??null,supplier:r.supplier??null,currency:r.source_currency??r.currency,...(r.tax_type?{tax_type:r.tax_type}:{}),...(r.tax_kind?{tax_kind:r.tax_kind}:{}),...(r.jurisdiction?{jurisdiction:r.jurisdiction}:{})} });
+const ref = reportingSource;
 const manualRef = i => i ? {source_type:'manual_input',id:i.id,user:i.created_by,timestamp:i.created_at,note:i.note,kind:i.kind,period:i.period,revision:i.revision,count:1} : null;
 function line(code,label,value,formula,rows=[],field='net',missing=[],manual=[]) {
  if(value!=null)cents(value);
- return {code,label,value:missing.length?null:value,formula,source_count:rows.reduce((n,r)=>n+r.count,0),sources:rows.map(r=>ref(r,field)),manual:manual.map(manualRef).filter(Boolean),missing:[...new Set(missing)]};
+ return {code,label,value:missing.length?null:value,formula,source_count:rows.reduce((n,r)=>n+r.count,0),sources:rows.map(r=>ref(r,field)),manual:manual.map(manualRef).filter(Boolean),missing:[...new Set(missing)],status:missing.length?'INCOMPLETE':value==null?'NO_DATA':rows.length||manual.some(Boolean)?'AVAILABLE':'NO_ACTIVITY'};
+}
+const hasDataset = (data,kinds) => data.groups.some(r=>kinds.includes(r.kind)&&r.month>=data.date_from.slice(0,7)&&r.month<=data.date_to.slice(0,7));
+const invalidAmountCount = (row,field) => {
+ if(field==='net')return Number(row.missing_net)|| (row.net==null?Number(row.count):0);
+ if(field==='vat')return Number(row.missing_vat)|| (row.vat==null?Number(row.count):0);
+ if(['income','outflow'].includes(field))return Number(row.missing_amount)||0;
+ if(field==='amount')return Number(row.missing_amount)|| (row.amount==null?Number(row.count):0);
+ if(['credit_notes','credit_notes_net'].includes(field))return Number(row.missing_net)||0;
+ return row[field]==null?Number(row.count):0;
+};
+function scopedMetric(data,month,{code,label,kinds,field='net',extra=0,manual=[],rows,emptyIsZero=false}) {
+ const relevant=rows??data.groups.filter(r=>r.month===month&&kinds.includes(r.kind));
+ const supported=relevant.filter(ars),excluded=currencyExclusions(relevant,field),invalid=supported.reduce((n,r)=>n+invalidAmountCount(r,field),0);
+ const evidence=hasDataset(data,kinds)||emptyIsZero||manual.some(Boolean);
+ const missing=currencyWarnings(relevant);
+ if(invalid)missing.push(`${invalid} registros de ${label.toLowerCase()} sin importe canónico completo.`);
+ const noData=!relevant.length&&!evidence;
+ if(noData)missing.push(`No hay registros de ${label.toLowerCase()} en el período seleccionado.`);
+ const supportedValue=noData?null:add([sum(supported,field),extra]);
+ return {...line(code,label,supportedValue,`SUM(${field} en ARS)${manual.some(Boolean)?' + ajuste manual':''}`,relevant,field,missing,manual),
+  supported_value:supportedValue,included_count:supported.reduce((n,r)=>n+Number(r.count),0)-invalid,invalid_count:invalid,
+  excluded_count:excluded.reduce((n,c)=>n+c.record_count,0),excluded_group_count:excluded.reduce((n,c)=>n+c.group_count,0),excluded_currencies:excluded,
+  status:noData?'NO_DATA':missing.length?'INCOMPLETE':!relevant.length&&extra===0?'NO_ACTIVITY':'AVAILABLE',
+  activity_basis:evidence?'IMPORTED_DATASET_IN_SELECTED_RANGE':'NO_DATASET_EVIDENCE',coverage:'IMPORTED_RECORDS_ONLY'};
+}
+// NO_ACTIVITY is a zero in the queried imported dataset, not certification of all business activity.
+export function aggregateMetric(model,code) {
+ const lines=model?.monthly?.flatMap(m=>m.lines.filter(l=>l.code===code))||[];
+ const kinds={sales:['SALES'],gross_sales:['SALES'],credit_notes:['SALES'],taxable_sales:['SALES'],untaxed_sales:['SALES'],purchases:['PURCHASES','MANUAL_PURCHASE'],payroll:['PAYROLL'],salary_net:['PAYROLL'],sac:['PAYROLL'],bank_flow:['BANK'],bank_income:['BANK'],bank_outflow:['BANK'],result:['SALES','PURCHASES','MANUAL_PURCHASE','PAYROLL','OTHER_INCOME','OTHER_EXPENSE'],other_income:['OTHER_INCOME'],other_expense:['OTHER_EXPENSE']}[code];
+ const globalWarnings=kinds?currencyWarnings(model?.groups?.filter(r=>kinds.includes(r.kind))||[]):[];
+ const missing=[...new Set([...lines.flatMap(l=>l.missing||[]).filter(m=>!kinds||!m.includes('pendientes de conversión; excluidos')), ...globalWarnings])];
+ const incomplete=lines.some(l=>l.status==='INCOMPLETE'||l.status!=='NO_DATA'&&l.missing?.length);
+ const noData=!lines.length||lines.some(l=>l.status==='NO_DATA'||l.value==null&&!l.missing?.length);
+ const known=lines.map(l=>l.supported_value??l.value).filter(v=>v!=null);
+ return {value:incomplete||noData?null:add(lines.map(l=>l.value)),supported_value:code==='result'&&(incomplete||noData)?null:known.length?add(known):null,
+  status:incomplete?'INCOMPLETE':noData?'NO_DATA':lines.every(l=>l.status==='NO_ACTIVITY')?'NO_ACTIVITY':'AVAILABLE',missing,
+  included_count:lines.reduce((n,l)=>n+(l.included_count??l.source_count??0),0),excluded_count:lines.reduce((n,l)=>n+(l.excluded_count??0),0),
+  excluded_group_count:lines.reduce((n,l)=>n+(l.excluded_group_count??0),0),excluded_currencies:lines.flatMap(l=>l.excluded_currencies||[]),coverage:'IMPORTED_RECORDS_ONLY'};
 }
 export const ALERT_DEFAULTS = Object.freeze({
  SALES_DROP:{category:'FINANCIAL',severity:'WARNING',threshold:15,mode:'previous'},
@@ -90,29 +131,38 @@ function validateData(data) {
  for(const a of data.accounts||[])for(const k of ['first','last','minimum','maximum','average'])if(a[k]!=null)a[k]=cents(Number(a[k]));
 }
 function resultMonth(data,month) {
- const rows=data.groups.filter(r=>r.month===month), used=rows.filter(ars), sales=used.filter(r=>r.kind==='SALES'), purchases=used.filter(r=>r.kind==='PURCHASES'), payroll=used.filter(r=>r.kind==='PAYROLL');
+ const rows=data.groups.filter(r=>r.month===month),sales=rows.filter(r=>r.kind==='SALES'),purchases=rows.filter(r=>['PURCHASES','MANUAL_PURCHASE'].includes(r.kind)),payroll=rows.filter(r=>r.kind==='PAYROLL');
  const adjust=latest(data,'PERIOD_ADJUSTMENT',month), a=adjust?.payload||{};
- const missing=rows.some(r=>!ars(r))?['Hay importes en moneda extranjera sin política de conversión validada.']:[];
- const metric=(code,label,rs,field='net',extra=0)=>line(code,label,add([sum(rs,field),extra]),`SUM(${field}) ${extra?'+ ajuste manual':''}`,rs,field,[...missing,...(!rs.length&&!['other_income','other_expense'].includes(code)?['No hay datos suficientes para calcular este indicador.']:[]),...(rs.some(r=>(field==='net'&&r.missing_net)||(field==='amount'&&r.missing_amount)||(['salary_net','sac','taxable'].includes(field)&&r[field]==null)||(['income','outflow'].includes(field)&&r.missing_amount))?['Faltan importes canónicos.']:[])],extra?[adjust]:[]);
- const salesLine=metric('sales','Ventas netas documentales',sales), purchaseLine=metric('purchases','Compras netas documentales',purchases), grossPayroll=metric('payroll','Remuneración bruta importada',payroll);
+ const metric=(code,label,rs,kinds,field='net',extra=0,manual=[],emptyIsZero=false)=>scopedMetric(data,month,{code,label,rows:rs,kinds,field,extra,manual,emptyIsZero});
+ const salesLine=metric('sales','Ventas netas documentales',sales,['SALES']),purchaseLine=metric('purchases','Compras netas documentales',purchases,['PURCHASES','MANUAL_PURCHASE']),grossPayroll=metric('payroll','Remuneración bruta importada',payroll,['PAYROLL']);
  if(!payroll.length&&a.payroll_not_applicable){grossPayroll.value=0;grossPayroll.missing=[];grossPayroll.manual=[manualRef(adjust)];}
- const manualPurchase=used.filter(r=>r.kind==='MANUAL_PURCHASE');
- const incomeRows=used.filter(r=>r.kind==='OTHER_INCOME'),expenseRows=used.filter(r=>r.kind==='OTHER_EXPENSE');
- const otherIncome=metric('other_income','Otros ingresos',incomeRows,'amount',a.other_income??0),otherExpense=metric('other_expense','Otros egresos',expenseRows,'amount',a.other_expense??0);
+ if(!payroll.length&&a.payroll_not_applicable){grossPayroll.status='NO_ACTIVITY';grossPayroll.supported_value=0;}
+ const incomeRows=rows.filter(r=>r.kind==='OTHER_INCOME'),expenseRows=rows.filter(r=>r.kind==='OTHER_EXPENSE');
+ const otherIncome=metric('other_income','Otros ingresos',incomeRows,['OTHER_INCOME'],'amount',a.other_income??0,a.other_income!=null?[adjust]:[],true),otherExpense=metric('other_expense','Otros egresos',expenseRows,['OTHER_EXPENSE'],'amount',a.other_expense??0,a.other_expense!=null?[adjust]:[],true);
+ const resultKinds=['SALES','PURCHASES','MANUAL_PURCHASE','PAYROLL','OTHER_INCOME','OTHER_EXPENSE'];
+ const resultRows=rows.filter(r=>resultKinds.includes(r.kind));
+ const inactive=!resultRows.length&&!adjust&&hasDataset(data,resultKinds);
+ const employer=line('employer_contributions','Cargas empleador ingresadas',inactive?0:a.employer_contributions??null,'Entrada manual; cero sin actividad documental del mes',[],'amount',!inactive&&a.employer_contributions==null?['Faltan cargas empleador del período (ingresá 0 si corresponde).']:[],[adjust]);
+ employer.status=inactive?'NO_ACTIVITY':a.employer_contributions==null?'NO_DATA':employer.status;
  const resultMissing=[...salesLine.missing,...purchaseLine.missing,...grossPayroll.missing,...otherIncome.missing,...otherExpense.missing];
- if(a.employer_contributions==null)resultMissing.push('Faltan cargas empleador del período (ingresá 0 si corresponde).');
- if(manualPurchase.length)resultMissing.push('Compras manuales sin neto/IVA discriminado.');
+ resultMissing.push(...employer.missing);
  const result=line('result','Resultado documental antes de impuesto',add([salesLine.value??0,-(purchaseLine.value??0),-(grossPayroll.value??0),-(a.employer_contributions??0),otherIncome.value??0,-(otherExpense.value??0)]),
-  'Ventas netas − compras netas − remuneración bruta − cargas manuales + otros ingresos − otros egresos',[...sales,...purchases,...payroll,...incomeRows,...expenseRows],'net',resultMissing,[adjust]);
- const grossSales=line('gross_sales','Ventas antes de notas de crédito',sum(sales,'net')-sum(sales,'credit_notes_net'),'Ventas netas − neto firmado de NC',sales,'net',salesLine.missing);
- const lines=[salesLine,grossSales,metric('credit_notes','Notas de crédito (total comprobantes)',sales,'credit_notes'),
-  metric('taxable_sales','Ventas gravadas',sales,'taxable'),line('untaxed_sales','Ventas no gravadas / exentas',sum(sales,'net')-sum(sales,'taxable'),'Ventas netas − gravadas',sales,'net',salesLine.missing),purchaseLine,grossPayroll,
-  metric('salary_net','Sueldos netos',payroll,'salary_net'),metric('sac','SAC importado',payroll,'sac'),line('employer_contributions','Cargas empleador ingresadas',a.employer_contributions??null,'Entrada manual',[],'amount',a.employer_contributions==null?['Faltan cargas empleador del período.']:[],[adjust]),otherIncome,otherExpense,result];
- const banks=used.filter(r=>r.kind==='BANK');
- lines.push(metric('bank_flow','Flujo bancario neto',banks,'amount'),metric('bank_income','Ingresos bancarios',banks,'income'),metric('bank_outflow','Egresos bancarios',banks,'outflow'));
+  'Ventas netas − compras netas − remuneración bruta − cargas manuales + otros ingresos − otros egresos',resultRows,'net',resultMissing,[adjust]);
+ const resultExclusions=currencyExclusions(resultRows,'net');
+ Object.assign(result,{excluded_count:resultExclusions.reduce((n,c)=>n+c.record_count,0),excluded_group_count:resultExclusions.reduce((n,c)=>n+c.group_count,0),excluded_currencies:resultExclusions,supported_value:result.value,
+  included_count:resultRows.filter(ars).reduce((n,r)=>n+r.count,0),status:inactive&&!resultMissing.length?'NO_ACTIVITY':!resultRows.length&&!hasDataset(data,resultKinds)?'NO_DATA':result.status,coverage:'IMPORTED_RECORDS_ONLY'});
+ const grossSales={...salesLine,code:'gross_sales',label:'Ventas antes de notas de crédito',formula:'Ventas netas ARS − neto firmado de NC ARS',value:salesLine.value==null?null:salesLine.value-sum(sales.filter(ars),'credit_notes_net'),supported_value:salesLine.supported_value==null?null:salesLine.supported_value-sum(sales.filter(ars),'credit_notes_net')};
+ const taxableSales=metric('taxable_sales','Ventas gravadas',sales,['SALES'],'taxable');
+ const untaxedSales={...salesLine,code:'untaxed_sales',label:'Ventas no gravadas / exentas',formula:'Ventas netas ARS − gravadas ARS',value:salesLine.value==null||taxableSales.value==null?null:salesLine.value-taxableSales.value,supported_value:salesLine.supported_value==null||taxableSales.supported_value==null?null:salesLine.supported_value-taxableSales.supported_value,missing:[...salesLine.missing,...taxableSales.missing]};
+ if(untaxedSales.missing.length)untaxedSales.status=salesLine.status==='NO_DATA'?'NO_DATA':'INCOMPLETE';
+ const lines=[salesLine,grossSales,metric('credit_notes','Notas de crédito (total comprobantes)',sales,['SALES'],'credit_notes'),taxableSales,untaxedSales,purchaseLine,grossPayroll,
+  metric('salary_net','Sueldos netos',payroll,['PAYROLL'],'salary_net'),metric('sac','SAC importado',payroll,['PAYROLL'],'sac'),employer,otherIncome,otherExpense,result];
+ if(!payroll.length&&a.payroll_not_applicable)for(const l of lines.filter(l=>['salary_net','sac'].includes(l.code)))Object.assign(l,{value:0,supported_value:0,missing:[],status:'NO_ACTIVITY',manual:[manualRef(adjust)]});
+ const banks=rows.filter(r=>r.kind==='BANK');
+ lines.push(metric('bank_flow','Flujo bancario neto',banks,['BANK'],'amount'),metric('bank_income','Ingresos bancarios',banks,['BANK'],'income'),metric('bank_outflow','Egresos bancarios',banks,['BANK'],'outflow'));
  for(const category of new Set(purchases.map(r=>r.category_id??null))){
   const members=purchases.filter(r=>(r.category_id??null)===category),name=data.categories.find(c=>c.id===category)?.name||'Sin clasificar';
-  const categoryLine=metric(`expense_category_${category||'unclassified'}`,`Compras · ${name}`,members);
+  const categoryLine=metric(`expense_category_${category||'unclassified'}`,`Compras · ${name}`,members,['PURCHASES','MANUAL_PURCHASE']);
   categoryLine.category_id=category;lines.push(categoryLine);
  }
  return {month,lines,sales:salesLine.value,result:result.value,purchases:purchaseLine.value,payroll:grossPayroll.value,margin:result.value!=null?percent(result.value,salesLine.value):null,
@@ -122,46 +172,56 @@ function resultMonth(data,month) {
 export function ivaEngine(data) {
  const months=monthsBetween(data.date_from,data.date_to), opening=data.inputs.filter(i=>i.kind==='IVA_OPENING'&&i.period<=months[0]).sort((a,b)=>b.period.localeCompare(a.period))[0];
  let technical=opening?.payload.technical??null,free=opening?.payload.free??null;
- let technicalRows=[],freeRows=[],technicalManual=opening?[opening]:[],freeManual=opening?[opening]:[];
+ let technicalRows=[],freeRows=[],technicalManual=opening?[opening]:[],freeManual=opening?[opening]:[],technicalCarryMissing=[],freeCarryMissing=[];
  const result=[];
  if(opening && opening.period<months[0]) { // Caller must include every intervening month in the aggregate range.
   technical=null;free=null;
  }
  for(const month of months) {
   const localOpening=latest(data,'IVA_OPENING',month);
-  if(localOpening){technical=localOpening.payload.technical;free=localOpening.payload.free;technicalRows=[];freeRows=[];technicalManual=[localOpening];freeManual=[localOpening];}
-  const rows=data.groups.filter(r=>r.month===month),sales=rows.filter(r=>r.kind==='SALES'&&ars(r)),purchases=rows.filter(r=>r.kind==='PURCHASES'&&ars(r));
+  if(localOpening){technical=localOpening.payload.technical;free=localOpening.payload.free;technicalRows=[];freeRows=[];technicalManual=[localOpening];freeManual=[localOpening];technicalCarryMissing=[];freeCarryMissing=[];}
+  const rows=data.groups.filter(r=>r.month===month),sales=rows.filter(r=>r.kind==='SALES'),purchases=rows.filter(r=>['PURCHASES','MANUAL_PURCHASE'].includes(r.kind));
   const tax=rows.filter(r=>r.kind==='TAX'&&r.tax_type==='IVA'),ret=tax.filter(r=>r.tax_kind==='retencion'),per=tax.filter(r=>r.tax_kind==='percepcion');
   const adjustment=latest(data,'PERIOD_ADJUSTMENT',month),a=adjustment?.payload||{};
-  const missing=[];
-  if(technical==null||free==null)missing.push('Falta configurar Apertura IVA o incluir todos los meses desde la apertura.');
-  if(!sales.length&&!purchases.length)missing.push('No hay comprobantes fiscales importados en este mes.');
-  if(rows.some(r=>r.missing_vat && ['SALES','PURCHASES','MANUAL_PURCHASE'].includes(r.kind)))missing.push('Hay comprobantes sin IVA discriminado.');
-  if(rows.some(r=>!ars(r)))missing.push('Moneda extranjera pendiente de conversión.');
-  const cf=sum(purchases,'vat'),df=sum(sales,'vat'),net=df-cf,previousTechnical=technical,previousFree=free;
-  const periodTechnical=technical==null?null:net-technical,available=free==null?null:add([free,sum(ret,'amount'),sum(per,'amount'),a.iva_retention??0,a.iva_perception??0,a.iva_ld_adjustment??0]);
-  if(tax.some(r=>!['retencion','percepcion'].includes(r.tax_kind)))missing.push('Hay registros IVA sin tipo retención/percepción confiable.');
-  if(rows.some(r=>r.kind==='TAX'&&!r.tax_type))missing.push('Hay registros fiscales sin impuesto identificado; falta resolver su clasificación.');
+  const cfLine=scopedMetric(data,month,{code:'iva_cf',label:'IVA CF',kinds:['PURCHASES','MANUAL_PURCHASE'],rows:purchases,field:'vat'});
+  const dfLine=scopedMetric(data,month,{code:'iva_df',label:'IVA DF',kinds:['SALES'],rows:sales,field:'vat'});
+  const retLine=scopedMetric(data,month,{code:'retentions',label:'Retenciones',kinds:['TAX'],rows:ret,field:'amount',extra:a.iva_retention??0,manual:[adjustment],emptyIsZero:true});
+  const perLine=scopedMetric(data,month,{code:'perceptions',label:'Percepciones',kinds:['TAX'],rows:per,field:'amount',extra:a.iva_perception??0,manual:[adjustment],emptyIsZero:true});
+  const openingWarning='Falta configurar Apertura IVA o incluir todos los meses desde la apertura.';
+  const previousTechnicalMissing=technical==null?(technicalCarryMissing.length?technicalCarryMissing:[openingWarning]):[];
+  const previousFreeMissing=free==null?(freeCarryMissing.length?freeCarryMissing:[openingWarning]):[];
+  const invoiceMissing=[...cfLine.missing,...dfLine.missing];
+  const technicalMissing=[...invoiceMissing,...previousTechnicalMissing];
+  const freeMissing=[...retLine.missing,...perLine.missing,...previousFreeMissing];
+  const cf=cfLine.supported_value??0,df=dfLine.supported_value??0,net=df-cf,previousTechnical=technical,previousFree=free;
+  const periodTechnical=technicalMissing.length?null:net-technical,available=freeMissing.length?null:add([free,retLine.value,perLine.value,a.iva_ld_adjustment??0]);
+  if(tax.some(r=>!['retencion','percepcion'].includes(r.tax_kind)))freeMissing.push('Hay registros IVA sin tipo retención/percepción confiable.');
+  if(rows.some(r=>r.kind==='TAX'&&!r.tax_type))freeMissing.push('Hay registros fiscales sin impuesto identificado; falta resolver su clasificación.');
   const compensation=a.iva_compensation??0;
-  if(available!=null&&(available<0||compensation>Math.min(Math.max(0,periodTechnical),available)))missing.push('Compensación IVA excede deuda o LD disponible.');
-  technical=missing.length?null:Math.max(0,-periodTechnical);free=missing.length?null:available-compensation;
+  const compensationMissing=[];
+  if(compensation>0&&(periodTechnical==null||available==null))compensationMissing.push('No se puede validar la compensación IVA con saldos incompletos.');
+  if(available!=null&&(available<0||compensation>0&&periodTechnical!=null&&compensation>Math.min(Math.max(0,periodTechnical),available)))compensationMissing.push('Compensación IVA excede deuda o LD disponible.');
+  freeMissing.push(...compensationMissing);
+  const missing=[...new Set([...technicalMissing,...freeMissing])];
+  technical=technicalMissing.length?null:Math.max(0,-periodTechnical);free=freeMissing.length?null:available-compensation;
   const payable=missing.length?null:Math.max(0,periodTechnical)-compensation;
-  const make=(code,label,value,formula,rs=[],field='amount',manual=[])=>line(code,label,value,formula,rs,field,missing,manual);
+  const make=(code,label,value,formula,rs=[],field='amount',manual=[],reasons=missing)=>{
+   const excluded=currencyExclusions(rs,field);
+   return {...line(code,label,value,formula,rs,field,reasons,manual),excluded_count:excluded.reduce((n,c)=>n+c.record_count,0),excluded_group_count:excluded.reduce((n,c)=>n+c.group_count,0),excluded_currencies:excluded};
+  };
   result.push({month,technical,free,payable,lines:[
-   line('iva_cf','IVA CF',cf,'SUM(IVA compras firmado)',purchases,'vat',missing.filter(m=>!m.includes('Apertura'))),
-   line('iva_df','IVA DF',df,'SUM(IVA ventas firmado)',sales,'vat',missing.filter(m=>!m.includes('Apertura'))),
-   make('technical','Saldo técnico',net,'DF − CF',[...sales,...purchases],'vat'),
-   make('technical_prior','Saldo técnico anterior',previousTechnical,'Apertura o arrastre previo',technicalRows,'vat',technicalManual),
-   make('technical_period','Saldo técnico del período',periodTechnical,'DF − CF − saldo técnico anterior',[...technicalRows,...sales,...purchases],'vat',technicalManual),
-   make('technical_next','Saldo técnico a favor siguiente',technical,'MAX(0, − saldo técnico del período)',[...technicalRows,...sales,...purchases],'vat',technicalManual),
-   make('free_prior','Saldo a favor LD anterior',previousFree,'Apertura o arrastre previo',freeRows,'amount',freeManual),
-   make('retentions','Retenciones',sum(ret,'amount')+(a.iva_retention??0),'Importadas IVA + ajuste manual',ret,'amount',[adjustment]),
-   make('perceptions','Percepciones',sum(per,'amount')+(a.iva_perception??0),'Importadas IVA + ajuste manual',per,'amount',[adjustment]),
-   make('ld_adjustment','Ajuste LD',a.iva_ld_adjustment??0,'Entrada manual',[],'amount',[adjustment]),
-   make('compensation','Compensación carga manual',compensation,'Instrucción manual limitada a deuda y LD',[],'amount',[adjustment]),
-   make('free_next','Saldo a favor LD',free,'LD previo + retenciones + percepciones + ajuste − compensación',[...freeRows,...tax],'amount',[...freeManual,adjustment]),
+   cfLine,dfLine,
+   make('technical','Saldo técnico',net,'DF − CF',[...sales,...purchases],'vat',[],invoiceMissing),
+   make('technical_prior','Saldo técnico anterior',previousTechnical,'Apertura o arrastre previo',technicalRows,'vat',technicalManual,previousTechnicalMissing),
+   make('technical_period','Saldo técnico del período',periodTechnical,'DF − CF − saldo técnico anterior',[...technicalRows,...sales,...purchases],'vat',technicalManual,technicalMissing),
+   make('technical_next','Saldo técnico a favor siguiente',technical,'MAX(0, − saldo técnico del período)',[...technicalRows,...sales,...purchases],'vat',technicalManual,technicalMissing),
+   make('free_prior','Saldo a favor LD anterior',previousFree,'Apertura o arrastre previo',freeRows,'amount',freeManual,previousFreeMissing),
+   retLine,perLine,
+   make('ld_adjustment','Ajuste LD',a.iva_ld_adjustment??0,'Entrada manual',[],'amount',[adjustment],[]),
+   make('compensation','Compensación carga manual',compensation,'Instrucción manual limitada a deuda y LD',[],'amount',[adjustment],compensationMissing),
+   make('free_next','Saldo a favor LD',free,'LD previo + retenciones + percepciones + ajuste − compensación',[...freeRows,...tax],'amount',[...freeManual,adjustment],freeMissing),
    make('iva_payable','IVA estimado a pagar',payable,'MAX(0, saldo técnico del período) − compensación',[...technicalRows,...freeRows,...sales,...purchases,...tax],'vat',[...technicalManual,...freeManual,adjustment])],missing});
-  technicalRows=[...technicalRows,...sales,...purchases];freeRows=[...freeRows,...tax];
+  technicalRows=[...technicalRows,...sales,...purchases];freeRows=[...freeRows,...tax];technicalCarryMissing=[...new Set(technicalMissing)];freeCarryMissing=[...new Set(freeMissing)];
   if(adjustment)freeManual.push(adjustment);
  }
  return result;
@@ -171,11 +231,12 @@ export function iibbEngine(data) {
   const year=month.slice(0,4),config=latest(data,'IIBB_CONFIG',year),coeff=latest(data,'CM_COEFFICIENTS',year),adjustment=latest(data,'PERIOD_ADJUSTMENT',month),rows=data.groups.filter(r=>r.month===month);
   const regime=config?.payload.regime,jurisdictions=regime==='LOCAL'?[{jurisdiction:config.payload.jurisdiction,coefficient:1}]:(coeff?.payload.rows||[]),missing=[];
   if(!regime)missing.push('Falta configurar régimen IIBB.');
-  if(rows.some(r=>r.kind==='TAX'&&!r.tax_type))missing.push('Hay registros fiscales sin impuesto identificado; falta resolver su clasificación.');
+  const unknownTax=rows.some(r=>r.kind==='TAX'&&!r.tax_type)?['Hay registros fiscales sin impuesto identificado; falta resolver su clasificación.']:[];
   if(regime==='CONVENIO_MULTILATERAL'&&!jurisdictions.length)missing.push(`Faltan coeficientes CM ${year}.`);
-  const sales=rows.filter(r=>r.kind==='SALES'),lines=[];
-  if(!sales.length)missing.push('No hay ventas importadas para estimar IIBB.');
-  if(sales.some(r=>!r.activity_id||r.net==null||r.missing_net||!ars(r)))missing.push('Ventas sin actividad/base o con moneda pendiente de conversión.');
+  const allSales=rows.filter(r=>r.kind==='SALES'),sales=allSales.filter(ars),lines=[];
+  const salesBase=scopedMetric(data,month,{code:'base',label:'Base imponible documental',kinds:['SALES'],rows:allSales});
+  missing.push(...salesBase.missing);
+  if(sales.some(r=>!r.activity_id||r.net==null||r.missing_net))missing.push('Ventas sin actividad/base canónica.');
   for(const j of jurisdictions){
    const jurisdictionMissing=[...missing];let determined=0;
    for(const sale of sales){
@@ -184,11 +245,15 @@ export function iibbEngine(data) {
     const base=rateAmount(sale.net??0,100,j.coefficient),amount=rateAmount(sale.net??0,Number(rates[0].rate),j.coefficient);determined=add([determined,amount]);
     lines.push({...line('iibb_activity','Base / impuesto por actividad',amount,'Base documental × coeficiente anual × alícuota vigente / 100',[sale],'net',jurisdictionMissing,[config,coeff]),jurisdiction:j.jurisdiction,activity_id:sale.activity_id,activity_name:data.activities.find(a=>a.id===sale.activity_id)?.name||sale.activity_id,base,coefficient:j.coefficient,rate:Number(rates[0].rate),rate_id:rates[0].id});
    }
-   const tax=rows.filter(r=>r.kind==='TAX'&&r.tax_type==='IIBB'&&r.jurisdiction===j.jurisdiction),a=(adjustment?.payload.iibb||[]).find(r=>r.jurisdiction===j.jurisdiction)||{};
+   const allTax=rows.filter(r=>r.kind==='TAX'&&r.tax_type==='IIBB'&&r.jurisdiction===j.jurisdiction),tax=allTax.filter(ars),a=(adjustment?.payload.iibb||[]).find(r=>r.jurisdiction===j.jurisdiction)||{};
+   const creditMissing=[...unknownTax,...currencyWarnings(allTax)];
+   if(tax.some(r=>r.amount==null||r.missing_amount||!['retencion','percepcion'].includes(r.tax_kind)))creditMissing.push('Créditos IIBB sin importe o tipo confiable.');
    const retention=sum(tax.filter(r=>r.tax_kind==='retencion'),'amount')+(a.retention??0),perception=sum(tax.filter(r=>r.tax_kind==='percepcion'),'amount')+(a.perception??0),bank=a.bank_retention??0;
    const net=add([determined,-retention,-perception,-bank,-(a.prior??0),a.interest??0,a.adjustment??0]);
    for(const [code,label,value,formula] of [['base','Base imponible documental',sum(sales.filter(ars),'net')*j.coefficient,'Ventas netas × coeficiente'],['determined','Impuesto determinado estimado',determined,'SUM(impuesto por actividad/tasa)'],['retentions','Retenciones',retention,'Retenciones identificadas + manual'],['perceptions','Percepciones',perception,'Percepciones identificadas + manual'],['bank_retention','Retenciones bancarias',bank,'Entrada manual'],['prior','Saldo anterior a favor',a.prior??0,'Entrada manual'],['interest','Interés',a.interest??0,'Entrada manual'],['adjustment','Ajustes',a.adjustment??0,'Entrada manual'],['iibb_payable','Total estimado a pagar',Math.max(0,net),'MAX(0, determinado − créditos − saldo anterior + interés + ajustes)'],['iibb_credit','Saldo a favor siguiente',Math.max(0,-net),'MAX(0, − saldo neto)']]){
-    lines.push({...line(code,label,Math.round(value),formula,[...sales,...tax],'amount',jurisdictionMissing,[config,coeff,adjustment]),jurisdiction:j.jurisdiction});
+    const dependentMissing=['base','determined'].includes(code)?jurisdictionMissing:['iibb_payable','iibb_credit'].includes(code)?[...jurisdictionMissing,...creditMissing]:['retentions','perceptions'].includes(code)?creditMissing:[];
+    lines.push({...line(code,label,Math.round(value),formula,['base','determined'].includes(code)?allSales:['iibb_payable','iibb_credit'].includes(code)?[...allSales,...allTax]:allTax,'amount',dependentMissing,[config,coeff,adjustment]),
+     jurisdiction:j.jurisdiction,...(['base','determined'].includes(code)?{supported_value:Math.round(value),excluded_count:salesBase.excluded_count,excluded_group_count:salesBase.excluded_group_count,excluded_currencies:salesBase.excluded_currencies,status:dependentMissing.length?'INCOMPLETE':salesBase.status}:{})});
    }
   }
   return {month,regime,lines,missing:[...new Set([...missing,...lines.flatMap(l=>l.missing)])],payable:missing.length||lines.some(l=>l.missing.length)?null:sum(lines.filter(l=>l.code==='iibb_payable'),'value')};
@@ -230,7 +295,7 @@ export function alertEngine(model,settings={rules:{}}) {
  emit('FISCAL_SPIKE','IVA superior al promedio reciente',fiscal,fiscalAverage,'IVA estimado a pagar supera el promedio de meses disponibles.','iva_payable',r=>change(fiscal,fiscalAverage)>r.threshold);
  const balances=model.accounts.filter(a=>a.first!=null&&a.last!=null),first=balances.length?sum(balances,'first'):null,last=balances.length?sum(balances,'last'):null;
  emit('BANK_BALANCE_DROP','Caída de saldos bancarios observados',last,first,'Variación entre primeras y últimas observaciones disponibles; no es saldo actual certificado.','bank_flow',r=>change(last,first)!=null&&change(last,first)<-r.threshold);
- const large=Math.max(0,...model.groups.filter(r=>r.kind==='BANK'&&!r.category_id).map(r=>r.largest_unclassified??0));
+ const large=Math.max(0,...model.groups.filter(r=>r.kind==='BANK'&&!r.category_id&&ars(r)).map(r=>r.largest_unclassified??0));
  emit('LARGE_UNCLASSIFIED_BANK','Movimiento bancario grande sin clasificar',large,null,'El mayor movimiento sin categoría supera el umbral monetario en centavos.','bank_flow',r=>large>r.threshold);
  const coverage=percent(current.classified_count,current.purchase_count);
  emit('CLASSIFICATION_COVERAGE','Cobertura de clasificación baja',coverage,null,'Porcentaje de comprobantes de compras con categoría persistida.','purchases',r=>coverage!=null&&coverage<r.threshold);
@@ -244,8 +309,9 @@ export function alertEngine(model,settings={rules:{}}) {
 }
 export function buildModel(input) {
  const data=structuredClone(input);validateData(data);
+ for(const group of data.groups){group.source_currency=group.source_currency??group.currency;group.currency=normalizeReportingCurrency(group.currency);}
  const monthly=monthsBetween(data.date_from,data.date_to).map(m=>resultMonth(data,m));
- const model={...data,engine_version:ENGINE_VERSION,monthly,iva:ivaEngine(data),iibb:iibbEngine(data)};
+ const model={...data,engine_version:ENGINE_VERSION,calculation_revision:CALCULATION_REVISION,monthly,iva:ivaEngine(data),iibb:iibbEngine(data),currency_warnings:currencyWarnings(data.groups),currency_exclusions:currencyExclusions(data.groups),coverage:'IMPORTED_RECORDS_ONLY'};
  model.annual=annualEngine(data,data.date_to.slice(0,4));
  for(const [code,label] of [['result','Resultado documental acumulado (auxiliar)'],['payroll','Remuneración bruta importada (auxiliar)'],['sac','SAC importado (auxiliar)']]){
   const lines=monthly.filter(m=>m.month.startsWith(data.date_to.slice(0,4))).map(m=>m.lines.find(l=>l.code===code));
@@ -260,7 +326,9 @@ export function buildReport(model,type,{from=model.date_from,to=model.date_to,ge
  const resultSection=code=>['sales','gross_sales','credit_notes','taxable_sales','untaxed_sales'].includes(code)?'VENTAS':code==='purchases'||code.startsWith('expense_category_')?'EGRESOS':['payroll','salary_net','sac','employer_contributions'].includes(code)?'PERSONAL':code==='result'?'RESULTADO':'OTROS';
  const sectionOrder=['VENTAS','EGRESOS','PERSONAL','OTROS','RESULTADO'];
  const rows=type==='RESULTADOS'?months.flatMap(m=>m.lines.filter(l=>!l.code.startsWith('bank_')).map(l=>({...l,month:m.month,section:resultSection(l.code)})).sort((a,b)=>sectionOrder.indexOf(a.section)-sectionOrder.indexOf(b.section))):type==='IVA'?model.iva.filter(m=>m.month>=from.slice(0,7)&&m.month<=to.slice(0,7)).flatMap(m=>m.lines.map(l=>({...l,month:m.month}))):type==='IIBB'?model.iibb.filter(m=>m.month>=from.slice(0,7)&&m.month<=to.slice(0,7)).flatMap(m=>m.lines.map(l=>({...l,month:m.month}))):model.annual.lines.map(l=>({...l,month:model.annual.year}));
- const missing=[...new Set([...rows.flatMap(l=>l.missing),...(type==='IIBB'?model.iibb.flatMap(m=>m.missing):[])])];
- return {organization_id:model.organization_id,company_name:model.organization.name,cuit:model.organization.cuit,type,from,to,source_from:model.date_from,source_to:model.date_to,generated_at:generatedAt,generated_by:model.actor,status:'BORRADOR',engine_version:ENGINE_VERSION,input_hash:model.input_hash,rows,missing,manual_inputs:model.inputs,
+ const relevant=model.groups.filter(r=>r.month>=(type==='IVA'?model.date_from:from).slice(0,7)&&r.month<=to.slice(0,7)&&
+  (type==='RESULTADOS'?['SALES','PURCHASES','MANUAL_PURCHASE','PAYROLL','OTHER_INCOME','OTHER_EXPENSE'].includes(r.kind):type==='IVA'?['SALES','PURCHASES','MANUAL_PURCHASE'].includes(r.kind)||r.kind==='TAX'&&r.tax_type==='IVA':type==='IIBB'?r.kind==='SALES'||r.kind==='TAX'&&r.tax_type==='IIBB':false));
+ const missing=[...new Set([...rows.flatMap(l=>l.missing),...(type==='IIBB'?model.iibb.filter(m=>m.month>=from.slice(0,7)&&m.month<=to.slice(0,7)).flatMap(m=>m.missing):[]),...currencyWarnings(relevant)])];
+ return {organization_id:model.organization_id,company_name:model.organization.name,cuit:model.organization.cuit,type,from,to,source_from:model.date_from,source_to:model.date_to,generated_at:generatedAt,generated_by:model.actor,status:'BORRADOR',engine_version:ENGINE_VERSION,calculation_revision:CALCULATION_REVISION,input_hash:model.input_hash,rows,missing,manual_inputs:model.inputs,currency_exclusions:currencyExclusions(relevant),data_status:missing.length?'INCOMPLETE':'AVAILABLE',
   disclaimer:type==='GANANCIAS'?'Auxiliar anual para el contador. No determina automáticamente Ganancias ni Bienes Personales.':'Cálculo documental estimado sobre datos importados; verificar integridad, clasificación y ajustes antes de presentar.'};
 }

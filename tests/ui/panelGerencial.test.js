@@ -2,8 +2,16 @@ import {jest} from '@jest/globals';
 import fs from 'node:fs';
 import {buildModel,buildReport} from '../../src/js/core/reporting/engine.js';
 import {reportingData} from '../fixtures/reporting.js';
+import {reportingCurrency046Data} from '../fixtures/reportingCurrency046.js';
 jest.unstable_mockModule('../../src/js/core/services/reportingService.js',()=>({reportingService:{}}));
 const {renderManagement,renderReport,comparisonPeriod,quickPeriod,createReportingController,metricTrace}=await import('../../src/js/components/managementReporting.js');
+test('annual diagnostic shape exposes supported purchase subtotal and exact exclusions while independent KPI cards stay numeric',()=>{
+ const model=buildModel(reportingCurrency046Data()),html=renderManagement(model,null);
+ const card=code=>html.match(new RegExp(`<button[^>]*data-trace="${code}"[^>]*>[\\s\\S]*?</button>`))?.[0];
+ expect(html).toContain('137 comprobantes de compra en ARS incluidos');expect(html).toContain('4 comprobantes de compra en USD');
+ expect(card('purchases')).toContain('ARS incluido');expect(card('purchases')).toContain('1.370,00');expect(card('bank_flow')).toContain('170,00');expect(card('sales')).toContain('4.000,00');
+ expect(metricTrace(model,null,'result').value).toBeNull();expect(metricTrace(model,null,'result').supported_value).toBeNull();expect(renderReport(buildReport(model,'RESULTADOS'))).toContain('ARS incluido:');
+});
 test('all eight summary cards retain full-period source trace including comparison and fiscal carry',()=>{
  const current=buildModel(reportingData()),previous=buildModel(reportingData({date_from:'2026-08-01',date_to:'2026-08-31'}));
  for(const code of ['sales','sales_change','result','margin','purchases','bank_balance','taxes','bank_flow']){const trace=metricTrace(current,previous,code);expect(trace.formula).toBeTruthy();expect(Array.isArray(trace.sources)).toBe(true);}
