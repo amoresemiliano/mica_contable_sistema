@@ -1,16 +1,17 @@
-﻿// Real local browser with canonical fixtures; no remote service access.
+// Real local browser with canonical fixtures; no remote service access.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 const root=process.cwd(),port=18975,debugPort=20000+Math.floor(Math.random()*20000);
-const html=`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/src/css/businessMetrics.css"><div id="root"></div><script type="module">
+const html=`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/src/css/businessMetrics.css"><link rel="stylesheet" href="/src/css/financeWorkspace.css"><div id="root"></div><script type="module">
 import {createMetricsController} from '/src/js/components/businessMetrics.js';
 import {buildBusinessHealth} from '/src/js/core/metrics/engine.js';
 import {reportingData} from '/tests/fixtures/reporting.js';
 const listeners=[];window.store={contextState:'TENANT_READY',activeOrganizationId:reportingData().organization_id,contextGeneration:1,hasCapability:()=>true,subscribe:f=>listeners.push(f)};
-window.delay=false;window.requests=[];
-const service={request:async args=>{window.requests.push(args);if(window.delay)await new Promise(r=>window.resolve=r);return {health:buildBusinessHealth(reportingData(),args)};},detail:async(org,from,to,filter)=>({organization_id:org,rows:[{id:'canonical-record',organization_id:org,month:filter.month}]})};
+window.delay=false;window.requests=[];window.data=reportingData();
+const service={request:async args=>{window.requests.push(args);if(window.delay)await new Promise(r=>window.resolve=r);return {health:buildBusinessHealth(window.data,args)};},detail:async(org,from,to,filter)=>({organization_id:org,rows:[{id:'canonical-record',organization_id:org,month:filter.month}]})};
+window.useHistory=async()=>{const base=reportingData(),groups=[],inputs=base.inputs.filter(i=>i.kind==='IIBB_CONFIG');for(let n=2;n<=9;n++){const month='2026-'+String(n).padStart(2,'0');groups.push(...base.groups.map(g=>({...g,month})));inputs.push(...base.inputs.filter(i=>i.kind==='PERIOD_ADJUSTMENT').map(i=>({...i,period:month,payload:{...i.payload,iva_compensation:0}})));}inputs.push({...base.inputs.find(i=>i.kind==='IVA_OPENING'),period:'2026-02'});window.data={...base,date_from:'2026-02-01',groups,inputs};await controller.load();};
 window.controller=createMetricsController({store:window.store,root:document.getElementById('root'),service});Object.assign(controller.state,{from:'2026-09-01',to:'2026-09-30'});await controller.load();window.changeOrg=()=>{store.activeOrganizationId='other-org';store.contextGeneration++;listeners.forEach(f=>f());};window.revoke=()=>{store.hasCapability=()=>false;listeners.forEach(f=>f());};window.ready=true;
 </script></html>`;
 const server=http.createServer((req,res)=>{
@@ -37,8 +38,17 @@ try{
    await evaluate(`document.querySelector('[data-view="${view}"]').click()`);await assert('document.documentElement.scrollWidth<=window.innerWidth','Overflow '+view+' '+width);
   }
   await evaluate(`document.querySelector('[data-view="Salud"]').click()`);
+  await assert("document.querySelectorAll('.finance-priority-number').length===controller.state.health.priorities.length",'Priorities rendered once');
+  await assert("document.querySelector('.finance-health-value').textContent.includes('No determinable')",'Unavailable score clearly distinguished');
   fs.writeFileSync('scratch/metrics-'+(mobile?'mobile':'desktop')+'.png',Buffer.from((await cdp('Page.captureScreenshot')).data,'base64'));
  }
+ await evaluate('window.useHistory()');
+ await assert('controller.state.health.health.score===85 && document.querySelectorAll(".finance-pillar meter").length===6','Complete canonical score and six pillar meters');
+ await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+ fs.writeFileSync('scratch/finance-metrics-complete-desktop.png',Buffer.from((await cdp('Page.captureScreenshot')).data,'base64'));
+ await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ await assert('document.documentElement.scrollWidth<=window.innerWidth','Complete score mobile overflow');
+ fs.writeFileSync('scratch/finance-metrics-complete-mobile.png',Buffer.from((await cdp('Page.captureScreenshot')).data,'base64'));
  await evaluate(`document.querySelector('[data-view="Operaci\u00f3n"]').click();document.querySelector('details').open=true;document.querySelector('[data-source]').click()`);
  for(let i=0;i<20&&!await evaluate(`document.getElementById('root').textContent.includes('canonical-record')`);i++)await new Promise(r=>setTimeout(r,50));
  await assert(`document.getElementById('root').textContent.includes('canonical-record')`,'Canonical detail');

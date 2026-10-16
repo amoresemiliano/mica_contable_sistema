@@ -3,8 +3,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
-const root=process.cwd(),port=18965,debugPort=18966;
-const html=`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MICA Gerencia y Reportes · Validación local</title><link rel="stylesheet" href="/src/css/styles.css"><link rel="stylesheet" href="/src/css/managementReporting.css"><style>body{display:block;padding:24px;background:#f4f7fa}main{max-width:1300px;margin:auto}@media(max-width:600px){body{padding:10px}}</style><script src="/src/js/vendor/xlsx.full.min.js"></script><main><div id="management-root"></div><div id="reports-root" hidden></div></main><script type="module">
+const root=process.cwd(),port=18965,debugPort=20000+Math.floor(Math.random()*20000);
+const html=`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MICA Gerencia y Reportes · Validación local</title><link rel="stylesheet" href="/src/css/styles.css"><link rel="stylesheet" href="/src/css/managementReporting.css"><link rel="stylesheet" href="/src/css/financeWorkspace.css"><style>body{display:block;padding:24px;background:#f4f7fa}main{max-width:1300px;margin:auto}@media(max-width:600px){body{padding:10px}}</style><script src="/src/js/vendor/xlsx.full.min.js"></script><main><div id="management-root"></div><div id="reports-root" hidden></div></main><script type="module">
 import {createReportingController} from '/src/js/components/managementReporting.js';
 import {buildModel,buildReport} from '/src/js/core/reporting/engine.js';
 import {reportingData} from '/tests/fixtures/reporting.js';
@@ -29,7 +29,7 @@ const server=http.createServer((req,res)=>{
  res.setHeader('Content-Type',file.endsWith('.css')?'text/css':'application/javascript');res.end(fs.readFileSync(file));
 });
 await new Promise(resolve=>server.listen(port,'127.0.0.1',resolve));
-const browser=spawn('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',['--headless=new','--disable-gpu','--no-first-run','--disable-background-networking','--disable-extensions','--remote-debugging-port='+debugPort,'--user-data-dir='+path.join(root,'scratch/reporting-browser-profile'),'http://127.0.0.1:'+port],{windowsHide:true,stdio:'ignore'});
+const browser=spawn('C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',['--headless=new','--disable-gpu','--no-first-run','--disable-background-networking','--disable-extensions','--remote-debugging-port='+debugPort,'--user-data-dir='+path.join(root,'scratch/reporting-browser-profile-'+debugPort),'http://127.0.0.1:'+port],{windowsHide:true,stdio:'ignore'});
 let ws;
 try{
  let pages;for(let i=0;i<40;i++){try{pages=await(await fetch('http://127.0.0.1:'+debugPort+'/json')).json();break;}catch{await new Promise(r=>setTimeout(r,250));}}
@@ -45,6 +45,15 @@ try{
  await evaluate("document.querySelector('[data-view=Resumen]').click()");fs.writeFileSync('scratch/reporting-desktop.png',Buffer.from((await cdp('Page.captureScreenshot')).data,'base64'));
  await evaluate("document.querySelector('#management-root [data-trace=sales]').click()");await assert("document.querySelector('.mr-dialog').textContent.includes('persisted-id')",'Drill-down source IDs');await evaluate("document.querySelector('[data-close-detail]').click()");
  await evaluate("window.switchFixture('reports');document.querySelector('[data-preview]').click()");await assert("document.querySelector('#reports-root').textContent.includes('IVA CF')",'IVA preview');
+ await assert("document.querySelectorAll('.finance-action-group').length===3",'Preparation/export/version groups');
+ fs.writeFileSync('scratch/finance-report-preview-desktop.png',Buffer.from((await cdp('Page.captureScreenshot')).data,'base64'));
+ await cdp('Emulation.setEmulatedMedia',{media:'print'});
+ await assert("getComputedStyle(document.querySelector('.mr-report-toolbar')).display==='none' && getComputedStyle(document.querySelector('.mr-report-meta')).display!=='none'",'Print keeps report identity and hides controls');
+ await cdp('Emulation.setEmulatedMedia',{media:''});
+ await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
+ await assert('document.documentElement.scrollWidth<=window.innerWidth','Preview mobile overflow');
+ fs.writeFileSync('scratch/finance-report-preview-mobile.png',Buffer.from((await cdp('Page.captureScreenshot')).data,'base64'));
+ await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
  await evaluate("document.querySelector('[data-status=close]').click()");await assert('window.snapshots.length===1','Close snapshot');await evaluate("window.data.groups[0].vat=999999;document.querySelector('[data-history]').click()");await evaluate("document.querySelector('[data-snapshot]').click()");await assert("window.reports.state.report.rows.find(r=>r.code==='iva_df').value===189000",'Frozen snapshot after source change');
  await evaluate("document.querySelector('[data-report-line=\"0\"]').click()");await assert("document.querySelector('.mr-dialog').textContent.includes('frozen-id')",'Frozen drill-down');await evaluate("document.querySelector('[data-close-detail]').click()");
  await evaluate("document.querySelector('details.mr-panel').open=true;document.querySelector('[name=technical]').value='250';document.querySelector('[name=free]').value='300';document.querySelector('[data-input-form]').requestSubmit()");await assert("window.saved.length===1 && window.saved[0].payload.technical===25000",'Manual opening form and cents');
