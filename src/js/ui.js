@@ -1,3 +1,4 @@
+import { exportExtractors, moduleExportRecords, downloadModule } from './core/moduleExports.js';
 import { mountReporting } from './components/managementReporting.js';
 import { mountBusinessMetrics } from './components/businessMetrics.js';
 import { saveClassificationControl } from './components/classificationControl.js';
@@ -69,6 +70,20 @@ export const iibbRatesGrid = new OperationalGrid({
     defaultColumns: ['checkbox', 'activity', 'jurisdiction', 'rate', 'valid_from', 'valid_to', 'estado', 'actions'],
     searchFields: ['jurisdiction', 'activity_name']
 });
+
+const moduleExportGrids = { comprobantes: comprobantesGrid, percepciones: percepcionesGrid };
+window.downloadOperationalModule = (module, format) => {
+    try { downloadModule(appStore, module, moduleExportGrids[module], format); }
+    catch (error) { alert(error.message); }
+};
+function renderModuleExportControls(module) {
+    const records = moduleExportRecords(appStore, module, moduleExportGrids[module]);
+    for (const button of document.querySelectorAll(`[data-module-export="${module}"]`)) {
+        button.hidden = !appStore.canOperationalAction('export');
+        button.disabled = !records.length;
+        button.title = records.length ? `Exportar ${records.length} registros filtrados` : 'No hay registros disponibles para exportar';
+    }
+}
 
 // Event handlers globales para las toolbars operacionales
 
@@ -1531,6 +1546,7 @@ export class UIManager {
     }
 
     static renderSalarySummary() {
+        renderModuleExportControls('sueldos');
         const container = document.getElementById('salary-detail-container');
         const badge = document.getElementById('salary-source-badge');
         const sal = appStore.salaries;
@@ -1624,6 +1640,7 @@ export class UIManager {
     }
 
     static renderPerceptionsTable() {
+        renderModuleExportControls('percepciones');
         UIManager.updateJurisdictionFilterSelects();
         UIManager.syncHeaderVisibility(percepcionesGrid, 'table-percepciones');
 
@@ -1631,11 +1648,7 @@ export class UIManager {
         const summaryBar = document.getElementById('percepciones-summary-bar');
         
         const rawList = appStore.perceptions || [];
-        const list = percepcionesGrid.filterAndSort(rawList, {
-            fuente: p => p.fuente || p.jurisdiction || p.jurisdiccion || '',
-            agente: p => p.agente || p.razonSocial || '',
-            monto: p => typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)
-        });
+        const list = percepcionesGrid.filterAndSort(rawList, exportExtractors.percepciones);
 
         if (summaryBar) {
             const total = list.reduce((sum, p) => sum + (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)), 0);
@@ -1743,20 +1756,14 @@ export class UIManager {
     }
 
     static renderMainTable() {
+        renderModuleExportControls('comprobantes');
         UIManager.syncHeaderVisibility(comprobantesGrid, 'table-comprobantes');
 
         const tbody = document.getElementById('table-body');
         if (!tbody) return;
 
         const rawItems = appStore.items || [];
-        const items = comprobantesGrid.filterAndSort(rawItems, {
-            razonSocial: i => i.razonSocial || i.agente || '',
-            cuit: i => i.cuit || '',
-            comprobante: i => i.comprobante || '',
-            total: i => i.total || 0,
-            iva: i => i.iva || i.importeIva || 0,
-            fecha: i => i.fecha || ''
-        });
+        const items = comprobantesGrid.filterAndSort(rawItems, exportExtractors.comprobantes);
 
         const summaryBar = document.getElementById('comprobantes-summary-bar');
         if (summaryBar) {
@@ -2988,6 +2995,7 @@ appStore.subscribe(() => {
     renderModuleAccess(appStore, document, switchTab);
     renderOperationalHeader(appStore, document);
     renderOperationalImportControls(appStore, document);
+    for (const module of ['comprobantes', 'percepciones', 'sueldos']) renderModuleExportControls(module);
     document.querySelectorAll('.modal, .modal-overlay').forEach(el => {
         el.inert = !['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState);
     });

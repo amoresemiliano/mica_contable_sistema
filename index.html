@@ -209,6 +209,10 @@
                     </div>
                 </div>
             </div>
+            <div class="module-export-actions" role="group" aria-label="Descargar comprobantes" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;max-width:100%;">
+                <button class="btn-secondary" data-module-export="comprobantes" disabled onclick="downloadOperationalModule('comprobantes', 'csv')">Descargar CSV</button>
+                <button class="btn-secondary" data-module-export="comprobantes" disabled onclick="downloadOperationalModule('comprobantes', 'xlsx')">&#128229; Exportar a Excel</button>
+            </div>
             <div id="comprobantes-summary-bar" style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px;">
                 0 comprobantes · $ 0,00
             </div>
@@ -319,6 +323,10 @@
                             <button id="percepciones-search-clear" style="display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px;" onclick="clearPercepcionesSearch()">✕</button>
                         </div>
                     </div>
+                </div>
+                <div class="module-export-actions" role="group" aria-label="Descargar percepciones" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;max-width:100%;">
+                    <button class="btn-secondary" data-module-export="percepciones" disabled onclick="downloadOperationalModule('percepciones', 'csv')">Descargar CSV</button>
+                    <button class="btn-secondary" data-module-export="percepciones" disabled onclick="downloadOperationalModule('percepciones', 'xlsx')">&#128229; Exportar a Excel</button>
                 </div>
                 <div id="percepciones-summary-bar" style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px;">
                     0 percepciones · Total $ 0,00
@@ -564,9 +572,14 @@
                             <h3 style="margin: 0;">Detalle de Liquidación Importada</h3>
                             <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">Desglose de conceptos de la nómina procesada.</p>
                         </div>
+
                         <div id="salary-source-badge" style="font-size: 12px; font-weight: 600; background: rgba(139, 92, 246, 0.15); color: #7c3aed; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.3);">
                             Fuente: PAYROLL | Período: Sin Cargar
                         </div>
+                    </div>
+                    <div class="module-export-actions" role="group" aria-label="Descargar sueldos" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;max-width:100%;">
+                        <button class="btn-secondary" data-module-export="sueldos" disabled onclick="downloadOperationalModule('sueldos', 'csv')">Descargar CSV</button>
+                        <button class="btn-secondary" data-module-export="sueldos" disabled onclick="downloadOperationalModule('sueldos', 'xlsx')">&#128229; Exportar a Excel</button>
                     </div>
                     <div id="salary-detail-container" style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px; border: 1px dashed var(--border-color); border-radius: 6px;">
                         Aún no se ha importado reporte de sueldos para este período.
