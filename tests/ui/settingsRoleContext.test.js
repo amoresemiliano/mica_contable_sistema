@@ -427,3 +427,27 @@ test('catalog management without assignment capability never fetches assignment 
     expect(store.taxCategories[0].assignedOrganizationIds).toEqual([]);
     expect(rpc).not.toHaveBeenCalled();
 });
+
+test('platform category query produces one canonical row per ID and separate assignment state', async () => {
+    grantPlatform(); store.activeOrganizationId=null;
+    const concept={id:'canonical-honorarios',name:'Honorarios Profesionales',category_type:'EXPENSE'};
+    query([concept,{...concept}]);
+    rpc.mockImplementation(name=>name==='list_catalog_assignment_state'
+        ? {range:jest.fn(async offset=>({data:offset ? [] : [{item_id:concept.id,organization_id:oeste,is_assigned:true,is_active:true}],error:null}))}
+        : Promise.resolve({data:[],error:null}));
+    await store.loadTaxCategories();
+    expect(store.taxCategories).toHaveLength(1);
+    expect(store.taxCategories[0].assignedOrganizationIds).toEqual([oeste]);
+    expect(store.categoryDefinitionConflicts).toEqual([]);
+    expect(store.taxCategories.filter(row=>row.name.includes('Honorarios'))).toHaveLength(1);
+});
+
+test('distinct same-concept IDs are diagnosed instead of silently merged', async () => {
+    grantPlatform(true,false);store.activeOrganizationId=null;
+    query([{id:'old',name:'Honorarios Profesionales',category_type:'EXPENSE'},
+        {id:'new',name:'Honorarios Profesionales',category_type:'EXPENSE'}]);
+    await store.loadTaxCategories();
+    expect(store.categoryDefinitionConflicts).toEqual([['old','new']]);
+    expect(store.taxCategories).toHaveLength(2);
+    store.clearTenantState();expect(store.categoryDefinitionConflicts).toEqual([]);
+});

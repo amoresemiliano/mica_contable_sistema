@@ -31,10 +31,11 @@ export function mountOperationalOrgSelectors(store, document) {
         const ready = ['TENANT_READY', 'PLATFORM_READY'].includes(store.contextState);
         const busy = ['SWITCHING', 'LOADING'].includes(store.contextState);
         for (const view of views) {
-            view.label.hidden = !store.canSwitchOperationalContext();
-            view.select.disabled = busy;
+            view.label.hidden = false;
+            view.select.disabled = busy || !store.canSwitchOperationalContext();
             view.select.replaceChildren();
             const choices = [...(store.canSelectPlatformContext() ? [{ organization_id: '', organization_name: 'MICA / Plataforma' }] : []), ...store.operationalOrgTargets];
+            if(store.activeOrganizationId && !choices.some(c=>c.organization_id===store.activeOrganizationId))choices.push({organization_id:store.activeOrganizationId,organization_name:store.getActiveOrganizationName()});
             for (const choice of choices) {
                 const option = document.createElement('option');
                 option.value = choice.organization_id;
@@ -88,6 +89,7 @@ export function renderOperationalHeader(store, document) {
     const entity = document.getElementById('current-entity-label');
     const orgName = store.getActiveOrganizationName();
     if (entity) entity.innerText = `Organización: ${orgName}`;
+    if (entity) entity.hidden = true;
     if (header) header.innerText = store.sessionUserId
-        ? `${store.sessionEmail} · ${orgName} · ${store.effectiveProfileName || 'Permisos personalizados'}` : '';
+        ? `${store.sessionEmail} · ${store.effectiveProfileName || 'Permisos personalizados'}` : '';
 }

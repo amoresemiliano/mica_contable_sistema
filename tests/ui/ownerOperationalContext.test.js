@@ -291,7 +291,7 @@ test('real header uses session email, confirmed organization and actual platform
     store.currentUserRole = 'invented role';
     const nodes = { 'user-header-info': {}, 'current-entity-label': {} };
     renderOperationalHeader(store, { getElementById: id => nodes[id] });
-    expect(nodes['user-header-info'].innerText).toBe('owner@example.com · NORTE · Owner real');
+    expect(nodes['user-header-info'].innerText).toBe('owner@example.com · Owner real');
 });
 
 // Small DOM harness executes the real reusable component, not a copy of its behavior.
@@ -316,7 +316,7 @@ test('all selector instances share context, preserve current tab, hide for catal
     expect(sections[1].hidden).toBe(true);
     store.permissions.platform.codes = ['CATALOG_ASSIGN_ANY_ORG'];
     store.notify();
-    for (const section of sections) expect(section.children[0].children[0].hidden).toBe(true);
+    for (const section of sections) { expect(section.children[0].children[0].hidden).toBe(false); expect(section.children[0].children[0].children[0].disabled).toBe(true); }
     await expect(store.switchOrganizationContext('SUR')).rejects.toThrow('Alcance operacional de plataforma');
 });
 

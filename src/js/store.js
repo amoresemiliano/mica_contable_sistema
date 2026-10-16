@@ -2,6 +2,7 @@ import { categorizer } from './categorizer.js';
 import { canVisitModule, canImport, canOcr, tenantCan, pruneDeniedDatasets, canOperationalAction } from './core/moduleAccess.js';
 import { persistenceService } from './core/services/persistenceService.js';
 import { MICA_MODULE_CONTRACT, MICA_METHOD_ACTIONS } from './core/micaPermissionContract.js';
+import { canonicalCatalog, duplicateDefinitions } from './core/operationalSemantics.js';
 
 // 3. STORE GLOBAL DE LA APP (SOLID: Single Responsibility / Decoupled via Observer Pattern)
 export class AppStore {
@@ -229,6 +230,7 @@ export class AppStore {
             'ocrHistory', 'importIssues', 'taxCategories', 'economicActivities', 'displayedEconomicActivities',
             'globalEconomicActivities', 'iibbRates']) this[key] = [];
         this.salaries = null;
+        this.categoryDefinitionConflicts = [];
         this.currentFilter = this.currentBankFilter = this.currentJurisdiction = 'all';
         this.searchQuery = '';
         this.bankTemplates = {};
@@ -318,7 +320,7 @@ export class AppStore {
             throw new Error('El contexto del servidor cambió. Reintentá la carga.');
         for (const key of ['items', 'perceptions', 'bankTransactions', 'salaries', 'salariesList',
             'taxCategories', 'economicActivities', 'displayedEconomicActivities', 'globalEconomicActivities',
-            'iibbRates', 'permissions', 'catalogCapabilities', 'catalogAssignmentTargets']) this[key] = draft[key];
+            'iibbRates', 'permissions', 'catalogCapabilities', 'catalogAssignmentTargets', 'categoryDefinitionConflicts']) this[key] = draft[key];
         this.operationalOrgTargets = targets;
         this.organizations = targets.map(o => ({ id: o.organization_id, name: o.organization_name }));
         if (context.organization_id && !this.organizations.some(o => o.id === context.organization_id)) {
@@ -1087,7 +1089,7 @@ export class AppStore {
                     }
                 });
 
-                this.taxCategories = (globalCats || []).map(c => {
+                this.taxCategories = canonicalCatalog(globalCats).map(c => {
                     const orgNames = categoryOrgMap.get(c.id) || [];
                     return {
                         ...c,
@@ -1096,6 +1098,7 @@ export class AppStore {
                         isAssignedToOrg: orgNames.length > 0
                     };
                 });
+                this.categoryDefinitionConflicts = duplicateDefinitions(this.taxCategories);
             } else if (this.activeOrganizationId) {
                 // MODO ORGANIZACIÓN (DEMO NORTE / SUR / OESTE):
                 // Muestra ÚNICAMENTE las categorías asignadas a esta organización (Activas o Inactivas)

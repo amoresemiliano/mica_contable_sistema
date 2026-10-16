@@ -1,4 +1,7 @@
-import { exportExtractors, moduleExportRecords, downloadModule } from './core/moduleExports.js';
+import { mountOperationalWorkspaces, mountModuleLinks } from './components/operationalWorkspace.js';
+import { mountContextInvalidation } from './core/multiTabContext.js';
+import { semanticExtractors } from './core/operationalSemantics.js';
+import { exportExtractors, moduleExportRecords, moduleExportRows, downloadModule } from './core/moduleExports.js';
 import { mountReporting } from './components/managementReporting.js';
 import { mountBusinessMetrics } from './components/businessMetrics.js';
 import { saveClassificationControl } from './components/classificationControl.js';
@@ -71,7 +74,7 @@ export const iibbRatesGrid = new OperationalGrid({
     searchFields: ['jurisdiction', 'activity_name']
 });
 
-const moduleExportGrids = { comprobantes: comprobantesGrid, percepciones: percepcionesGrid };
+const moduleExportGrids = { comprobantes: comprobantesGrid, percepciones: percepcionesGrid, bancos: bancosGrid };
 window.downloadOperationalModule = (module, format) => {
     try { downloadModule(appStore, module, moduleExportGrids[module], format); }
     catch (error) { alert(error.message); }
@@ -506,12 +509,14 @@ function getActiveCompanyCuit() {
 // 5. CONTROLADOR NAVEGACIÓN SPA E INTERFAZ (SOLID: Single Responsibility)
 export function switchTab(tabId) {
     if (!appStore.canVisitModule(tabId)) return false;
+    if (window.location.hash !== '#' + tabId) window.history.replaceState(null, '', '#' + tabId);
+    document.body.dataset.activeModule = tabId;
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.getElementById(tabId)?.classList.remove('hidden');
     requestOperationalData(appStore, document, tabId);
 
     document.querySelectorAll('.sidebar-nav a').forEach(el => el.classList.remove('active-nav'));
-    const activeLink = document.querySelector(`.sidebar-nav [onclick="switchTab('${tabId}')"]`);
+    const activeLink = document.querySelector(`.sidebar-nav [data-tab="${tabId}"]`);
     if (activeLink) activeLink.classList.add('active-nav');
 
     // Resaltado de la barra mobile inferior
@@ -1565,52 +1570,10 @@ export class UIManager {
 
         if (!container) return;
 
-        const fmt = (v) => `$ ${(v || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-
-        container.innerHTML = `
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; text-align: left;">
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Período Liquidado</span>
-                    <strong style="font-size: 14px; color: var(--primary);">${sal.periodo || 'N/D'}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Remunerativo</span>
-                    <strong style="font-size: 14px;">${fmt(sal.remunerativo)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">No Remunerativo</span>
-                    <strong style="font-size: 14px;">${fmt(sal.noRemunerativo)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Anticipos / Adelantos</span>
-                    <strong style="font-size: 14px;">${fmt(sal.anticipos)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">SAC Proporcional</span>
-                    <strong style="font-size: 14px;">${fmt(sal.sacProporcional)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Aporte Sindical Oblig.</span>
-                    <strong style="font-size: 14px;">${fmt(sal.aporteSindicalObligatorio)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">FAECYS</span>
-                    <strong style="font-size: 14px;">${fmt(sal.faecys)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Sueldo Neto Total</span>
-                    <strong style="font-size: 14px; color: var(--success);">${fmt(sal.sueldoNeto)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Sueldo Bruto Calculado</span>
-                    <strong style="font-size: 14px;">${fmt(sal.sueldoBrutoCalculado)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Aporte Sindical Calculado</span>
-                    <strong style="font-size: 14px;">${fmt(sal.aporteSindicalCalculado)}</strong>
-                </div>
-            </div>
-        `;
+        const rows = moduleExportRows(appStore, 'sueldos', [sal]);
+        const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        container.classList.add('workspace-table-viewport');
+        container.innerHTML = `<table class="simple-table"><thead><tr>${rows[0].map(label=>`<th>${escape(label)}</th>`).join('')}</tr></thead><tbody><tr>${rows[1].map(value=>`<td>${escape(value)}</td>`).join('')}</tr></tbody></table>`;
     }
 
     static updateJurisdictionFilterSelects() {
@@ -1648,7 +1611,7 @@ export class UIManager {
         const summaryBar = document.getElementById('percepciones-summary-bar');
         
         const rawList = appStore.perceptions || [];
-        const list = percepcionesGrid.filterAndSort(rawList, exportExtractors.percepciones);
+        const list = percepcionesGrid.filterAndSort(rawList, semanticExtractors(appStore, exportExtractors.percepciones));
 
         if (summaryBar) {
             const total = list.reduce((sum, p) => sum + (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)), 0);
@@ -1689,6 +1652,7 @@ export class UIManager {
     }
 
     static renderBankTable() {
+        renderModuleExportControls('bancos');
         UIManager.syncHeaderVisibility(bancosGrid, 'table-bancos');
 
         const tbody = document.getElementById('table-bancos-body');
@@ -1696,11 +1660,7 @@ export class UIManager {
         if (!tbody) return;
 
         const rawTxs = appStore.bankTransactions || [];
-        const transactions = bancosGrid.filterAndSort(rawTxs, {
-            fecha: t => t.fecha || t.fechaValor || '',
-            descripcion: t => t.descripcion || t.concepto || '',
-            monto: t => t.monto || t.amount || 0
-        });
+        const transactions = bancosGrid.filterAndSort(rawTxs, semanticExtractors(appStore, exportExtractors.bancos));
 
         if (summaryBar) {
             const debits = transactions.filter(t => (t.monto || 0) < 0 || t.tipo === 'debit' || t.tipo === 'DEBITO').reduce((sum, t) => sum + Math.abs(t.monto || 0), 0);
@@ -1763,7 +1723,7 @@ export class UIManager {
         if (!tbody) return;
 
         const rawItems = appStore.items || [];
-        const items = comprobantesGrid.filterAndSort(rawItems, exportExtractors.comprobantes);
+        const items = comprobantesGrid.filterAndSort(rawItems, semanticExtractors(appStore, exportExtractors.comprobantes));
 
         const summaryBar = document.getElementById('comprobantes-summary-bar');
         if (summaryBar) {
@@ -2995,7 +2955,7 @@ appStore.subscribe(() => {
     renderModuleAccess(appStore, document, switchTab);
     renderOperationalHeader(appStore, document);
     renderOperationalImportControls(appStore, document);
-    for (const module of ['comprobantes', 'percepciones', 'sueldos']) renderModuleExportControls(module);
+    for (const module of ['comprobantes', 'percepciones', 'sueldos', 'bancos']) renderModuleExportControls(module);
     document.querySelectorAll('.modal, .modal-overlay').forEach(el => {
         el.inert = !['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState);
     });
@@ -3041,6 +3001,10 @@ for (const [pattern, module] of [
 }
 document.addEventListener('DOMContentLoaded', () => {
     mountOperationalOrgSelectors(appStore, document);
+    mountOperationalWorkspaces(appStore, document);
+    const applyRoute = mountModuleLinks(document, switchTab, window);
+    appStore.subscribe(() => { if (['TENANT_READY','PLATFORM_READY'].includes(appStore.contextState)) applyRoute(); });
+    mountContextInvalidation(appStore, window);
     renderModuleAccess(appStore, document, switchTab);
     renderOperationalImportControls(appStore, document);
     UIManager.init();

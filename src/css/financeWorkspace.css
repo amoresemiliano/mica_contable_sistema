@@ -102,3 +102,48 @@
 @media(max-width:600px){:is(.mr-shell,.business-metrics){padding:8px 0 28px}.finance-header,.mr-heading{margin-bottom:20px;padding-bottom:18px}.finance-header h1,.mr-heading h2{font-size:28px}.finance-header p,.finance-subtitle{font-size:12px}.finance-context{display:none}.finance-section-heading h2{font-size:18px}.mr-shell .mr-kpi{padding:14px!important}.mr-kpi>strong{font-size:22px}.mr-kpi small{font-size:10px}.mr-filters{padding:14px}.mr-panel{padding:18px}.finance-action-group{border:0;padding-right:0;width:100%}.mr-report-toolbar{gap:18px;padding:14px}.mr-report-meta{padding:20px 16px}.mr-report-meta h3{font-size:20px}.mr-input-form{padding:15px}.metric-hero{grid-template-columns:1fr;padding:24px;gap:20px}.finance-health-copy h2{font-size:24px}.finance-health-value{border-left:0;border-top:1px solid #d9e6ed;padding:18px 0 0;display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:6px 16px}.finance-health-value>strong{grid-column:1/-1;grid-row:2;font-size:60px;margin:0}.finance-health-value>strong.finance-score-empty{font-size:27px;max-width:none}.finance-health-value>p{grid-column:1/-1;margin:0}.finance-score-scale{text-align:right}.finance-pillars{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.finance-pillar{padding:15px}.finance-pillar .finance-card-top{align-items:start}.finance-pillar-score{font-size:30px}.finance-insights,.finance-priorities,.finance-indicators{grid-template-columns:1fr}.finance-insight{padding:20px}.finance-insight h3{font-size:16px}.metrics-timeline{grid-template-columns:repeat(2,minmax(0,1fr))}.finance-quality{padding:20px}.mr-dialog{padding:18px}.mr-bar-row{grid-template-columns:minmax(70px,1fr) minmax(20px,.6fr) auto;font-size:11px!important}.business-metrics nav button{flex:1 1 auto;padding:9px 10px}.finance-health-status{gap:8px}}
 @media(prefers-reduced-motion:reduce){:is(.mr-shell,.business-metrics) button{transition:none}}
 @media print{.mr-shell{max-width:none;padding:0;color:#000;font-size:10pt}.mr-heading,.mr-filters,.mr-report-toolbar,.mr-shell>details,.mr-shell button,.finance-context{display:none!important}.mr-report-meta{border:0;border-bottom:1px solid #888;padding:0 0 12px;margin:0}.mr-shell .mr-table-wrap{overflow:visible}.mr-shell table{font-size:9pt}.mr-shell th,.mr-shell td{padding:6px}.mr-shell thead{display:table-header-group}.mr-shell tr{break-inside:avoid}.mr-notice{background:#fff;border:1px solid #777;color:#000}.mr-report-meta p{color:#333}}
+/* Compact operational workspaces: scoped to operational modules and catalog tables. */
+[data-workspace]{min-width:0;max-width:100%}
+[data-workspace] .operational-context-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:0 0 12px;padding:0;border:0}
+[data-workspace] .operational-context-toolbar h2{font-size:22px;margin:0;color:var(--primary)}
+[data-workspace] .operational-context-toolbar label{display:flex;align-items:center;gap:8px;max-width:100%;min-width:0}
+[data-workspace] .operational-org-select{max-width:340px;min-width:0}
+.workspace-user{margin-left:auto;font-size:12px;color:var(--text-muted);overflow-wrap:anywhere}
+body:has([data-workspace]:not(.hidden))> #app-container > .wrapper > header{display:none}
+.workspace-toolbar{display:flex!important;align-items:center;flex-wrap:wrap;gap:8px!important;margin:0 0 12px!important;position:relative;z-index:3}
+.workspace-toolbar>div{gap:8px!important;min-width:0;flex-wrap:wrap}
+.workspace-toolbar>div:first-child{flex:1 1 auto}
+.workspace-toolbar .btn-group{display:flex;flex-wrap:wrap}
+.workspace-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:none;flex-wrap:nowrap!important}
+.workspace-table-viewport .grid-pagination{position:sticky;left:0;max-width:100%}
+@media(min-width:1100px){
+ .workspace-toolbar{display:grid!important;grid-template-columns:minmax(0,1fr) 240px auto;align-items:center}
+ .workspace-toolbar:not(:has(.workspace-search)){grid-template-columns:minmax(0,1fr) auto}
+ .workspace-search>div,.workspace-search input{width:100%!important}
+}
+[data-workspace] .card-header>div{min-width:0;flex-wrap:wrap}
+.workspace-menu{position:relative;flex:none}
+.workspace-menu>summary{list-style:none;cursor:pointer;white-space:nowrap;padding:8px 12px}
+.workspace-menu>summary:after{content:' ▾'}
+.workspace-menu>summary::-webkit-details-marker{display:none}
+.workspace-menu-panel{position:absolute;right:0;top:100%;z-index:40;min-width:180px;max-width:min(340px,calc(100vw - 40px));padding:10px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;box-shadow:0 6px 20px #17263820;display:flex;flex-direction:column;gap:8px}
+.workspace-import .drop-zone{padding:10px!important;min-height:0;margin:0;border:1px dashed var(--border-color);width:100%;box-sizing:border-box}
+.workspace-import .drop-zone h3{display:none}
+.workspace-import .drop-zone p{font-size:11px;margin:8px 0 0}
+[data-workspace] .operational-module-body{min-width:0;max-width:100%}
+[data-workspace] .card{min-width:0;margin-top:12px!important;padding:14px}
+.workspace-table-viewport,.mica-admin-content .data-table-container{overflow-x:auto!important;max-width:100%;min-width:0;touch-action:pan-x pan-y;-webkit-overflow-scrolling:touch}
+.workspace-table-viewport table{min-width:max-content;width:100%;table-layout:auto}
+@media(max-width:768px){
+ [data-workspace] .workspace-user{margin-left:0;flex-basis:100%}
+ [data-workspace] .operational-org-select{max-width:calc(100vw - 130px)}
+ [data-workspace] .workspace-table-viewport table{display:table!important;min-width:800px}
+ [data-workspace] .workspace-table-viewport thead{display:table-header-group!important}
+ [data-workspace] .workspace-table-viewport tbody{display:table-row-group!important}
+ [data-workspace] .workspace-table-viewport tr{display:table-row!important}
+ [data-workspace] .workspace-table-viewport th,[data-workspace] .workspace-table-viewport td{display:table-cell!important;padding:10px!important;white-space:nowrap}
+ [data-workspace] .workspace-table-viewport th,[data-workspace] .workspace-table-viewport td,[data-workspace] .workspace-table-viewport tr{width:auto!important}
+ [data-workspace] .workspace-table-viewport td:before{display:none!important}
+ [data-workspace] .workspace-table-viewport .hidden{display:none!important}
+ .workspace-toolbar input[type=search],.workspace-toolbar input[type=text]{max-width:100%}
+}

@@ -59,7 +59,7 @@ describe('DEV-ADMIN-UX-01 Administration UX & Persistent Header', () => {
         const tabs = walk(root).filter(n => n.role === 'tab').map(n => n.textContent);
         expect(tabs).toEqual(['Empresas', 'Usuarios', 'Categorización']);
         expect(walk(root).some(n => n.textContent === '+ Nueva Empresa')).toBe(true);
-        expect(walk(root).some(n => n.textContent === 'Contexto: Empresa Norte')).toBe(true);
+        expect(walk(root).some(n => n.textContent === 'Contexto: Empresa seleccionada')).toBe(true);
         expect(walk(root).some(n => n.name === 'administration-target')).toBe(false);
     });
 
@@ -180,7 +180,7 @@ test.each(['operational', 'platform'])('%s categorization retains cards, header 
     // Detached card IDs are no longer discoverable; reuse the original nodes.
     document.getElementById = jest.fn(() => null);
     click(root, 'Categorías'); expect(body().children).toEqual([cards.get('card-tax-categories')]);
-    expect(walk(root).some(n => n.textContent === 'Contexto: Empresa Norte')).toBe(true);
+    expect(walk(root).some(n => n.textContent === 'Contexto: Empresa seleccionada')).toBe(true);
     await view.load({ section: 'Empresas' });
     expect(walk(root).find(n => n.role === 'tabpanel').actionHeader.children[0].textContent).toBe('Empresas');
 });
@@ -254,7 +254,7 @@ test('tenant context identity change resets managed target and keeps the real ca
     store.activeOrganizationId = 'sur'; store.contextState = 'TENANT_READY'; store.contextGeneration++;
     await view.load();
     expect(walk(root).some(n => n.name === 'administration-target')).toBe(false);
-    expect(walk(root).some(n => n.textContent === 'Contexto: Empresa Sur')).toBe(true);
+    expect(walk(root).some(n => n.textContent === 'Contexto: Empresa seleccionada')).toBe(true);
     expect(walk(root).find(n => n.id === 'mica-categorizacion-subview').children).toContain(card);
 });
 

@@ -151,12 +151,14 @@ export function createAdministrationView(root, store, service = administrationSe
         svg.append(path); button.append(svg); button.onclick = action; return button;
     }
     function renderPersistentHeader(data, onNewCompany) {
+        const pageTitle = document.getElementById?.('page-title');
+        if(pageTitle)pageTitle.textContent = activeSection === 'Categorización' ? 'Categorización impositiva' : 'Administración MICA';
         const header = el('div', null, { className: 'mica-admin-persistent-header' });
         const leftGroup = el('div', null, { className: 'mica-admin-header-left' });
         const orgSelectorWrap = el('div', null, { className: 'mica-admin-org-selector' });
         
         const platform = store.contextState === 'PLATFORM_READY';
-        const contextName = platform ? 'Vegen Platform' : (store.getActiveOrganizationName?.() || data.organizations.find(o => o.id === store.activeOrganizationId)?.name || 'Organización');
+        const contextName = platform ? 'PLATAFORMA' : 'Empresa seleccionada';
         orgSelectorWrap.append(el('span', 'Contexto: ' + contextName, { className: 'mica-admin-context' }));
         if (platform) {
         const orgSelectLabel = el('label', 'Empresa gestionada:', { className: 'mica-admin-org-label' });
@@ -509,7 +511,16 @@ export function createAdministrationView(root, store, service = administrationSe
 
             if (activeCategorizationSubSection === 'Categorías') {
                 if (taxCatCard) catContainer.append(taxCatCard);
-                if (refreshCatalog) refreshCatalogData(() => store.loadTaxCategories?.(), catContainer);
+                if (globalCatalog) {
+                    const note = el('p', 'Catálogo global: una fila por definición. La asignación a la empresa gestionada se muestra por separado.', {className:'mica-admin-context'});
+                    catContainer.prepend?.(note);
+                    const warning=el('p', '', {role:'status'});
+                    const updateWarning=()=>{warning.textContent=store.categoryDefinitionConflicts?.length
+                        ? `Hay ${store.categoryDefinitionConflicts.length} grupos de definiciones distintas con el mismo nombre y tipo. Requieren revisión de datos; no se fusionaron automáticamente.` : '';};
+                    catContainer.append(warning);updateWarning();
+                    if(refreshCatalog)refreshCatalogData(async()=>{await store.loadTaxCategories?.();updateWarning();},catContainer);
+                }
+                if (refreshCatalog && !globalCatalog) refreshCatalogData(() => store.loadTaxCategories?.(), catContainer);
             } else if (activeCategorizationSubSection === 'Actividades') {
                 if (econActCard) catContainer.append(econActCard);
                 if (refreshCatalog) refreshCatalogData(() => store.loadEconomicActivities?.(), catContainer);

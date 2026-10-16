@@ -16,9 +16,10 @@ beforeEach(() => {
     store.perceptions=[{organization_id:'A',fecha:'16/10/2026',fuente:'IVA',jurisdiction:'NACIONAL (IVA)',regimen:'001',amount:-10}];
     store.salaries={organization_id:'A',periodo:'2026-10',fuente:'PAYROLL',sueldoNeto:1500.25};
     store.salariesList=[store.salaries,{organization_id:'A',periodo:'2026-09',sueldoNeto:99}];
+    store.bankTransactions=[{organization_id:'A',fecha:'16/10/2026',descripcion:'Banco Ñ',monto:-25,tipo:'debit'}];
 });
 afterEach(()=>jest.restoreAllMocks());
-test.each(['comprobantes','percepciones','sueldos'])('%s CSV and XLSX round trip with numeric cells', module => {
+test.each(['comprobantes','percepciones','sueldos','bancos'])('%s CSV and XLSX round trip with numeric cells', module => {
     const records=moduleExportRecords(store,module);
     const rows=moduleExportRows(store,module,records);
     const csv=moduleCsv(rows);
