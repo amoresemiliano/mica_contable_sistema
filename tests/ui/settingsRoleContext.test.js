@@ -125,7 +125,7 @@ function query(data, error = null) {
     q.select.mockReturnValue(q);
     q.eq.mockReturnValue(q);
     q.order.mockResolvedValue({ data, error });
-    q.maybeSingle.mockResolvedValue({ data, error });
+    q.maybeSingle.mockResolvedValue({ data:Array.isArray(data)?data[0] || null:data, error });
     q.then = (resolve, reject) => Promise.resolve({ data, error }).then(resolve, reject);
     from.mockReturnValue(q);
     return q;
@@ -273,6 +273,7 @@ test('ADMIN loads only assigned categories and can reactivate only that subset',
 });
 
 test('global category creation does not implicitly assign to a tenant', async () => {
+    query([]);
     rpc.mockResolvedValue({ data: 'new-category', error: null });
     await persistenceService.createTaxCategory({ name: 'Global' });
     expect(rpc).toHaveBeenCalledTimes(1);

@@ -1,6 +1,7 @@
 import { mountOperationalWorkspaces, mountModuleLinks } from './components/operationalWorkspace.js';
 import { mountContextInvalidation } from './core/multiTabContext.js';
 import { semanticExtractors } from './core/operationalSemantics.js';
+import { cleanCategoryName, equivalentCategory, duplicateCategoryMessage } from './core/categoryNames.js';
 import { exportExtractors, moduleExportRecords, moduleExportRows, downloadModule } from './core/moduleExports.js';
 import { mountReporting } from './components/managementReporting.js';
 import { mountBusinessMetrics } from './components/businessMetrics.js';
@@ -2861,7 +2862,7 @@ window.submitTaxCategoryForm = async () => {
     const btn = document.getElementById('btn-save-tax-category');
     const feedback = document.getElementById('tax-category-feedback');
 
-    const name = nameInput ? nameInput.value.trim() : '';
+    const name = cleanCategoryName(nameInput?.value);
     const category_type = typeInput ? typeInput.value : 'EXPENSE';
     const description = descInput ? descInput.value.trim() : '';
 
@@ -2876,9 +2877,9 @@ window.submitTaxCategoryForm = async () => {
 
     // Validación client-side de duplicados
     const existing = appStore.taxCategories || [];
-    if (existing.some(c => c.id !== document.getElementById('form-tax-category')?.dataset.editingId && (c.name || '').toLowerCase() === name.toLowerCase())) {
+    if (existing.some(c => c.id !== document.getElementById('form-tax-category')?.dataset.editingId && equivalentCategory(c,name,category_type))) {
         if (feedback) {
-            feedback.innerText = "Ya existe una categoría tributaria con el mismo nombre.";
+            feedback.innerText = duplicateCategoryMessage;
             feedback.className = "auth-status-banner auth-error";
             feedback.style.display = "block";
         }

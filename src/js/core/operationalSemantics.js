@@ -1,3 +1,5 @@
+import { categoryNameKey } from './categoryNames.js';
+
 export function classificationValues(store, row) {
     const category = store.taxCategories?.find(c => c.id === row.category_id);
     const activity = store.economicActivities?.find(a => a.id === row.activity_id);
@@ -20,7 +22,7 @@ export function canonicalCatalog(rows) {
 export function duplicateDefinitions(rows) {
     const groups = new Map();
     for (const row of canonicalCatalog(rows)) {
-        const key = `${row.category_type}|${String(row.name).trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase()}`;
+        const key = `${row.category_type}|${categoryNameKey(row.name)}`;
         if (!groups.has(key)) groups.set(key,[]);
         groups.get(key).push(row.id);
     }

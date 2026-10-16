@@ -3,6 +3,7 @@ import { isMicaCapability } from '../micaCapabilities.js';
 import { validateImportEnvelope } from '../importEnvelope.js';
 import { persistedClassification } from '../classification.js';
 import { persistImportChunks } from './importChunks.js';
+import { cleanCategoryName, categoryNameKey, duplicateCategoryMessage } from '../categoryNames.js';
 
 /**
  * Servicio de Persistencia para MICA (Fase 2 - Supabase Staging)
@@ -623,16 +624,23 @@ export class PersistenceService {
      * Crear categoría global; asignar solo si se indica un destino explícito.
      */
     async createTaxCategory({ name, description = '', category_type = 'EXPENSE' }, targetOrgId = null) {
-        if (!name || !name.trim()) {
+        const cleanName=cleanCategoryName(name);
+        if (!cleanName) {
             throw new Error('El nombre de la categoría es obligatorio.');
         }
 
+        const type=category_type || 'EXPENSE';
+        const {data:existing,error:lookupError}=await supabase.from('eco_tax_categories').select('id')
+            .eq('category_type',type).eq('canonical_name_key',categoryNameKey(cleanName)).maybeSingle();
+        if(lookupError)throw new Error(`No se pudo verificar el catálogo global: ${lookupError.message}`);
+        if(existing)throw new Error(duplicateCategoryMessage);
+
         const { data: categoryId, error: createError } = await supabase.rpc('create_global_tax_category', {
-            p_name: name.trim(),
+            p_name: cleanName,
             p_description: description ? description.trim() : '',
             p_category_type: category_type || 'EXPENSE'
         });
-        if (createError) throw new Error(`Error al crear categoría tributaria: ${createError.message}`);
+        if (createError) throw new Error(createError.code==='23505' ? duplicateCategoryMessage : `Error al crear categoría tributaria: ${createError.message}`);
 
         if (targetOrgId) {
             const { error: assignError } = await supabase.rpc('assign_tax_category_to_org', {
@@ -643,7 +651,7 @@ export class PersistenceService {
             if (assignError) throw new Error(`Error al asignar categoría a la organización: ${assignError.message}`);
         }
 
-        return { id: categoryId, name: name.trim(), description: description ? description.trim() : '', category_type };
+        return { id: categoryId, name: cleanName, description: description ? description.trim() : '', category_type:type };
     }
 
     /**
