@@ -25,6 +25,19 @@ CREATE TABLE public.eco_financial_movements(
  category_id UUID REFERENCES public.eco_tax_categories,amount NUMERIC,normalized_payload JSONB,
  updated_at TIMESTAMPTZ DEFAULT now()
 );
+-- Additional FKs confirmed by the manual DEV inventory. They are never mutated by 048.
+CREATE TABLE public.eco_classification_rules(
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),target_category_id UUID REFERENCES public.eco_tax_categories,
+ name TEXT
+);
+CREATE TABLE public.eco_movement_allocations(
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),category_id UUID REFERENCES public.eco_tax_categories,
+ amount NUMERIC
+);
+CREATE TABLE public.eco_tax_subcategories(
+ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),category_id UUID REFERENCES public.eco_tax_categories ON DELETE CASCADE,
+ name TEXT
+);
 CREATE TABLE public.eco_audit_events(id UUID PRIMARY KEY DEFAULT gen_random_uuid(),organization_id UUID,event_type TEXT);
 ALTER TABLE public.eco_tax_categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.eco_org_tax_categories ENABLE ROW LEVEL SECURITY;
@@ -71,3 +84,6 @@ SELECT md5('honorarios-'||n)::UUID,'00000000-0000-0000-0000-000000000001','c1567
 INSERT INTO public.eco_normalized_records(id,organization_id,category_id,total,normalized_payload) VALUES
  ('00000000-0000-0000-0000-000000000099','00000000-0000-0000-0000-000000000003','a209c838-d3e3-4e3c-9b4f-4619c83cc336',-123.45,'{"moneda":"USD","tipo_cbte":3}'),
  ('00000000-0000-0000-0000-000000000098','00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000010',9,'{"moneda":"PES"}');
+INSERT INTO public.eco_classification_rules(target_category_id,name) VALUES ('c15675d7-be33-4400-84c3-9985e1a59579','Keep survivor rule');
+INSERT INTO public.eco_movement_allocations(category_id,amount) VALUES ('02768384-f366-4fd9-aa0c-a437866cfeb4',123.45);
+INSERT INTO public.eco_tax_subcategories(category_id,name) VALUES ('00000000-0000-0000-0000-000000000010','Keep unrelated subcategory');

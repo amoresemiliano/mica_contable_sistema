@@ -4,7 +4,10 @@ SELECT current_database() AS database_name,current_setting('server_version') AS 
   current_setting('server_encoding') AS encoding;
 
 SELECT ns.nspname AS reference_schema,t.relname AS reference_table,c.conname,
-  pg_get_constraintdef(c.oid) AS definition,c.convalidated
+  pg_get_constraintdef(c.oid) AS definition,c.convalidated,
+  CASE WHEN ns.nspname='public' AND t.relname IN ('eco_org_tax_categories','eco_normalized_records','eco_financial_movements') THEN 'MUTATED'
+    WHEN ns.nspname='public' AND t.relname IN ('eco_classification_rules','eco_movement_allocations','eco_tax_subcategories') THEN 'VERIFIED_ZERO'
+    ELSE 'UNEXPECTED' END AS migration_scope
 FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace ns ON ns.oid=t.relnamespace
 WHERE c.contype='f' AND c.confrelid IN ('public.eco_tax_categories'::regclass,'public.eco_org_tax_categories'::regclass)
 ORDER BY 1,2,3;
@@ -20,7 +23,10 @@ WITH expected(id,kind) AS (VALUES
 SELECT e.kind,e.id,c.name,c.category_type,c.is_active,
  (SELECT count(*) FROM public.eco_normalized_records WHERE category_id=e.id) AS normalized_records,
  (SELECT count(*) FROM public.eco_financial_movements WHERE category_id=e.id) AS financial_movements,
- (SELECT count(*) FROM public.eco_org_tax_categories WHERE category_id=e.id) AS organization_assignments
+ (SELECT count(*) FROM public.eco_org_tax_categories WHERE category_id=e.id) AS organization_assignments,
+ (SELECT count(*) FROM public.eco_classification_rules WHERE target_category_id=e.id) AS classification_rules,
+ (SELECT count(*) FROM public.eco_movement_allocations WHERE category_id=e.id) AS movement_allocations,
+ (SELECT count(*) FROM public.eco_tax_subcategories WHERE category_id=e.id) AS tax_subcategories
 FROM expected e LEFT JOIN public.eco_tax_categories c ON c.id=e.id ORDER BY e.kind,e.id;
 
 SELECT c.id AS category_id,c.name,o.id AS organization_id,o.name AS organization,

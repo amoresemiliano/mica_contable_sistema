@@ -5,6 +5,8 @@ SET LOCAL statement_timeout = '120s';
 LOCK TABLE public.eco_tax_categories, public.eco_org_tax_categories,
   public.eco_normalized_records, public.eco_financial_movements,
   public.eco_organizations IN ACCESS EXCLUSIVE MODE;
+LOCK TABLE public.eco_classification_rules, public.eco_movement_allocations,
+  public.eco_tax_subcategories IN SHARE MODE;
 DO $preflight$
 BEGIN
   IF to_regclass('private.migration_048_category_backup') IS NULL

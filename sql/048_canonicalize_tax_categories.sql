@@ -6,6 +6,9 @@ SET LOCAL statement_timeout = '120s';
 LOCK TABLE public.eco_tax_categories, public.eco_org_tax_categories,
   public.eco_normalized_records, public.eco_financial_movements,
   public.eco_organizations IN ACCESS EXCLUSIVE MODE;
+-- Freeze the reviewed zero-reference set while checking it and deleting categories.
+LOCK TABLE public.eco_classification_rules, public.eco_movement_allocations,
+  public.eco_tax_subcategories IN SHARE MODE;
 
 DO $preflight$
 BEGIN
@@ -81,19 +84,37 @@ BEGIN
     AND attname IN ('name','category_type') AND NOT attnotnull AND NOT attisdropped) THEN
     RAISE EXCEPTION '048 nullable name/type schema drift would weaken canonical uniqueness';
   END IF;
-  -- Every incoming FK is inspected. Unknown/composite references require explicit review.
+  -- Every incoming FK is inspected, with exactly one validated FK per explicit pair.
   IF (SELECT count(*) FROM pg_constraint WHERE contype='f'
-      AND confrelid='public.eco_tax_categories'::regclass) <> 3
-     OR EXISTS (
-       SELECT 1 FROM pg_constraint c WHERE c.contype='f'
-       AND c.confrelid='public.eco_tax_categories'::regclass AND NOT (
-         c.conrelid IN ('public.eco_org_tax_categories'::regclass,
-           'public.eco_normalized_records'::regclass,'public.eco_financial_movements'::regclass)
-         AND array_length(c.conkey,1)=1 AND array_length(c.confkey,1)=1 AND c.convalidated
-         AND (SELECT attname FROM pg_attribute WHERE attrelid=c.conrelid AND attnum=c.conkey[1])='category_id'
-         AND (SELECT attname FROM pg_attribute WHERE attrelid=c.confrelid AND attnum=c.confkey[1])='id')) THEN
+      AND confrelid='public.eco_tax_categories'::regclass) <> 6 THEN
     RAISE EXCEPTION '048 category FK inventory drift; review pg_constraint before mutation';
   END IF;
+  FOR v_row IN SELECT * FROM (VALUES
+    ('public.eco_org_tax_categories'::regclass,'category_id','MUTATED',NULL::TEXT),
+    ('public.eco_normalized_records'::regclass,'category_id','MUTATED',NULL::TEXT),
+    ('public.eco_financial_movements'::regclass,'category_id','MUTATED',NULL::TEXT),
+    ('public.eco_classification_rules'::regclass,'target_category_id','VERIFIED_ZERO',NULL::TEXT),
+    ('public.eco_movement_allocations'::regclass,'category_id','VERIFIED_ZERO',NULL::TEXT),
+    ('public.eco_tax_subcategories'::regclass,'category_id','VERIFIED_ZERO','c')
+  ) refs(reference_table,reference_column,reference_scope,required_delete_action)
+  LOOP
+    SELECT count(*) INTO n FROM pg_constraint c
+    JOIN pg_attribute src ON src.attrelid=c.conrelid AND src.attnum=c.conkey[1]
+    JOIN pg_attribute dst ON dst.attrelid=c.confrelid AND dst.attnum=c.confkey[1]
+    WHERE c.contype='f' AND c.confrelid='public.eco_tax_categories'::regclass
+      AND c.conrelid=v_row.reference_table AND src.attname::TEXT=v_row.reference_column
+      AND dst.attname='id' AND src.atttypid='uuid'::regtype AND dst.atttypid='uuid'::regtype
+      AND array_length(c.conkey,1)=1 AND array_length(c.confkey,1)=1 AND c.convalidated
+      AND (v_row.required_delete_action IS NULL OR c.confdeltype::TEXT=v_row.required_delete_action);
+    IF n<>1 THEN RAISE EXCEPTION '048 category FK inventory drift for %.%: expected single validated UUID FK to category id',
+      v_row.reference_table,v_row.reference_column; END IF;
+    IF v_row.reference_scope='VERIFIED_ZERO' THEN
+      EXECUTE format('SELECT count(*) FROM %s WHERE %I IN (SELECT duplicate_id FROM pg_temp.mica048_map)',
+        v_row.reference_table,v_row.reference_column) INTO n;
+      IF n<>0 THEN RAISE EXCEPTION '048 verified-zero reference drift in %.% (% rows); no automatic reassignment or cascading deletion allowed',
+        v_row.reference_table,v_row.reference_column,n; END IF;
+    END IF;
+  END LOOP;
   IF EXISTS (SELECT 1 FROM pg_constraint WHERE contype='f'
       AND confrelid='public.eco_org_tax_categories'::regclass) THEN
     RAISE EXCEPTION '048 assignment rows have incoming references; merge requires review';
@@ -130,7 +151,7 @@ BEGIN
   END IF;
 
   -- Fail closed for undeclared scalar/JSON/text references, including historical reports.
-  -- Historical JSON is never rewritten automatically. Only the three inventoried FKs move.
+  -- Historical JSON is never rewritten automatically. Only the three MUTATED FKs move.
   FOR v_row IN SELECT ns.nspname,cl.relname,a.attname
     FROM pg_attribute a JOIN pg_class cl ON cl.oid=a.attrelid JOIN pg_namespace ns ON ns.oid=cl.relnamespace
     WHERE ns.nspname IN ('public','private') AND cl.relkind IN ('r','p')

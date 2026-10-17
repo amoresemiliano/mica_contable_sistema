@@ -1,6 +1,9 @@
 # DEV-CATEGORY-CANONICALIZATION-048
 
 Base: `0b327b0af829db2d24b373d45b389c9a6b34f9a9` / `dev`.
+FK inventory correction: `DEV-CATEGORY-CANONICALIZATION-048-FK-INVENTORY-FIX`,
+based on `c3467541a56ada40680198581bb1c453fe243713` and the Product Owner's manual
+DEV evidence. Mutation scope and survivor mapping are unchanged.
 Status: **PREPARED / LOCALLY_VERIFIED / READY_FOR_MANUAL_DEV_MIGRATION**.
 No remote SQL execution, deployment or PROD access. Canonicalization has not been
 applied to DEV by this work package. Counts below describe the supplied diagnosis
@@ -23,11 +26,27 @@ and deleted even though it has no references.
 
 ## Inventory and preflight
 
-Repository schema 014 defines three category FKs:
+Manual DEV evidence supplied for `DEV-CATEGORY-CANONICALIZATION-048-FK-INVENTORY-FIX`
+confirmed six incoming category FKs. Schema 014 documents only the three mutated
+references; the local fixture and preflight now also represent the additional DEV FKs.
+
+Mutated reference tables (unchanged data-migration scope):
 
 - `public.eco_normalized_records.category_id`
 - `public.eco_financial_movements.category_id`
 - `public.eco_org_tax_categories.category_id`
+
+Verified-zero reference tables (no INSERT/UPDATE/DELETE or row restoration by 048):
+
+- `public.eco_classification_rules.target_category_id`
+- `public.eco_movement_allocations.category_id`
+- `public.eco_tax_subcategories.category_id` — `ON DELETE CASCADE`.
+
+The supplied DEV diagnostic found zero references to the five explicit duplicate
+IDs in these three additional tables. UP reasserts zero under SHARE locks before
+deleting any category; it never relies on cascading deletion. References to survivor
+or unrelated IDs are permitted and preserved. Read-only output labels each FK as
+MUTATED/VERIFIED_ZERO and reports all six reference counts per diagnosed ID.
 
 Reporting 045/046/047 reads the canonical relational fields and stores historical
 JSON snapshots; it introduces no additional direct category FK. Those engines
@@ -53,8 +72,12 @@ does not replace them. It requires:
   rows must belong to DEMO OESTE, DEMO NORTE or MICA as specified. Compatible
   survivor assignments to those same organizations are allowed for safe collisions.
   BAIGORRIA must be unambiguous; its Honorarios records cannot belong to another company.
-- Runtime `pg_constraint` inventory must contain exactly the three reviewed simple,
-  validated category FKs. Unknown/composite FKs and incoming assignment FKs abort
+- Runtime `pg_constraint` inventory must contain exactly the six reviewed FKs, with
+  exactly one single-column, validated UUID FK for each explicit table/column pair
+  to `eco_tax_categories.id`; subcategories must retain ON DELETE CASCADE. Delete
+  actions not supplied in the DEV evidence are not invented; their complete actual
+  definitions are recorded in the ledger and compared by DOWN. Unknown/composite
+  FKs, missing expected FKs and incoming assignment FKs abort
   before mutation, even if currently empty. No unreviewed user triggers or existing
   generated/identity columns may affect exact row restoration.
 - A scan of all columns in public/private user tables checks for explicit duplicate
@@ -114,6 +137,10 @@ revoked from PUBLIC/anon/authenticated. It contains exact full-row snapshots bef
 and after the merge: definitions, assignments, all relevant normalized/financial
 rows, mapping, schema, incoming FKs, constraints, indexes, column/table ACLs, owners,
 RLS policies, user triggers and the normalization function definition.
+The FK evidence already enumerates all incoming references, including the three
+additional tables and their full definitions. Their rows are not backed up or
+restored, because 048 never mutates them. DOWN detects additional-FK definition drift
+but permits later legitimate survivor references in these tables and preserves them.
 
 UP and DOWN are independent transactional files. Both lock affected tables and
 organizations with a 10-second lock timeout and 120-second statement timeout. The
@@ -132,7 +159,9 @@ a separately reviewed reconciliation strategy.
 
 ## Local evidence
 
-**36 PostgreSQL integration cases passed; 271 Jest tests passed in 12 suites.**
+**45 PostgreSQL integration cases passed for the FK inventory fix.** The preceding
+048 application change passed 271 Jest tests in 12 suites; application code is
+unchanged in this fix, so those tests were not repeated.
 All SQL execution for validation was local; remote connections: zero.
 
 The SQL harness uses PGlite 0.5.10 installed only under ignored/untracked scratch:
@@ -150,6 +179,13 @@ duplicate assignment, canonical global and tenant catalogs, DB duplicate prevent
 distinct types, exact rollback and negative drift cases. JavaScript cases exercise
 the real UI handler, lookup/no-insert behavior, concurrent-insert error handling
 and normalized-type semantics, plus operational/import/export regressions.
+
+FK inventory fix validation additionally covers acceptance of six FKs, a seventh
+FK, a missing/unvalidated/wrong-column FK, subcategory delete-action drift, nonzero
+references in each verified-zero table, preservation of their existing source rows,
+additional-FK rollback drift, and preservation of post-UP survivor references. The
+fixture includes source rows in all three extra tables; exact UP/DOWN comparisons
+include them. Their data and schema are never modified by either migration file.
 
 Previously observed broad-suite failures at the base (historical SQL fingerprints
 and reporting fake-DOM `root.querySelector`) are outside this change; the complete
