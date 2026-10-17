@@ -17,7 +17,7 @@ export function emptyState(title,note) {
 // Presentation annotations only. Existing event selectors, source values and
 // permission-gated controls remain owned by the reporting controller.
 export function refineReportingPresentation(root,mode) {
- const shell=root.querySelector('.mr-shell');if(!shell)return;
+ const shell=root.querySelector?.('.mr-shell');if(!shell)return;
  shell.classList.add('finance-surface',`finance-${mode}`);
  const heading=shell.querySelector('.mr-heading h2');
  if(heading){const note=document.createElement('p');note.className='finance-subtitle';note.textContent=mode==='management'?'Una lectura clara de ventas, resultados y movimientos del negocio.':'Prepará, revisá y conservá reportes con respaldo en cada cálculo.';heading.after(note);}
@@ -32,7 +32,8 @@ export function refineReportingPresentation(root,mode) {
  }}
  const kpis=shell.querySelector('.mr-kpis');
  if(kpis){kpis.insertAdjacentHTML('beforebegin',sectionHeading('Resumen ejecutivo','Indicadores documentales del período · abrí una tarjeta para ver su cálculo.'));
-  for(const card of kpis.children){const incomplete=card.querySelector('.mr-metric-warning'),value=card.querySelector('strong')?.textContent||'';
+  for(const card of kpis.children){
+   card.classList.toggle('finance-executive-kpi',['sales','purchases','result','bank_flow'].includes(card.dataset.trace));const incomplete=card.querySelector('.mr-metric-warning'),value=card.querySelector('strong')?.textContent||'';
    const unavailable=/No disponible|No determinable|Sin datos|Sin comparación/.test(value),tone=incomplete?'warning':unavailable?'neutral':card.classList.contains('mr-negative')?'critical':'info';
    card.dataset.presentationTone=tone;
    card.insertAdjacentHTML('afterbegin',statusChip(incomplete?'Parcial':unavailable?'No disponible':'Documentado',tone));

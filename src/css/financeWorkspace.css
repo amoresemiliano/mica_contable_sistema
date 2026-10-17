@@ -103,6 +103,48 @@
 @media(prefers-reduced-motion:reduce){:is(.mr-shell,.business-metrics) button{transition:none}}
 @media print{.mr-shell{max-width:none;padding:0;color:#000;font-size:10pt}.mr-heading,.mr-filters,.mr-report-toolbar,.mr-shell>details,.mr-shell button,.finance-context{display:none!important}.mr-report-meta{border:0;border-bottom:1px solid #888;padding:0 0 12px;margin:0}.mr-shell .mr-table-wrap{overflow:visible}.mr-shell table{font-size:9pt}.mr-shell th,.mr-shell td{padding:6px}.mr-shell thead{display:table-header-group}.mr-shell tr{break-inside:avoid}.mr-notice{background:#fff;border:1px solid #777;color:#000}.mr-report-meta p{color:#333}}
 /* Compact operational workspaces: scoped to operational modules and catalog tables. */
+/* Executive hierarchy: color is always paired with a status label. */
+.mr-kpis{gap:12px;margin-bottom:16px}
+.mr-shell .mr-kpi{order:2;padding:16px!important;box-shadow:none}
+.mr-shell .finance-executive-kpi{order:1;border-top:3px solid var(--fin-blue)!important;padding:20px!important}
+.mr-shell .finance-executive-kpi>strong{font-size:clamp(28px,2.3vw,38px)}
+.mr-kpi[data-presentation-tone=warning]{background:#fff;border-top-color:var(--fin-amber)!important}
+.mr-kpi[data-presentation-tone=critical]{border-top-color:var(--fin-red)!important}
+.mr-kpi:not(.finance-executive-kpi)>strong{font-size:24px}
+.finance-section-heading{margin:24px 0 12px}
+.finance-management-actions{padding:16px 20px;background:var(--fin-blue-soft);border-radius:10px;margin:16px 0}
+.finance-management-actions h2{font-size:20px;margin:0 0 8px}
+.finance-management-actions ol{margin:0;padding-left:24px}
+.finance-management-actions li{padding:4px}
+.mr-shell .finance-management-actions button{border:0;background:transparent;text-align:left;padding:6px}
+.mr-panels{gap:16px}.mr-panel{margin:8px 0;padding:20px}.mr-panel h3{font-size:20px;margin-bottom:12px}
+.mr-shell .mr-alert{background:#fff;border:0;border-bottom:1px solid var(--fin-line);border-radius:0}
+.finance-alert-group h4{font-size:12px;letter-spacing:.03em}
+.finance-health-diagnostic{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;border-top:1px solid var(--fin-line);padding-top:16px}
+.finance-health-diagnostic strong{font-size:13px;color:var(--fin-blue)}
+.finance-health-diagnostic p{font-size:12px;color:var(--fin-muted);margin:6px 0}
+.finance-pillar{border-top:4px solid #8796a3}
+.finance-pillar--positive{border-top-color:var(--fin-green)}
+.finance-pillar--warning{border-top-color:var(--fin-amber)}
+.finance-pillar--critical{border-top-color:var(--fin-red)}
+.finance-pillar--neutral .finance-pillar-score{font-size:22px;color:var(--fin-muted);letter-spacing:-.3px}
+.finance-priorities{grid-template-columns:1fr}
+.finance-priorities>.finance-insight{display:block;border-left:4px solid var(--fin-amber);padding:16px 20px}
+.finance-priorities>.finance-insight:first-child{grid-column:auto;background:#f7fafc;padding:24px;border-left-width:6px}
+.finance-priorities>.finance-insight:first-child .finance-priority-number{font-size:32px;color:var(--fin-blue)}
+.finance-priorities>.finance-insight:nth-child(n+3){padding:12px 20px}
+.finance-priorities .finance-insight--critical{border-left-color:var(--fin-red)}
+.finance-priorities .finance-insight-top{justify-content:flex-start}
+.finance-positive-signals.has-signals{padding:16px;background:var(--fin-green-soft);border-radius:12px}
+.finance-positive-signals .finance-insight{background:transparent;border:0;padding:8px}
+.finance-positive-signals .finance-empty{padding:12px 16px;border:0}
+.metrics-timeline{gap:0;border-top:2px solid var(--fin-line);margin-top:24px}
+.metrics-timeline .finance-month{position:relative;border:0;border-radius:0;background:transparent;padding:20px 12px 8px;min-width:0}
+.finance-month:before{content:'';position:absolute;top:-7px;left:12px;width:12px;height:12px;border-radius:50%;background:#7c8996;outline:4px solid white}
+.finance-month--positive:before{background:var(--fin-green)}.finance-month--warning:before{background:var(--fin-amber)}.finance-month--critical:before{background:var(--fin-red)}
+.finance-month>strong{font-size:20px;letter-spacing:0;margin:8px 0}.finance-month small{font-size:11px}
+.finance-quality{padding:20px;margin-top:24px;border:0}
+@media(max-width:600px){.finance-health-diagnostic{grid-template-columns:1fr;gap:8px}.metrics-timeline{grid-template-columns:repeat(2,minmax(0,1fr))}.finance-priorities>.finance-insight:first-child{padding:20px}.mr-kpi:not(.finance-executive-kpi)>strong{font-size:20px}}
 [data-workspace]{min-width:0;max-width:100%}
 [data-workspace] .operational-context-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:0 0 12px;padding:0;border:0}
 [data-workspace] .operational-context-toolbar h2{font-size:22px;margin:0;color:var(--primary)}
@@ -121,6 +163,16 @@ body:has([data-workspace]:not(.hidden))> #app-container > .wrapper > header{disp
  .workspace-toolbar:not(:has(.workspace-search)){grid-template-columns:minmax(0,1fr) auto}
  .workspace-search>div,.workspace-search input{width:100%!important}
 }
+/* Shared two-row toolbar; existing controls are moved, never cloned. */
+.workspace-toolbar{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(220px,38%);grid-template-areas:'filters actions' 'period search';gap:8px 16px!important}
+.workspace-filters{grid-area:filters;display:flex;align-items:center;gap:8px!important}
+.workspace-actions{grid-area:actions;justify-self:end}
+.workspace-period{grid-area:period;flex-wrap:wrap;min-width:0;gap:6px}
+.workspace-search{grid-area:search;width:100%;justify-self:end}
+.workspace-search>div,.workspace-search input{width:100%!important;box-sizing:border-box}
+.workspace-toolbar:not(:has(.workspace-search)){grid-template-columns:minmax(0,1fr) auto}
+@media(min-width:1100px){.workspace-filters,.workspace-filters .btn-group{flex-wrap:nowrap!important}.workspace-filters button{white-space:nowrap}}
+@media(max-width:850px){.workspace-toolbar{grid-template-columns:minmax(0,1fr)!important;grid-template-areas:'filters' 'actions' 'period' 'search'}.workspace-actions{justify-self:start;margin-left:0}.workspace-period>div{flex-wrap:wrap}.workspace-filters{flex-wrap:wrap}}
 [data-workspace] .card-header>div{min-width:0;flex-wrap:wrap}
 .workspace-menu{position:relative;flex:none}
 .workspace-menu>summary{list-style:none;cursor:pointer;white-space:nowrap;padding:8px 12px}

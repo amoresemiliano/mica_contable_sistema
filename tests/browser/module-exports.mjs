@@ -44,6 +44,10 @@ try{
   await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile});
   for(const [module,id] of [['comprobantes','tab-conciliador'],['percepciones','tab-percepciones'],['bancos','tab-bancos'],['sueldos','tab-sueldos']]){
    await evaluate(`show('${id}');document.querySelector('#${id} .workspace-download').open=true`);
+   if(!mobile && module!=='sueldos') {
+    await assert(`(()=>{const root=document.getElementById('${id}'),rect=s=>root.querySelector(s).getBoundingClientRect(),col=rect('[id$="-col-btn"]'),filter=rect('.workspace-filters'),actions=rect('.workspace-actions'),period=rect('.workspace-period'),search=rect('.workspace-search');return Math.abs(col.y-actions.y)<10 && col.y<period.y && Math.abs(period.y-search.y)<10 && actions.x>filter.x && search.x>period.x;})()`,'Two-row geometry '+module);
+   }
+   if(!mobile && module==='sueldos')await assert(`document.querySelector('#tab-sueldos .workspace-period').getBoundingClientRect().y>document.querySelector('#tab-sueldos .workspace-actions').getBoundingClientRect().y`,'Payroll period on second row');
    await evaluate(`if(grids['${module}']){grids['${module}'].visibleColumns=new Set(Array.from(document.querySelectorAll('#${id} th[data-col-key]')).map(th=>th.dataset.colKey));render();}`);
    await assert(`Array.from(document.querySelectorAll('[data-module-export="${module}"]')).every(b=>!b.disabled && b.getBoundingClientRect().width>0)`,'Export controls not usable');
    await assert(`Array.from(document.querySelectorAll('[data-module-export="${module}"]')).every(b=>b.getBoundingClientRect().right<=innerWidth)`,'Export controls overflow');
@@ -92,6 +96,16 @@ try{
  await assert(`Array.from(document.querySelectorAll('[data-module-export]')).every(b=>b.disabled)`,'Switching did not disable export');
  await evaluate(`store.clearTenantState();store.activeOrganizationId='B';store.contextState='TENANT_READY';store.permissions.organization={loaded:true,orgId:'B',codes:['RECORD_VIEW','REPORT_EXPORT']};render()`);
  await assert(`Array.from(document.querySelectorAll('[data-module-export]')).every(b=>b.disabled)`,'Previous-company records available after switch');
+ // Real route activation uses the shared administration host, including hash changes.
+ await evaluate(`store.permissions.platform={loaded:true,codes:['GLOBAL_CATALOG_VIEW','PLATFORM_MANAGE']};store.activeOrganizationId=null;store.contextState='PLATFORM_READY';history.replaceState(null,'','#tab-bancos');store.notify()`);
+ await assert(`document.body.dataset.activeModule==='tab-categorizacion' && location.hash==='#tab-categorizacion'`,'Platform canonical fallback');
+ for(const route of ['tab-configuracion','tab-categorizacion']) {
+  await evaluate(`switchTab('${route}');for(let n=0;n<10;n++)store.notify()`);
+  await assert(`document.body.dataset.activeModule==='${route}' && location.hash==='#${route}' && !document.getElementById('tab-configuracion').classList.contains('hidden')`,'Shared host route stability '+route);
+ }
+ await evaluate(`location.hash='#tab-bancos'`);
+ await new Promise(resolve=>setTimeout(resolve,100));
+ await assert(`location.hash==='#tab-categorizacion'`,'Unavailable hash fallback');
  if(errors.length)throw Error(errors.join('; '));
  console.log('PASS: four shared workspaces, desktop/mobile, CSV/XLSX/PDF, headers, native links, two real tabs and context invalidation, import pickers, scroll bounds, filtered empty state, organization transition');
  }finally{ws?.close();browser.kill();server.close();}

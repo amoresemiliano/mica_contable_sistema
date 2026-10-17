@@ -32,6 +32,9 @@ try{
  const assert=async(expression,message)=>{if(!await evaluate(expression))throw Error(message);};
  await cdp('Runtime.enable');for(let i=0;i<60&&!await evaluate('!!window.ready');i++)await new Promise(r=>setTimeout(r,100));await assert('window.ready','Fixture load failed');
  await cdp('Page.enable');
+ await assert(`document.querySelector('.finance-health-diagnostic') && document.querySelectorAll('.finance-pillar').length===6`,'Health diagnostic and six pillars');
+ await assert(`document.querySelector('.finance-positive-signals') && document.querySelector('.finance-quality-summary')`,'Positive evidence and quality');
+ await assert(`Array.from(document.querySelectorAll('.finance-month')).every(c=>c.className.includes('finance-month--'))`,'Semantic timeline states');
  for(const [width,height,mobile] of [[1440,1000,false],[390,844,true]]){
   await cdp('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile});
   for(const view of ['Salud','Rentabilidad','Liquidez','Operaci\u00f3n','Riesgos y prioridades']){

@@ -1,6 +1,14 @@
 // MICA module boundary. Effective server capabilities are the only authority.
 import { MICA_MODULE_CONTRACT, MICA_IMPORT_CONTRACT, MICA_OCR_ACTIONS, MICA_ACTION_CONTRACT } from './micaPermissionContract.js';
 export const MODULES = Object.freeze(Object.fromEntries(Object.entries(MICA_MODULE_CONTRACT).map(([id,entry])=>[id,entry.any])));
+// Categorization has its own route but shares the administration shell.
+export const moduleSectionId = id => id === 'tab-categorizacion' ? 'tab-configuracion' : id;
+export function fallbackModule(store) {
+    const candidates = !store.activeOrganizationId
+        ? ['tab-categorizacion', 'tab-configuracion', 'tab-access']
+        : [...Object.keys(MODULES), 'tab-configuracion', 'tab-access'];
+    return candidates.find(id => canVisitModule(store, id));
+}
 export function tenantCan(store, code) {
     return store.contextState === 'TENANT_READY' && !!store.activeOrganizationId &&
         store.hasCapability(code, { scope: 'ORGANIZATION', orgId: store.activeOrganizationId });
@@ -57,12 +65,16 @@ export function renderModuleAccess(store, document, navigate) {
         link.hidden = !allowed; link.setAttribute('aria-disabled', String(!allowed));
     }
     const active = document.querySelector('.tab-content:not(.hidden)');
-    if (['TENANT_READY', 'PLATFORM_READY'].includes(store.contextState) && (!active || !canVisitModule(store, active.id))) {
-        const target = [...Object.keys(MODULES), 'tab-configuracion', 'tab-access'].find(id => canVisitModule(store,id));
-        navigate(target);
+    const selected = document.body?.dataset.activeModule || active?.id;
+    const requested = document.defaultView?.location.hash.slice(1) || selected;
+    if (['TENANT_READY', 'PLATFORM_READY'].includes(store.contextState)) {
+        const target = canVisitModule(store, requested) ? requested : fallbackModule(store);
+        if (target && (target !== selected || requested !== target || active?.id !== moduleSectionId(target))) navigate(target);
     }
+    const renderedRoute = document.body?.dataset.activeModule || selected;
     for (const section of document.querySelectorAll('.tab-content')) {
-        if (!canVisitModule(store, section.id)) {
+        const sharedHost = section.id === moduleSectionId(renderedRoute) && canVisitModule(store, renderedRoute);
+        if (!sharedHost && !canVisitModule(store, section.id)) {
             // Keep the context/retry toolbar usable while loading or after an error.
             // The selector component separately blocks the module body in those states.
             section.inert = ['TENANT_READY', 'PLATFORM_READY'].includes(store.contextState);

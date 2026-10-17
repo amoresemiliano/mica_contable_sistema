@@ -21,6 +21,11 @@ export function mountOperationalWorkspaces(store, document) {
         let toolbar = body.querySelector('.operational-toolbar');
         if (!toolbar) { toolbar=document.createElement('div');toolbar.className='operational-toolbar';body.prepend(toolbar); }
         toolbar.classList.add('workspace-toolbar');
+        if(config.id==='sueldos') {
+            const filters=document.createElement('div');filters.className='workspace-filters';filters.textContent='Nómina consolidada';toolbar.append(filters);
+            const period=document.getElementById('salary-source-badge');
+            if(period){period.classList.add('workspace-period');toolbar.append(period);}
+        }
         // Preserve existing input elements, IDs and drop listeners inside a compact panel.
         const importer = document.createElement('details');importer.className='workspace-menu workspace-import';
         const summary=document.createElement('summary');summary.className='btn-primary';summary.textContent='Importar';importer.append(summary);
@@ -44,8 +49,11 @@ export function mountOperationalWorkspaces(store, document) {
         }
         body.querySelectorAll('.module-export-actions').forEach(el=>el.remove());
         if(config.id==='bancos')body.querySelector('[onclick="appStore.exportBankMovements()"]')?.remove();
-        toolbar.children[0]?.classList.add('workspace-filters');
-        toolbar.children[1]?.classList.add('workspace-search');
+        const filters=toolbar.children[0],search=config.id==='sueldos'?null:toolbar.children[1];
+        filters?.classList.add('workspace-filters');
+        search?.classList.add('workspace-search');
+        const period=filters?.querySelector('[id$="-date-mode"]')?.parentElement;
+        if(period){period.classList.add('workspace-period');toolbar.append(period);}
         const actions=document.createElement('div');actions.className='workspace-actions';actions.append(importer,download);
         toolbar.append(actions);
         // Filters come first; data follows immediately, retaining existing summaries and bulk controls.
@@ -77,6 +85,6 @@ export function mountModuleLinks(document, navigate, window) {
         link.href='#'+id;link.dataset.tab=id;link.removeAttribute('onclick');
         link.onclick=event=>nativeModuleClick(event,navigate,id);
     }
-    const route=()=>{const id=window.location.hash.slice(1);const target=document.getElementById(id);if(target?.classList.contains('tab-content') && target.classList.contains('hidden'))navigate(id);};
+    const route=()=>{const id=window.location.hash.slice(1);if(id && document.body?.dataset.activeModule!==id)navigate(id);};
     window.addEventListener('hashchange',route);return route;
 }

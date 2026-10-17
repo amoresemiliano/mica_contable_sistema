@@ -14,7 +14,7 @@ import { MICA_MODULE_CONTRACT } from './core/micaPermissionContract.js';
 import { mountOperationalOrgSelectors, renderOperationalImportControls, renderOperationalHeader } from './components/operationalOrgSelector.js';
 import { supabase } from './core/services/supabaseClient.js';
 import { openAdministration } from './components/administration.js';
-import { renderModuleAccess } from './core/moduleAccess.js';
+import { renderModuleAccess, moduleSectionId } from './core/moduleAccess.js';
 import { appStore } from './store.js';
 import { setupOCR, renderOcrHistory } from './ocr.js';
 import { Reconciler } from './reconciler.js';
@@ -511,6 +511,8 @@ function getActiveCompanyCuit() {
 export function switchTab(tabId) {
     if (!appStore.canVisitModule(tabId)) return false;
     if (window.location.hash !== '#' + tabId) window.history.replaceState(null, '', '#' + tabId);
+    if (document.body.dataset.activeModule === tabId &&
+        !document.getElementById(moduleSectionId(tabId))?.classList.contains('hidden')) return true;
     document.body.dataset.activeModule = tabId;
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.getElementById(tabId)?.classList.remove('hidden');
@@ -3003,7 +3005,9 @@ for (const [pattern, module] of [
 document.addEventListener('DOMContentLoaded', () => {
     mountOperationalOrgSelectors(appStore, document);
     mountOperationalWorkspaces(appStore, document);
-    const applyRoute = mountModuleLinks(document, switchTab, window);
+    const applyRoute = mountModuleLinks(document, id => {
+        if (!switchTab(id)) renderModuleAccess(appStore, document, switchTab);
+    }, window);
     appStore.subscribe(() => { if (['TENANT_READY','PLATFORM_READY'].includes(appStore.contextState)) applyRoute(); });
     mountContextInvalidation(appStore, window);
     renderModuleAccess(appStore, document, switchTab);

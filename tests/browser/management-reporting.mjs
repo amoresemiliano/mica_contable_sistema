@@ -40,6 +40,10 @@ try{
  const assert=async(expression,message)=>{if(!await evaluate(expression))throw Error(message);};
  await cdp('Runtime.enable');for(let i=0;i<60&&!await evaluate('!!window.ready');i++)await new Promise(r=>setTimeout(r,100));await assert('window.ready','Fixture load failed');
  await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});await cdp('Page.enable');
+ await assert(`document.querySelectorAll('.finance-executive-kpi').length===4`,'Four executive KPIs');
+ await assert(`document.querySelector('.finance-management-actions') && document.querySelectorAll('.finance-management-actions li').length<=3`,'Bounded next actions');
+ await assert(`(async()=>{const {renderManagement}=await import('/src/js/components/managementReporting.js'),{refineReportingPresentation}=await import('/src/js/components/financeUi.js');const model=structuredClone(management.state.model);model.alerts=['CRITICAL','WARNING','POSITIVE'].map(severity=>({severity,title:severity,explanation:'Evidencia local',source:'sales',category:'Prueba',current_value:1,comparison_value:0,threshold:1,mode:'fixture'}));const root=document.createElement('div');root.innerHTML='<div class="mr-shell">'+renderManagement(model,null)+'</div>';refineReportingPresentation(root,'management');return root.querySelectorAll('.finance-alert-group').length===3;})()`,'Three evidence-based alert groups');
+ await assert(`Array.from(document.querySelectorAll('.mr-kpi[data-metric-status="INCOMPLETE"]')).every(c=>c.dataset.presentationTone!=='positive')`,'Incomplete is never healthy');
  await assert("document.querySelectorAll('#management-root .mr-kpi').length===8",'Eight KPI cards');
  for(const view of ['Resumen','Resultados','Tesorería','Fiscal','Análisis']){await evaluate(`document.querySelector('[data-view="${view}"]').click()`);await assert("document.querySelector('#management-root svg[role=img]')!==null",'Accessible chart '+view);}
  await evaluate("document.querySelector('[data-view=Resumen]').click()");fs.writeFileSync('scratch/reporting-desktop.png',Buffer.from((await cdp('Page.captureScreenshot')).data,'base64'));
