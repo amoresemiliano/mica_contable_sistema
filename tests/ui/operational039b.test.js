@@ -12,19 +12,24 @@ const node = tag => ({ tag, children: [], value: '', hidden: false, events: {},
     append(...children) { this.children.push(...children); }, replaceChildren(...children) { this.children = children; },
     setAttribute(key, value) { this[key] = value; }, addEventListener(key, fn) { this.events[key] = fn; }, focus() {} });
 const all = n => [n, ...(n.children || []).filter(c => typeof c === 'object').flatMap(all)];
+function advanced(root, section) {
+    all(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios').onclick();
+    all(root).find(n=>n.textContent==='Permisos avanzados').onclick();
+    if(section) all(root).find(n=>n.className==='mica-admin-advanced-nav').children.find(n=>n.textContent===section).onclick();
+}
 const rows = Array.from({length: 123}, (_, i) => ({id: String(i), name: i < 66 ? 'Norte' : 'Sur', fecha: '2026-09-01'}));
 
 test('039c invitation UI filters preset scope and keeps activation separate',async()=>{
     const oldDocument=global.document,oldFormData=global.FormData;
-    global.document={createElement:node};
+    global.document={createElement:node,createElementNS:(_ns,tag)=>node(tag)};
     global.FormData=class {constructor(f){this.inputs=all(f);}get(name){return this.inputs.find(n=>n.name===name)?.value;}};
     try {
         const data=fixture(),root=node('root'); data.presets.push({id:'tenant',name:'Contador',scope:'ORGANIZATION',is_active:true});
         const invitation=jest.fn(async(action)=>action==='list'?[]:{status:'PENDING_AUTHENTICATION'}),apply=jest.fn();
         const store={sessionUserId:'actor',contextState:'TENANT_READY',activeOrganizationId:'NORTE',contextGeneration:1,pendingOperations:0,subscribe(){}};
         await createAdministrationView(root,store,{read:async()=>data,invitation,apply}).load();
-        all(root).find(n=>n.role==='tab'&&n.textContent==='Usuarios').onclick();
-        all(root).find(n=>n.textContent==='+ Invitar usuario').onclick();
+        advanced(root, 'Usuarios');
+        all(root).find(n=>n.id==='mica-admin-advanced').children.flatMap(all).find(n=>n.textContent==='+ Invitar usuario').onclick();
         const f=all(root).find(n=>n.tag==='form'&&all(n).some(c=>c.textContent==='Invitar usuario'));
         const scope=all(f).find(n=>n.name==='scope'),preset=all(f).find(n=>n.name==='preset');
         expect(preset.children.map(n=>n.value)).toEqual(['tenant']);
@@ -108,30 +113,31 @@ test('assignment preview requires active context/scope and DENY wins across path
 });
 
 test('administration has one visible tab, compact editors, filtered capabilities and selected-user assignments', async () => {
-    const old=global.document; global.document={createElement:node};
+    const old=global.document; global.document={createElement:node,createElementNS:(_ns,tag)=>node(tag)};
     try {
         const root=node('root'), data=fixture();
         const store={sessionUserId:'actor',contextState:'TENANT_READY',activeOrganizationId:'NORTE',contextGeneration:1,subscribe(){}};
         await createAdministrationView(root,store,{read:async()=>data}).load();
-        const panels=()=>all(root).filter(n=>n.role==='tabpanel');
-        expect(panels().filter(n=>!n.hidden)).toHaveLength(1);
+        const panels=()=>all(root).filter(n=>n.role==='region');
+        expect(all(root).filter(n=>n.role==='tabpanel')).toHaveLength(1);
         const tabs=all(root).filter(n=>n.role==='tab');
-        expect(tabs.map(t=>t.textContent)).toEqual(['Organizaciones','Usuarios','Roles y permisos','Asignaciones']);
-        tabs[2].onclick(); expect(all(panels()[0]).some(n=>n.tag==='h3'&&n.textContent==='Roles y permisos')).toBe(true);
-        all(panels()[0]).find(n=>n.textContent==='Nuevo preset').onclick();
-        const boxes=all(panels()[0]).filter(n=>n.type==='checkbox');
+        expect(tabs.map(t=>t.textContent)).toEqual(['Empresas','Usuarios','Categorización']);
+        advanced(root, 'Roles'); expect(all(panels()[0]).some(n=>n.tag==='h3'&&n.textContent==='Roles')).toBe(true);
+        all(panels()[0]).find(n=>n.textContent==='Nuevo rol').onclick();
+        const roleEditor=()=>all(root).find(n=>n.tag==='dialog');
+        const boxes=all(roleEditor()).filter(n=>n.type==='checkbox');
         expect(boxes.map(n=>n.value)).toContain('BANK_IMPORT'); expect(boxes.map(n=>n.value)).not.toContain('ACCESS_ANY_ORG');
-        expect(all(panels()[0]).find(n=>n.className==='mica-permission-count').textContent).toBe('0 de 1 seleccionados');
+        expect(all(roleEditor()).find(n=>n.className==='mica-permission-count').textContent).toBe('0 de 1 seleccionados');
         boxes[0].checked=true; boxes[0].onchange();
-        expect(all(panels()[0]).find(n=>n.className==='mica-permission-count').textContent).toBe('1 de 1 seleccionados');
-        expect(all(panels()[0]).find(n=>n.tag==='strong').textContent).toBe('Importar extractos');
-        all(panels()[0]).find(n=>n.textContent==='Expandir grupos').onclick();
-        expect(all(panels()[0]).filter(n=>n.tag==='details').every(n=>n.open)).toBe(true);
-        all(panels()[0]).find(n=>n.textContent==='Contraer grupos').onclick();
-        expect(all(panels()[0]).filter(n=>n.tag==='details').every(n=>!n.open)).toBe(true);
-        const search=all(panels()[0]).find(n=>n.type==='search'); search.value='unmatched'; search.oninput();
-        expect(all(panels()[0]).filter(n=>n.tag==='details').every(n=>n.hidden)).toBe(true);
-        tabs[3].onclick(); expect(panels().filter(n=>!n.hidden)).toHaveLength(1);
+        expect(all(roleEditor()).find(n=>n.className==='mica-permission-count').textContent).toBe('1 de 1 seleccionados');
+        expect(all(roleEditor()).find(n=>n.tag==='strong').textContent).toBe('Importar extractos');
+        all(roleEditor()).find(n=>n.textContent==='Expandir grupos').onclick();
+        expect(all(roleEditor()).filter(n=>n.tag==='details').every(n=>n.open)).toBe(true);
+        all(roleEditor()).find(n=>n.textContent==='Contraer grupos').onclick();
+        expect(all(roleEditor()).filter(n=>n.tag==='details').every(n=>!n.open)).toBe(true);
+        const search=all(roleEditor()).find(n=>n.type==='search'); search.value='unmatched'; search.oninput();
+        expect(all(roleEditor()).filter(n=>n.tag==='details').every(n=>n.hidden)).toBe(true);
+        all(root).find(n=>n.className==='mica-admin-advanced-nav').children.find(n=>n.textContent==='Accesos').onclick(); expect(panels().filter(n=>!n.hidden)).toHaveLength(1);
         expect(panels()).toHaveLength(1);
         all(panels()[0]).find(n=>n.textContent==='Ver detalle').onclick();
         const drawer=all(root).find(n=>n.tag==='dialog');
@@ -142,7 +148,7 @@ test('administration has one visible tab, compact editors, filtered capabilities
 
 test('approved pending features remain selectable and persist in a custom preset with secondary codes', async () => {
     const oldDocument=global.document, oldFormData=global.FormData;
-    global.document={createElement:node};
+    global.document={createElement:node,createElementNS:(_ns,tag)=>node(tag)};
     global.FormData=class {
         constructor(form) {this.inputs=all(form).filter(n=>n.name&&(!n.type||n.type!=='checkbox'||n.checked));}
         get(name) {return this.inputs.find(n=>n.name===name)?.value ?? null;}
@@ -156,9 +162,9 @@ test('approved pending features remain selectable and persist in a custom preset
         const apply=jest.fn(async()=> 'new-preset');
         const store={sessionUserId:'actor',contextState:'TENANT_READY',activeOrganizationId:'NORTE',contextGeneration:1,pendingOperations:0,subscribe(){}};
         await createAdministrationView(root,store,{read:async()=>data,apply}).load();
-        all(root).find(n=>n.role==='tab'&&n.textContent==='Roles y permisos').onclick();
-        all(root).find(n=>n.textContent==='Nuevo preset').onclick();
-        const form=all(root).find(n=>n.tag==='form'&&all(n).some(c=>c.textContent==='Crear preset'));
+        advanced(root, 'Roles');
+        all(root).find(n=>n.textContent==='Nuevo rol').onclick();
+        const form=all(root).find(n=>n.tag==='form'&&all(n).some(c=>c.textContent==='Crear rol'));
         all(form).find(n=>n.name==='name').value='Permisos futuros';
         const boxes=all(form).filter(n=>n.type==='checkbox');
         expect(boxes.map(n=>n.value)).toEqual(approved.map(c=>c.code));

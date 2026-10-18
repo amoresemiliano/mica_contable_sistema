@@ -10,7 +10,9 @@ export function createAdministrationService(client = supabase) {
     return {
         read: (org = null, search = '') => rpc('mica_admin_read', { p_org: org, p_search: search }),
         apply: (action, data) => rpc('mica_admin_apply', { p_action: action, p_data: data }),
-        invitation: (action, org, data = {}) => rpc('mica_invitation', { p_action: action, p_org: org, p_data: data })
+        invitation: (action, org, data = {}) => rpc('mica_invitation', { p_action: action, p_org: org, p_data: data }),
+        platformAccess: (action, org = null, data = {}) => rpc('mica_platform_access', { p_action: action, p_org: org, p_data: data }),
+        platformRates: (action, org = null, data = {}) => rpc('mica_platform_iibb', { p_action: action, p_org: org, p_data: data })
     };
 }
 export const administrationService = createAdministrationService();

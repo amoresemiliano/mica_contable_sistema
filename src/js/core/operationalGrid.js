@@ -412,8 +412,8 @@ export class OperationalGrid {
                     const numB = typeof valB === 'number' ? valB : parseFloat(String(valB).replace(/[^0-9.-]+/g, "")) || 0;
                     return (numA - numB) * dir;
                 } else if (type === 'date') {
-                    const dateA = new Date(valA).getTime() || 0;
-                    const dateB = new Date(valB).getTime() || 0;
+                    const dateA = new Date(this.parseToIsoDate(valA)).getTime() || 0;
+                    const dateB = new Date(this.parseToIsoDate(valB)).getTime() || 0;
                     return (dateA - dateB) * dir;
                 } else {
                     return String(valA).localeCompare(String(valB), 'es', { sensitivity: 'base' }) * dir;

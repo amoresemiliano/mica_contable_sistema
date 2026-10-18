@@ -1,3 +1,4 @@
+import { perceptionDate, perceptionAmount } from './perceptionNormalization.js';
 /**
  * Parser para archivos de Percepciones/Retenciones IVA (.xls / .xlsx / .csv).
  * Soporta exportaciones de SICORE y de AFIP / ARCA (Impuesto 767 IVA).
@@ -53,7 +54,7 @@ export function parseIvaPerceptions(rows, context = {}) {
         if (!row || !Array.isArray(row) || row.length === 0) continue;
 
         const res = {
-            sourceRowNumber: i + 1,
+            sourceRowNumber: row.sourceRowNumber || i + 1,
             rawRow: row,
             errors: [],
             warnings: [],
@@ -71,20 +72,9 @@ export function parseIvaPerceptions(rows, context = {}) {
             res.errors.push("CUIT inválido (debe tener 11 dígitos).");
         }
 
-        let fechaStr = String(rawFecha || '').trim();
-        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(fechaStr)) {
-            res.errors.push("Fecha inválida.");
-        }
-
-        let monto = 0;
-        if (typeof rawImporte === 'number') {
-            monto = rawImporte;
-        } else if (rawImporte !== null && rawImporte !== undefined && rawImporte !== '') {
-            let str = String(rawImporte).trim();
-            if (str.includes('.') && str.includes(',')) str = str.replace(/\./g, '').replace(',', '.');
-            else if (str.includes(',')) str = str.replace(',', '.');
-            monto = parseFloat(str);
-        }
+        const fechaStr = perceptionDate(rawFecha);
+        if (!fechaStr) res.errors.push('Fecha inválida.');
+        const monto = perceptionAmount(rawImporte);
 
         if (isNaN(monto) || monto <= 0) {
             res.errors.push("Importe inválido.");
@@ -109,7 +99,9 @@ export function parseIvaPerceptions(rows, context = {}) {
                 importe: monto,
                 jurisdiction: 'NACIONAL (IVA)',
                 fuente: 'IVA',
-                tipo: 'percepcion'
+                tipo: mapping.operacion !== undefined && /retencion/i.test(String(row[mapping.operacion]).normalize('NFD').replace(/[\u0300-\u036f]/g,'')) ? 'retencion' : 'percepcion',
+                audit: { operacion: mapping.operacion !== undefined ? row[mapping.operacion] : null,
+                    impuesto: mapping.impuesto !== undefined ? row[mapping.impuesto] : null }
             };
         }
 

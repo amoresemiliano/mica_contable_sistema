@@ -1,0 +1,4 @@
+sep=,
+
+CUIT,N° Ader,Razon Social,N° Certificado,Norma,Fecha Percepcion,Tipo Comprobante,N° Comprobante,Fecha Comprobante,Monto Percibido,Base Calculo
+"30999999991","1","Agente, Sintetico","00000001","01","16/07/2026","F","0001","16/07/2026","123.45","4000.00",

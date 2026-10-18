@@ -1,4 +1,10 @@
-import { unresolvedPurchases, purchaseCategoryTotals } from './core/classification.js';
+import { mountOperationalWorkspaces, mountModuleLinks } from './components/operationalWorkspace.js';
+import { mountContextInvalidation } from './core/multiTabContext.js';
+import { semanticExtractors } from './core/operationalSemantics.js';
+import { cleanCategoryName, equivalentCategory, duplicateCategoryMessage } from './core/categoryNames.js';
+import { exportExtractors, moduleExportRecords, moduleExportRows, downloadModule } from './core/moduleExports.js';
+import { mountReporting } from './components/managementReporting.js';
+import { mountBusinessMetrics } from './components/businessMetrics.js';
 import { saveClassificationControl } from './components/classificationControl.js';
 import { initializeWithSessionRecovery } from './core/sessionRecovery.js';
 import { validateImportEnvelope, refreshDuplicateImport, assertImportResult } from './core/importEnvelope.js';
@@ -8,7 +14,7 @@ import { MICA_MODULE_CONTRACT } from './core/micaPermissionContract.js';
 import { mountOperationalOrgSelectors, renderOperationalImportControls, renderOperationalHeader } from './components/operationalOrgSelector.js';
 import { supabase } from './core/services/supabaseClient.js';
 import { openAdministration } from './components/administration.js';
-import { renderModuleAccess } from './core/moduleAccess.js';
+import { renderModuleAccess, moduleSectionId } from './core/moduleAccess.js';
 import { appStore } from './store.js';
 import { setupOCR, renderOcrHistory } from './ocr.js';
 import { Reconciler } from './reconciler.js';
@@ -19,8 +25,7 @@ import { createSheetJsAdapter } from './core/adapters/sheetJsAdapter.js';
 import { parseDelimitedText } from './adapters/textAdapter.js';
 import { createBrowserFingerprintProvider } from './adapters/browserFingerprintProvider.js';
 import { parseArcaRows } from './core/parsers/arcaParser.js';
-import { parseArbaText } from './core/parsers/arbaParser.js';
-import { parseIvaPerceptions } from './core/parsers/ivaPerceptionParser.js';
+import { parsePerceptionInput } from './core/parsers/perceptionFormats.js';
 import { parseBankRows } from './core/parsers/bankParser.js';
 import { parseSalaryRows } from './core/parsers/salaryParser.js';
 import { stageImport } from './core/services/importService.js';
@@ -70,6 +75,20 @@ export const iibbRatesGrid = new OperationalGrid({
     searchFields: ['jurisdiction', 'activity_name']
 });
 
+const moduleExportGrids = { comprobantes: comprobantesGrid, percepciones: percepcionesGrid, bancos: bancosGrid };
+window.downloadOperationalModule = (module, format) => {
+    try { downloadModule(appStore, module, moduleExportGrids[module], format); }
+    catch (error) { alert(error.message); }
+};
+function renderModuleExportControls(module) {
+    const records = moduleExportRecords(appStore, module, moduleExportGrids[module]);
+    for (const button of document.querySelectorAll(`[data-module-export="${module}"]`)) {
+        button.hidden = !appStore.canOperationalAction('export');
+        button.disabled = !records.length;
+        button.title = records.length ? `Exportar ${records.length} registros filtrados` : 'No hay registros disponibles para exportar';
+    }
+}
+
 // Event handlers globales para las toolbars operacionales
 
 // --- Comprobantes ---
@@ -106,15 +125,55 @@ window.clearComprobantesSearch = function() {
     UIManager.renderMainTable();
 };
 
-window.toggleComprobantesColDropdown = function(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('comprobantes-col-menu');
-    if (menu) {
-        const isHidden = menu.style.display === 'none' || !menu.style.display;
-        menu.style.display = isHidden ? 'block' : 'none';
-        if (isHidden) renderComprobantesColumnCheckboxes();
+// --- Unified Column Dropdown Manager ---
+const COLUMN_DROPDOWN_IDS = [
+    { btnId: 'comprobantes-col-btn', menuId: 'comprobantes-col-menu', renderFn: () => renderComprobantesColumnCheckboxes() },
+    { btnId: 'percepciones-col-btn', menuId: 'percepciones-col-menu', renderFn: () => renderPercepcionesColumnCheckboxes() },
+    { btnId: 'bancos-col-btn', menuId: 'bancos-col-menu', renderFn: () => renderBancosColumnCheckboxes() }
+];
+
+function closeAllColumnDropdowns() {
+    COLUMN_DROPDOWN_IDS.forEach(({ menuId }) => {
+        const menu = document.getElementById(menuId);
+        if (menu) menu.style.display = 'none';
+    });
+}
+
+function handleColumnDropdownToggle(e, menuId, renderFn) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById(menuId);
+    if (!menu) return;
+    const isCurrentlyOpen = menu.style.display === 'block';
+    closeAllColumnDropdowns();
+    if (!isCurrentlyOpen) {
+        menu.style.display = 'block';
+        if (renderFn) renderFn();
     }
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    const handleOutsideDismiss = (e) => {
+        COLUMN_DROPDOWN_IDS.forEach(({ btnId, menuId }) => {
+            const menu = document.getElementById(menuId);
+            if (menu && menu.style.display === 'block') {
+                const btn = document.getElementById(btnId);
+                if (!menu.contains(e.target) && (!btn || !btn.contains(e.target))) {
+                    menu.style.display = 'none';
+                }
+            }
+        });
+    };
+    document.addEventListener('click', handleOutsideDismiss);
+    document.addEventListener('touchstart', handleOutsideDismiss, { passive: true });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeAllColumnDropdowns();
+    });
+}
+
+window.toggleComprobantesColDropdown = function(e) {
+    handleColumnDropdownToggle(e, 'comprobantes-col-menu', renderComprobantesColumnCheckboxes);
 };
+
 
 function renderComprobantesColumnCheckboxes() {
     const container = document.getElementById('comprobantes-col-checkboxes');
@@ -197,13 +256,7 @@ window.clearPercepcionesSearch = function() {
 };
 
 window.togglePercepcionesColDropdown = function(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('percepciones-col-menu');
-    if (menu) {
-        const isHidden = menu.style.display === 'none' || !menu.style.display;
-        menu.style.display = isHidden ? 'block' : 'none';
-        if (isHidden) renderPercepcionesColumnCheckboxes();
-    }
+    handleColumnDropdownToggle(e, 'percepciones-col-menu', renderPercepcionesColumnCheckboxes);
 };
 
 function renderPercepcionesColumnCheckboxes() {
@@ -282,13 +335,7 @@ window.clearBancosSearch = function() {
 };
 
 window.toggleBancosColDropdown = function(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('bancos-col-menu');
-    if (menu) {
-        const isHidden = menu.style.display === 'none' || !menu.style.display;
-        menu.style.display = isHidden ? 'block' : 'none';
-        if (isHidden) renderBancosColumnCheckboxes();
-    }
+    handleColumnDropdownToggle(e, 'bancos-col-menu', renderBancosColumnCheckboxes);
 };
 
 function renderBancosColumnCheckboxes() {
@@ -463,12 +510,16 @@ function getActiveCompanyCuit() {
 // 5. CONTROLADOR NAVEGACIÓN SPA E INTERFAZ (SOLID: Single Responsibility)
 export function switchTab(tabId) {
     if (!appStore.canVisitModule(tabId)) return false;
+    if (window.location.hash !== '#' + tabId) window.history.replaceState(null, '', '#' + tabId);
+    if (document.body.dataset.activeModule === tabId &&
+        !document.getElementById(moduleSectionId(tabId))?.classList.contains('hidden')) return true;
+    document.body.dataset.activeModule = tabId;
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.getElementById(tabId)?.classList.remove('hidden');
     requestOperationalData(appStore, document, tabId);
 
     document.querySelectorAll('.sidebar-nav a').forEach(el => el.classList.remove('active-nav'));
-    const activeLink = document.querySelector(`.sidebar-nav [onclick="switchTab('${tabId}')"]`);
+    const activeLink = document.querySelector(`.sidebar-nav [data-tab="${tabId}"]`);
     if (activeLink) activeLink.classList.add('active-nav');
 
     // Resaltado de la barra mobile inferior
@@ -497,17 +548,21 @@ export function switchTab(tabId) {
         renderManualRecords();
     }
     else if (tabId === 'tab-categorizacion') {
-        if (appStore.loadTaxCategories) appStore.loadTaxCategories();
-        if (appStore.loadEconomicActivities) appStore.loadEconomicActivities();
-        if (appStore.loadIibbRates) appStore.loadIibbRates();
+        titleElement.innerText = "Administración MICA";
+        // Route to tab-configuracion shell so persistent header stays visible
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+        document.getElementById('tab-configuracion')?.classList.remove('hidden');
+        openAdministration(appStore, { section: 'Categorización' });
     }
     else if (tabId === 'tab-configuracion') {
         titleElement.innerText = "Administración MICA";
-        openAdministration(appStore);
+        openAdministration(appStore, { section: 'Empresas' });
     }
     else if (tabId === 'tab-client-dashboard') {
-        renderClientDashboard();
+        renderClientDashboard({refresh:true});
     }
+    else if (tabId === 'tab-metrics') { mountBusinessMetrics(appStore, {refresh:true}); }
+    else if (tabId === 'tab-reports') { mountReporting(appStore, 'reports', {refresh:true}); }
     else if (tabId === 'tab-access') titleElement.innerText = "Acceso MICA";
     return true;
 }
@@ -525,122 +580,8 @@ export function toggleMobileMoreSheet(show) {
 }
 
 // CONTROLADOR DE MÉTRICAS OPERATIVAS PARA EL GERENTE (DASHBOARD)
-export function renderClientDashboard() {
-    const items = appStore.items;
-    const manualMovs = appStore.manualMovements.filter(m => m.origen === 'manual-interno');
+export function renderClientDashboard(options) { mountReporting(appStore, 'management', options); }
 
-    // Ventas Brutas (Emitidos + Ingresos manuales internos)
-    const salesARCA = items.filter(i => i.tipo === 'emitido').reduce((sum, i) => sum + i.total, 0);
-    const salesManual = manualMovs.filter(m => m.tipo === 'Ingreso').reduce((sum, m) => sum + m.importe, 0);
-    const sales = salesARCA + salesManual;
-
-    // Compras (Recibidos + Egresos manuales internos)
-    const purchasesARCA = items.filter(i => i.tipo === 'recibido').reduce((sum, i) => sum + i.total, 0);
-    const purchasesManual = manualMovs.filter(m => m.tipo === 'Gasto').reduce((sum, m) => sum + m.importe, 0);
-    const purchases = purchasesARCA + purchasesManual;
-
-    const netBalance = sales - purchases;
-
-    // Actualización de valores principales
-    const salesValEl = document.getElementById('client-sales-val');
-    const purchasesValEl = document.getElementById('client-purchases-val');
-    const netEl = document.getElementById('client-net-val');
-    const ivaValEl = document.getElementById('client-iva-val');
-    const iibbValEl = document.getElementById('client-iibb-val');
-    const laborValEl = document.getElementById('client-labor-val');
-
-    if (salesValEl) salesValEl.innerText = `$ ${sales.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-    if (purchasesValEl) purchasesValEl.innerText = `$ ${purchases.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-    
-    if (netEl) {
-        netEl.innerText = `$ ${netBalance.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-        netEl.style.color = netBalance >= 0 ? 'var(--success)' : 'var(--warning)';
-    }
-
-    // IVA: Utilizar únicamente valores fiscales reales importados (Débito - Crédito)
-    const emittedItems = items.filter(i => i.tipo === 'emitido' || i.type === 'emitido');
-    const receivedItems = items.filter(i => i.tipo === 'recibido' || i.type === 'recibido');
-
-    const hasRealIvaEmitted = emittedItems.some(i => parseFloat(i.iva || i.importeIva || i.imp_iva) > 0);
-    const hasRealIvaReceived = receivedItems.some(i => parseFloat(i.iva || i.importeIva || i.imp_iva) > 0);
-
-    if (ivaValEl) {
-        if (hasRealIvaEmitted || hasRealIvaReceived) {
-            const totalIvaDebito = emittedItems.reduce((sum, i) => sum + (parseFloat(i.iva || i.importeIva || i.imp_iva) || 0), 0);
-            const totalIvaCredito = receivedItems.reduce((sum, i) => sum + (parseFloat(i.iva || i.importeIva || i.imp_iva) || 0), 0);
-            const netIva = totalIvaDebito - totalIvaCredito;
-            ivaValEl.innerText = `$ ${Math.max(0, netIva).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-        } else {
-            ivaValEl.innerText = "Pendiente de determinación";
-        }
-    }
-
-    // IIBB: Sin tasa hardcoded 3%. Estado neutro hasta motor de determinación
-    if (iibbValEl) {
-        iibbValEl.innerText = "Pendiente de determinación";
-    }
-
-    // Costo Laboral del Mes (usa modelo validado de Sueldos sin DOM form inputs ni anticipos desajustados)
-    let costLabor = 0;
-    if (appStore.salaries) {
-        const sal = appStore.salaries;
-        costLabor = sal.costoLaboralReal !== undefined 
-            ? sal.costoLaboralReal 
-            : ((sal.sueldoBrutoCalculado || sal.sueldoBruto || sal.remunerativo || 0) + (sal.noRemunerativo || 0));
-    }
-    if (laborValEl) laborValEl.innerText = `$ ${costLabor.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-
-    // Alertas de comprobantes sin categorizar / saldo pendiente por explicar
-    const alertUnresolved = document.getElementById('alert-unresolved-taxes');
-    const alertNoIssues = document.getElementById('alert-no-issues');
-    if (alertUnresolved) {
-        const pendingCount = unresolvedPurchases(items);
-        if (pendingCount > 0) {
-            alertUnresolved.innerHTML = `⚠️ <strong>Atención:</strong> Tenés ${pendingCount} comprobantes de compras sin categorizar o con saldo pendiente por explicar.`;
-            alertUnresolved.classList.remove('hidden');
-            alertUnresolved.style.display = 'block';
-            if (alertNoIssues) alertNoIssues.style.display = 'none';
-        } else {
-            alertUnresolved.classList.add('hidden');
-            alertUnresolved.style.display = 'none';
-            if (alertNoIssues) alertNoIssues.style.display = 'block';
-        }
-    }
-
-    // Desglose de Gastos
-    const categoryChartContainer = document.getElementById('client-category-chart');
-    if (!categoryChartContainer) return;
-
-    const purchaseItems = items.filter(i => i.tipo === 'recibido');
-    if (purchaseItems.length === 0 && purchasesManual === 0) {
-        categoryChartContainer.innerHTML = `<li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">No hay datos de compras disponibles.</li>`;
-        return;
-    }
-
-    const catTotals = purchaseCategoryTotals(purchaseItems, appStore.taxCategories);
-    if (purchasesManual > 0) {
-        catTotals.push({label:'Gastos Caja Chica (Manual)',amount:purchasesManual});
-    }
-
-    const sortedCategories = catTotals.sort((a,b) => b.amount - a.amount);
-    categoryChartContainer.innerHTML = sortedCategories.map(({label, amount}) => {
-        const category = String(label).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        const pct = Math.round((amount / (purchases || 1)) * 100);
-        return `
-            <li class="progress-item">
-                <div class="progress-item-labels">
-                    <span>${category}</span>
-                    <span>$ ${amount.toLocaleString('es-AR', {maximumFractionDigits: 0})} (${pct}%)</span>
-                </div>
-                <div class="progress-track">
-                    <div class="progress-bar" style="width: ${pct}%;"></div>
-                </div>
-            </li>
-        `;
-    }).join('');
-}
-
-// BÚSQUEDA DE COMISIONES Y TRANSACCIONES BANCARIAS
 export function renderBancosGrid() { UIManager.renderBankTable(); }
 
 window.saveMicaClassification = (control, method, id) => {
@@ -1316,11 +1257,15 @@ export class UIManager {
         try {
             const buffer = await readFileAsArrayBuffer(file);
             if (!validContext()) return;
-            const text = await readFileAsText(file).catch(() => '');
+            let text = await readFileAsText(file).catch(() => '');
+            if (text.includes('\uFFFD')) text = new TextDecoder('windows-1252').decode(buffer);
             if (!validContext()) return;
             const formatInfo = detectFileFormat({ arrayBuffer: buffer, text, fileName: file.name, mimeType: file.type });
             
-            const isExcelFormat = formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF' || file.name.toLowerCase().endsWith('.xls') || file.name.toLowerCase().endsWith('.xlsx');
+            const isExcelFormat = formatInfo === 'OOXML_XLSX' || formatInfo === 'OLE2_BIFF';
+            const formatWarning = !isExcelFormat && /\.xlsx?$/i.test(file.name)
+                ? 'El archivo tiene extensión Excel pero contiene una exportación de texto compatible; se procesará como archivo de texto.' : null;
+            if (formatWarning) alert(formatWarning);
 
             let rows = [];
             if (isExcelFormat) {
@@ -1359,26 +1304,10 @@ export class UIManager {
                     UIManager.render();
                 });
             } else if (type === 'percepcion') {
-                const ext = file.name.split('.').pop().toLowerCase();
-                let sourceType = null;
-
-                if (isExcelFormat) {
-                    if (!['xls', 'xlsx', 'csv'].includes(ext)) {
-                        alert(`Contradicción detectada: El contenido parece Excel/CSV pero la extensión es .${ext}. Importación rechazada.`);
-                        return;
-                    }
-                    context.jurisdiccion = 'IVA';
-                    parsedItems = parseIvaPerceptions(rows, context);
-                    sourceType = 'PERCEPCIONES_IVA';
-                } else {
-                    if (ext !== 'txt') {
-                        alert(`Contradicción detectada: El contenido parece ARBA TXT pero la extensión es .${ext}. Importación rechazada.`);
-                        return;
-                    }
-                    context.jurisdiccion = 'ARBA';
-                    parsedItems = parseArbaText(text, context);
-                    sourceType = 'PERCEPCIONES_ARBA';
-                }
+                const perception = parsePerceptionInput({ text: isExcelFormat ? undefined : text, rows }, context);
+                parsedItems = perception.items;
+                if (formatWarning) parsedItems.forEach(r => r.warnings.push(formatWarning));
+                const sourceType = perception.format.sourceType;
                 
                 const validPerceptions = parsedItems.filter(r => r.normalizedData !== null).map(r => r.normalizedData);
                 const invalidRows = parsedItems.filter(r => r.normalizedData === null);
@@ -1397,7 +1326,7 @@ export class UIManager {
                             const hashHex = await persistenceService.sha256File(file);
                             if (!validContext()) return;
                             
-                            const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            const checkResult = await persistenceService.checkFileImportable(hashHex, { resumable: parsedItems.length > 500 });
                             if (!validContext()) return;
                             if (checkResult && checkResult.importable === false) {
                                 await showExistingImport(checkResult, 'percepcion', validContext);
@@ -1405,7 +1334,9 @@ export class UIManager {
                             }
                             
                             let importInfo;
-                            if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                            if (checkResult?.resume_import) {
+                                importInfo = checkResult.resume_import;
+                            } else if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
                                 importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
                                 if (!validContext()) return;
                             } else {
@@ -1427,7 +1358,7 @@ export class UIManager {
                             try {
                                 persisted = await persistenceService.persistPerceptionsBatch({
                                     importId: importInfo.import_id,
-                                    fileInfo: {
+                                    fileInfo: importInfo.file_info || {
                                         original_name: file.name,
                                         storage_path: uploadResult.path,
                                         mime_type: uploadResult.mimeType,
@@ -1438,7 +1369,7 @@ export class UIManager {
                                 });
                                 if (!validContext()) return;
                             } catch (persistErr) {
-                                if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!uploadResult.reused && !persistErr.preserveSourceFile) await persistenceService.cleanupStorageFile(uploadResult.path);
                                 if (!validContext()) return;
                                 throw persistErr;
                             }
@@ -1478,7 +1409,7 @@ export class UIManager {
                             const hashHex = await persistenceService.sha256File(file);
                             if (!validContext()) return;
                             
-                            const checkResult = await persistenceService.checkFileImportable(hashHex);
+                            const checkResult = await persistenceService.checkFileImportable(hashHex, { resumable: result.length > 500 });
                             if (!validContext()) return;
                             if (checkResult && checkResult.importable === false) {
                                 await showExistingImport(checkResult, 'banco', validContext);
@@ -1486,7 +1417,9 @@ export class UIManager {
                             }
                             
                             let importInfo;
-                            if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
+                            if (checkResult?.resume_import) {
+                                importInfo = checkResult.resume_import;
+                            } else if (checkResult && checkResult.retry_available && checkResult.retry_candidate_import_id) {
                                 importInfo = await persistenceService.requestFailedImportRetry(checkResult.retry_candidate_import_id);
                                 if (!validContext()) return;
                             } else {
@@ -1508,7 +1441,7 @@ export class UIManager {
                             try {
                                 persisted = await persistenceService.persistFinancialMovementsBatch({
                                     importId: importInfo.import_id,
-                                    fileInfo: {
+                                    fileInfo: importInfo.file_info || {
                                         original_name: file.name,
                                         storage_path: uploadResult.path,
                                         mime_type: uploadResult.mimeType,
@@ -1519,7 +1452,7 @@ export class UIManager {
                                 });
                                 if (!validContext()) return;
                             } catch (persistErr) {
-                                if (!uploadResult.reused) await persistenceService.cleanupStorageFile(uploadResult.path);
+                                if (!uploadResult.reused && !persistErr.preserveSourceFile) await persistenceService.cleanupStorageFile(uploadResult.path);
                                 if (!validContext()) return;
                                 throw persistErr;
                             }
@@ -1621,6 +1554,7 @@ export class UIManager {
     }
 
     static renderSalarySummary() {
+        renderModuleExportControls('sueldos');
         const container = document.getElementById('salary-detail-container');
         const badge = document.getElementById('salary-source-badge');
         const sal = appStore.salaries;
@@ -1639,52 +1573,10 @@ export class UIManager {
 
         if (!container) return;
 
-        const fmt = (v) => `$ ${(v || 0).toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
-
-        container.innerHTML = `
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; text-align: left;">
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Período Liquidado</span>
-                    <strong style="font-size: 14px; color: var(--primary);">${sal.periodo || 'N/D'}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Remunerativo</span>
-                    <strong style="font-size: 14px;">${fmt(sal.remunerativo)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">No Remunerativo</span>
-                    <strong style="font-size: 14px;">${fmt(sal.noRemunerativo)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Anticipos / Adelantos</span>
-                    <strong style="font-size: 14px;">${fmt(sal.anticipos)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">SAC Proporcional</span>
-                    <strong style="font-size: 14px;">${fmt(sal.sacProporcional)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Aporte Sindical Oblig.</span>
-                    <strong style="font-size: 14px;">${fmt(sal.aporteSindicalObligatorio)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">FAECYS</span>
-                    <strong style="font-size: 14px;">${fmt(sal.faecys)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Sueldo Neto Total</span>
-                    <strong style="font-size: 14px; color: var(--success);">${fmt(sal.sueldoNeto)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Sueldo Bruto Calculado</span>
-                    <strong style="font-size: 14px;">${fmt(sal.sueldoBrutoCalculado)}</strong>
-                </div>
-                <div style="background: var(--bg-primary); padding: 10px; border-radius: 6px; border: 1px solid var(--border-color);">
-                    <span style="font-size: 11px; color: var(--text-muted); display: block;">Aporte Sindical Calculado</span>
-                    <strong style="font-size: 14px;">${fmt(sal.aporteSindicalCalculado)}</strong>
-                </div>
-            </div>
-        `;
+        const rows = moduleExportRows(appStore, 'sueldos', [sal]);
+        const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        container.classList.add('workspace-table-viewport');
+        container.innerHTML = `<table class="simple-table"><thead><tr>${rows[0].map(label=>`<th>${escape(label)}</th>`).join('')}</tr></thead><tbody><tr>${rows[1].map(value=>`<td>${escape(value)}</td>`).join('')}</tr></tbody></table>`;
     }
 
     static updateJurisdictionFilterSelects() {
@@ -1714,6 +1606,7 @@ export class UIManager {
     }
 
     static renderPerceptionsTable() {
+        renderModuleExportControls('percepciones');
         UIManager.updateJurisdictionFilterSelects();
         UIManager.syncHeaderVisibility(percepcionesGrid, 'table-percepciones');
 
@@ -1721,11 +1614,7 @@ export class UIManager {
         const summaryBar = document.getElementById('percepciones-summary-bar');
         
         const rawList = appStore.perceptions || [];
-        const list = percepcionesGrid.filterAndSort(rawList, {
-            fuente: p => p.fuente || p.jurisdiction || p.jurisdiccion || '',
-            agente: p => p.agente || p.razonSocial || '',
-            monto: p => typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)
-        });
+        const list = percepcionesGrid.filterAndSort(rawList, semanticExtractors(appStore, exportExtractors.percepciones));
 
         if (summaryBar) {
             const total = list.reduce((sum, p) => sum + (typeof p.amount === 'number' ? p.amount : (typeof p.monto === 'number' ? p.monto : parseFloat(p.importe) || 0)), 0);
@@ -1766,6 +1655,7 @@ export class UIManager {
     }
 
     static renderBankTable() {
+        renderModuleExportControls('bancos');
         UIManager.syncHeaderVisibility(bancosGrid, 'table-bancos');
 
         const tbody = document.getElementById('table-bancos-body');
@@ -1773,11 +1663,7 @@ export class UIManager {
         if (!tbody) return;
 
         const rawTxs = appStore.bankTransactions || [];
-        const transactions = bancosGrid.filterAndSort(rawTxs, {
-            fecha: t => t.fecha || t.fechaValor || '',
-            descripcion: t => t.descripcion || t.concepto || '',
-            monto: t => t.monto || t.amount || 0
-        });
+        const transactions = bancosGrid.filterAndSort(rawTxs, semanticExtractors(appStore, exportExtractors.bancos));
 
         if (summaryBar) {
             const debits = transactions.filter(t => (t.monto || 0) < 0 || t.tipo === 'debit' || t.tipo === 'DEBITO').reduce((sum, t) => sum + Math.abs(t.monto || 0), 0);
@@ -1833,20 +1719,14 @@ export class UIManager {
     }
 
     static renderMainTable() {
+        renderModuleExportControls('comprobantes');
         UIManager.syncHeaderVisibility(comprobantesGrid, 'table-comprobantes');
 
         const tbody = document.getElementById('table-body');
         if (!tbody) return;
 
         const rawItems = appStore.items || [];
-        const items = comprobantesGrid.filterAndSort(rawItems, {
-            razonSocial: i => i.razonSocial || i.agente || '',
-            cuit: i => i.cuit || '',
-            comprobante: i => i.comprobante || '',
-            total: i => i.total || 0,
-            iva: i => i.iva || i.importeIva || 0,
-            fecha: i => i.fecha || ''
-        });
+        const items = comprobantesGrid.filterAndSort(rawItems, semanticExtractors(appStore, exportExtractors.comprobantes));
 
         const summaryBar = document.getElementById('comprobantes-summary-bar');
         if (summaryBar) {
@@ -1948,8 +1828,8 @@ export class UIManager {
 
     static renderSettings() {
         const canManageGlobal = appStore.isCatalogPlatformContext() && appStore.canManageGlobalCatalog();
-        const canActOnTax = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('category');
-        const canActOnActivity = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('activity');
+        let canActOnTax = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('category');
+        let canActOnActivity = appStore.isCatalogPlatformContext() ? appStore.canAssignCatalog() : appStore.canActivateCatalog('activity');
         for (const id of ['btn-import-arca-catalog', 'btn-create-global-category']) {
             const control = document.getElementById(id);
             if (control) {
@@ -1962,29 +1842,35 @@ export class UIManager {
             this.closeModal('modal-tax-category');
         }
         const isGlobalMode = appStore.isCatalogPlatformContext();
+        const admin = document.getElementById('mica-administration')?.dataset;
+        const managedTarget = admin?.catalogManagement === 'true';
 
         // Target Org Containers para Global Mode
         const targetTaxCatContainer = document.getElementById('target-org-tax-categories-container');
         const selectTargetTaxCat = document.getElementById('select-target-org-tax-cat');
         if (targetTaxCatContainer && selectTargetTaxCat) {
-            targetTaxCatContainer.style.display = isGlobalMode && appStore.canAssignCatalog() ? 'flex' : 'none';
+            targetTaxCatContainer.style.display = isGlobalMode && appStore.canAssignCatalog() && !managedTarget ? 'flex' : 'none';
             const orgs = (appStore.catalogAssignmentTargets || []).map(o => ({ id: o.organization_id, name: o.organization_name }));
-            const previousTarget = selectTargetTaxCat.value;
-            selectTargetTaxCat.innerHTML = orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            const previousTarget = managedTarget ? admin.catalogTarget : selectTargetTaxCat.value;
+            selectTargetTaxCat.innerHTML = (managedTarget ? '<option value="">Seleccioná una empresa gestionada</option>' : '') + orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            if (managedTarget) selectTargetTaxCat.value = orgs.some(o => o.id === previousTarget) ? previousTarget : '';
             selectTargetTaxCat.onchange = () => window.handleCatalogTargetChange('categories');
         }
 
         const targetEconActContainer = document.getElementById('target-org-economic-activities-container');
         const selectTargetEconAct = document.getElementById('select-target-org-econ-act');
         if (targetEconActContainer && selectTargetEconAct) {
-            targetEconActContainer.style.display = isGlobalMode && appStore.canAssignCatalog() ? 'flex' : 'none';
+            targetEconActContainer.style.display = isGlobalMode && appStore.canAssignCatalog() && !managedTarget ? 'flex' : 'none';
             const orgs = (appStore.catalogAssignmentTargets || []).map(o => ({ id: o.organization_id, name: o.organization_name }));
-            const previousTarget = selectTargetEconAct.value;
-            selectTargetEconAct.innerHTML = orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            const previousTarget = managedTarget ? admin.catalogTarget : selectTargetEconAct.value;
+            selectTargetEconAct.innerHTML = (managedTarget ? '<option value="">Seleccioná una empresa gestionada</option>' : '') + orgs.map(o => `<option value="${o.id}" ${o.id === previousTarget ? 'selected' : ''}>${o.name}</option>`).join('');
+            if (managedTarget) selectTargetEconAct.value = orgs.some(o => o.id === previousTarget) ? previousTarget : '';
             selectTargetEconAct.onchange = () => window.handleCatalogTargetChange('activities');
         }
 
         if (isGlobalMode) {
+            canActOnTax = canActOnTax && !!selectTargetTaxCat?.value;
+            canActOnActivity = canActOnActivity && !!selectTargetEconAct?.value;
             for (const [rows, target] of [
                 [appStore.taxCategories, selectTargetTaxCat?.value],
                 [appStore.displayedEconomicActivities, selectTargetEconAct?.value]
@@ -2214,20 +2100,10 @@ export class UIManager {
 
         // 3. IIBB Rates
         const rates = appStore.iibbRates || [];
-        this.renderRecordActionToolbar({
-            containerId: 'toolbar-iibb-rates',
-            grid: iibbRatesGrid,
-            visibleItems: rates,
-            onEdit: 'window.actionEditIibbRate()',
-            onClone: 'window.actionCloneIibbRate()',
-            onToggleActive: 'window.actionToggleIibbRates()',
-            onDelete: 'window.actionDeleteIibbRates()',
-            options: {
-                masterToggleHandler: 'window.toggleMasterIibbRates',
-                toggleLabel: 'Activar / Desactivar',
-                deleteLabel: 'Desactivar / Eliminar'
-            }
-        });
+        const rateText = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const rateDate = value => value ? rateText(String(value).slice(0,10).split('-').reverse().join('/')) : '-';
+        const rateToolbar = document.getElementById('toolbar-iibb-rates');
+        if (rateToolbar) { rateToolbar.innerHTML = ''; rateToolbar.hidden = true; rateToolbar.style.display = 'none'; }
 
         const irTbody = document.getElementById('table-iibb-rates-body');
         if (irTbody) {
@@ -2238,14 +2114,14 @@ export class UIManager {
             } else {
                 irTbody.innerHTML = rates.map(r => `
                     <tr>
-                        <td style="text-align: center;"><input type="checkbox" class="iibb-rate-checkbox" value="${r.id}" ${iibbRatesGrid.isRowSelected(r.id) ? 'checked' : ''} onchange="window.toggleIibbRateRowSelection('${r.id}')"></td>
-                        <td><strong>${r.activity_name || 'Desconocida'}</strong></td>
-                        <td><strong>${r.jurisdiction}</strong></td>
+                        <td></td>
+                        <td><strong>${rateText(r.activity_name || 'Desconocida')}</strong></td>
+                        <td><strong>${rateText(r.jurisdiction)}</strong></td>
                         <td style="font-weight: 700; color: var(--primary);">${r.rate_percent}%</td>
-                        <td>${r.valid_from ? new Date(r.valid_from).toLocaleDateString() : '-'}</td>
-                        <td>${r.valid_to ? new Date(r.valid_to).toLocaleDateString() : 'Indefinido'}</td>
+                        <td>${rateDate(r.valid_from)}</td>
+                        <td>${r.valid_to ? rateDate(r.valid_to) : 'Indefinido'}</td>
                         <td>${r.is_active ? '<span style="color:var(--success); font-weight:600;">Vigente</span>' : '<span style="color:var(--text-muted);">Inactivo</span>'}</td>
-                        <td><button class="btn-secondary" style="font-size: 11px; padding: 2px 6px;" onclick="window.promptEditIibbRateModal('${r.id}')">Editar</button></td>
+                        <td>Asignada por Platform</td>
                     </tr>
                 `).join('');
             }
@@ -2413,8 +2289,8 @@ window.loadLessEconomicActivities = function() {
 };
 
 window.handleCatalogTargetChange = function(kind) {
-    if (kind === 'categories') taxCategoriesGrid.clearSelection();
-    else economicActivitiesGrid.clearSelection();
+    if (kind === 'categories' || kind === 'all') taxCategoriesGrid.clearSelection();
+    if (kind !== 'categories') economicActivitiesGrid.clearSelection();
     UIManager.renderSettings();
 };
 
@@ -2502,6 +2378,7 @@ window.toggleSingleTaxCategoryAssignment = async function(id) {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-tax-cat')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             if (enabled) await appStore.unassignTaxCategoryFromOrg(id, target);
             else await appStore.assignTaxCategoryToOrg(id, target);
         } else {
@@ -2523,6 +2400,7 @@ window.actionToggleTaxCategories = async function() {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-tax-cat')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             await appStore.bulkAssignTaxCategories(ids, target);
         } else {
             await appStore.setTaxCategoriesActive(ids, true);
@@ -2544,6 +2422,7 @@ window.actionDeleteTaxCategories = async function() {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-tax-cat')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             await appStore.bulkUnassignTaxCategories(ids, target);
         } else {
             await appStore.setTaxCategoriesActive(ids, false);
@@ -2605,6 +2484,7 @@ window.toggleSingleEconomicActivityAssignment = async function(id) {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-econ-act')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             if (enabled) await appStore.unassignEconomicActivityFromOrg(id, target);
             else await appStore.assignEconomicActivityToOrg(id, target);
         } else {
@@ -2626,6 +2506,7 @@ window.actionAssignEconomicActivities = async function() {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-econ-act')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             await appStore.bulkAssignEconomicActivitiesToOrg(ids, target);
         } else {
             await appStore.setEconomicActivitiesActive(ids, true);
@@ -2647,6 +2528,7 @@ window.actionUnassignEconomicActivities = async function() {
     try {
         if (globalMode) {
             const target = document.getElementById('select-target-org-econ-act')?.value;
+            if (!target) throw new Error('Seleccioná una empresa gestionada válida.');
             await appStore.bulkUnassignEconomicActivitiesFromOrg(ids, target);
         } else {
             await appStore.setEconomicActivitiesActive(ids, false);
@@ -2982,7 +2864,7 @@ window.submitTaxCategoryForm = async () => {
     const btn = document.getElementById('btn-save-tax-category');
     const feedback = document.getElementById('tax-category-feedback');
 
-    const name = nameInput ? nameInput.value.trim() : '';
+    const name = cleanCategoryName(nameInput?.value);
     const category_type = typeInput ? typeInput.value : 'EXPENSE';
     const description = descInput ? descInput.value.trim() : '';
 
@@ -2997,9 +2879,9 @@ window.submitTaxCategoryForm = async () => {
 
     // Validación client-side de duplicados
     const existing = appStore.taxCategories || [];
-    if (existing.some(c => c.id !== document.getElementById('form-tax-category')?.dataset.editingId && (c.name || '').toLowerCase() === name.toLowerCase())) {
+    if (existing.some(c => c.id !== document.getElementById('form-tax-category')?.dataset.editingId && equivalentCategory(c,name,category_type))) {
         if (feedback) {
-            feedback.innerText = "Ya existe una categoría tributaria con el mismo nombre.";
+            feedback.innerText = duplicateCategoryMessage;
             feedback.className = "auth-status-banner auth-error";
             feedback.style.display = "block";
         }
@@ -3076,6 +2958,7 @@ appStore.subscribe(() => {
     renderModuleAccess(appStore, document, switchTab);
     renderOperationalHeader(appStore, document);
     renderOperationalImportControls(appStore, document);
+    for (const module of ['comprobantes', 'percepciones', 'sueldos', 'bancos']) renderModuleExportControls(module);
     document.querySelectorAll('.modal, .modal-overlay').forEach(el => {
         el.inert = !['TENANT_READY', 'PLATFORM_READY'].includes(appStore.contextState);
     });
@@ -3086,7 +2969,10 @@ appStore.subscribe(() => {
     }
     requestOperationalData(appStore, document, document.querySelector('.tab-content:not(.hidden)')?.id);
     updateSalaryFormFields();
-    if (appStore.canVisitModule('tab-client-dashboard')) renderClientDashboard();
+    const reportingTab = document.querySelector('.tab-content:not(.hidden)')?.id;
+    if (reportingTab === 'tab-client-dashboard') renderClientDashboard();
+    if (reportingTab === 'tab-reports') mountReporting(appStore, 'reports');
+    if (reportingTab === 'tab-metrics') mountBusinessMetrics(appStore);
     if (appStore.canVisitModule('tab-movimientos-manuales')) renderOcrHistory();
     if (appStore.canVisitModule('tab-movimientos-manuales')) renderResolucionManual();
     if (appStore.canVisitModule('tab-categorizacion')) UIManager.renderCategorization();
@@ -3118,6 +3004,12 @@ for (const [pattern, module] of [
 }
 document.addEventListener('DOMContentLoaded', () => {
     mountOperationalOrgSelectors(appStore, document);
+    mountOperationalWorkspaces(appStore, document);
+    const applyRoute = mountModuleLinks(document, id => {
+        if (!switchTab(id)) renderModuleAccess(appStore, document, switchTab);
+    }, window);
+    appStore.subscribe(() => { if (['TENANT_READY','PLATFORM_READY'].includes(appStore.contextState)) applyRoute(); });
+    mountContextInvalidation(appStore, window);
     renderModuleAccess(appStore, document, switchTab);
     renderOperationalImportControls(appStore, document);
     UIManager.init();

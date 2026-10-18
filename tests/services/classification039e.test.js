@@ -33,15 +33,16 @@ beforeEach(async () => {
             return {data:structuredClone((name.includes('records')?records:financials).filter(r=>!args.p_after_id||r.id>args.p_after_id))};
         throw Error('Unexpected RPC '+name);
     });
-    store=actor(); await store.ensureOperationalData('tab-client-dashboard');
-    expect(store.operationalDataStatus('tab-client-dashboard').error).toBe('');rpc.mockClear();
+    store=actor(); await Promise.all(['tab-conciliador','tab-bancos'].map(module=>store.ensureOperationalData(module)));
+    expect(store.operationalDataStatus('tab-conciliador').error).toBe('');
+    expect(store.operationalDataStatus('tab-bancos').error).toBe('');rpc.mockClear();
 });
 test.each([['records','r1','updateCategory','updateActivity'],['financials','f0','updateBankCategory','updateBankActivity']])(
     '%s saves both fields and a fresh store rehydrates the server classification',async(family,id,category,activity)=>{
         await store[category](id,'cat'); await store[activity](id,'act');
         expect(rpc).toHaveBeenCalledWith(family==='records'?'update_record_classification':'update_movement_classification',
             expect.objectContaining({p_category_id:'cat',p_activity_id:'act'}));
-        const fresh=actor(); await fresh.ensureOperationalData('tab-client-dashboard');
+        const fresh=actor(); await Promise.all(['tab-conciliador','tab-bancos'].map(module=>fresh.ensureOperationalData(module)));
         const rows=family==='records'?fresh.items:fresh.bankTransactions;
         expect(rows.find(r=>r.id===id)).toMatchObject({category_id:'cat',activity_id:'act',confirmada:true});
         if(family==='records')expect(unresolvedPurchases(fresh.items)).toBe(1);

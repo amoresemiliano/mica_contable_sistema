@@ -25,9 +25,9 @@ export function parseBankRows(rows, context = {}) {
 
         row.forEach(cell => {
             const str = String(cell || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            if (str.includes('fecha') || str.includes('fec.')) hasDate = true;
-            if (str.includes('concepto') || str.includes('descripcion') || str.includes('detalle')) hasDesc = true;
-            if (str.includes('importe') || str.includes('monto') || str.includes('debito') || str.includes('credito')) hasAmount = true;
+            if (str.includes('fecha') || str.includes('fec.') || str === 'release_date') hasDate = true;
+            if (str.includes('concepto') || str.includes('descripcion') || str.includes('detalle') || str === 'transaction_type') hasDesc = true;
+            if (str.includes('importe') || str.includes('monto') || str.includes('debito') || str.includes('credito') || str === 'transaction_net_amount') hasAmount = true;
         });
 
         if (hasDate && hasDesc && hasAmount) {
@@ -39,7 +39,12 @@ export function parseBankRows(rows, context = {}) {
 
     if (headerRowIdx !== -1) {
         headers.forEach((clean, idx) => {
-            if (clean === 'fec. valor' || clean === 'fecha valor') mapping.fechaValor = idx;
+            if (clean === 'release_date') mapping.fecha = idx;
+            else if (clean === 'transaction_type') mapping.concepto = idx;
+            else if (clean === 'reference_id') mapping.referencia = idx;
+            else if (clean === 'transaction_net_amount') mapping.importe = idx;
+            else if (clean === 'partial_balance') mapping.saldo = idx;
+            else if (clean === 'fec. valor' || clean === 'fecha valor') mapping.fechaValor = idx;
             else if (clean.includes('fec.') || clean === 'fecha') {
                 if (mapping.fecha === undefined) mapping.fecha = idx;
             }
@@ -113,6 +118,11 @@ export function parseBankRows(rows, context = {}) {
             return String(val);
         }
         const str = String(val).trim();
+        if (headers.includes('release_date') && /^\d{2}-\d{2}-\d{4}$/.test(str)) {
+            const [d,m,y]=str.split('-');
+            const date=new Date(Date.UTC(+y,+m-1,+d));
+            return date.getUTCFullYear()===+y && date.getUTCMonth()===+m-1 && date.getUTCDate()===+d ? `${y}-${m}-${d}` : null;
+        }
         return str || null;
     };
 
@@ -156,6 +166,7 @@ export function parseBankRows(rows, context = {}) {
         let isDebit = false;
         let isCredit = false;
         let amountErrors = [];
+        if (headers.includes('release_date') && !dateVal) amountErrors.push('Fecha inválida.');
 
         if (mapping.importe !== undefined) {
             let rawAmt = checkStrictNumber(row[mapping.importe]);
@@ -207,7 +218,7 @@ export function parseBankRows(rows, context = {}) {
         if (rowString.includes('IIBB') || rowString.includes('INGRESOS BRUTOS')) signals.push('IIBB');
 
         results.push({
-            sourceRowNumber: i + 1,
+            sourceRowNumber: row.sourceRowNumber || i + 1,
             rawRow: row,
             errors: amountErrors,
             warnings: [],

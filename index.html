@@ -7,6 +7,9 @@
     <!-- Estilos externalizados -->
     <link rel="stylesheet" href="src/css/styles.css">
     <link rel="stylesheet" href="src/css/administration.css">
+    <link rel="stylesheet" href="src/css/managementReporting.css">
+    <link rel="stylesheet" href="src/css/businessMetrics.css">
+    <link rel="stylesheet" href="src/css/financeWorkspace.css">
     <!-- Biblioteca SheetJS para parsear planillas Excel (.xlsx/.xls) en el cliente -->
     <script src="src/js/vendor/xlsx.full.min.js"></script>
 </head>
@@ -73,7 +76,9 @@
             <li><a onclick="switchTab('tab-sueldos')">👥 <span class="nav-text">Sueldos</span></a></li>
             <li><a onclick="switchTab('tab-movimientos-manuales')">📝 <span class="nav-text">Carga manual y OCR</span></a></li>
             <li><a onclick="switchTab('tab-categorizacion')">🏷️ <span class="nav-text">Categorización</span></a></li>
-            <li><a onclick="switchTab('tab-client-dashboard')">📊 <span class="nav-text">Panel Gerencial</span></a></li>
+            <li><a onclick="switchTab('tab-client-dashboard')">📊 <span class="nav-text">Gerencia</span></a></li>
+            <li><a onclick="switchTab('tab-metrics')">📈 <span class="nav-text">Métricas</span></a></li>
+            <li><a onclick="switchTab('tab-reports')"><span class="nav-text">Reportes</span></a></li>
             <li><a onclick="switchTab('tab-configuracion')">⚙️ <span class="nav-text">Configuración</span></a></li>
         </ul>
 
@@ -204,6 +209,10 @@
                     </div>
                 </div>
             </div>
+            <div class="module-export-actions" role="group" aria-label="Descargar comprobantes" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;max-width:100%;">
+                <button class="btn-secondary" data-module-export="comprobantes" disabled onclick="downloadOperationalModule('comprobantes', 'csv')">Descargar CSV</button>
+                <button class="btn-secondary" data-module-export="comprobantes" disabled onclick="downloadOperationalModule('comprobantes', 'xlsx')">&#128229; Exportar a Excel</button>
+            </div>
             <div id="comprobantes-summary-bar" style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px;">
                 0 comprobantes · $ 0,00
             </div>
@@ -314,6 +323,10 @@
                             <button id="percepciones-search-clear" style="display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px;" onclick="clearPercepcionesSearch()">✕</button>
                         </div>
                     </div>
+                </div>
+                <div class="module-export-actions" role="group" aria-label="Descargar percepciones" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;max-width:100%;">
+                    <button class="btn-secondary" data-module-export="percepciones" disabled onclick="downloadOperationalModule('percepciones', 'csv')">Descargar CSV</button>
+                    <button class="btn-secondary" data-module-export="percepciones" disabled onclick="downloadOperationalModule('percepciones', 'xlsx')">&#128229; Exportar a Excel</button>
                 </div>
                 <div id="percepciones-summary-bar" style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px;">
                     0 percepciones · Total $ 0,00
@@ -446,7 +459,7 @@
                                     <th data-col-key="monto" onclick="handleBancosSort('monto', 'numeric')" style="cursor: pointer;">Importe <span id="sort-icon-bank-monto">↕</span></th>
                                     <th data-col-key="tipo" onclick="handleBancosSort('tipo', 'text')" style="cursor: pointer;">Tipo <span id="sort-icon-bank-tipo">↕</span></th>
                                     <th data-col-key="cuenta" onclick="handleBancosSort('cuenta', 'text')" style="cursor: pointer;">Clasificación / Categoría <span id="sort-icon-bank-cuenta">↕</span></th>
-                                    <th data-col-key="estado">Acción</th>
+                                    <th data-col-key="estado" onclick="handleBancosSort('estado', 'text')" style="cursor:pointer">Estado</th>
                                 </tr>
                             </thead>
                             <tbody id="table-bancos-body">
@@ -559,9 +572,14 @@
                             <h3 style="margin: 0;">Detalle de Liquidación Importada</h3>
                             <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0;">Desglose de conceptos de la nómina procesada.</p>
                         </div>
+
                         <div id="salary-source-badge" style="font-size: 12px; font-weight: 600; background: rgba(139, 92, 246, 0.15); color: #7c3aed; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(139, 92, 246, 0.3);">
                             Fuente: PAYROLL | Período: Sin Cargar
                         </div>
+                    </div>
+                    <div class="module-export-actions" role="group" aria-label="Descargar sueldos" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;max-width:100%;">
+                        <button class="btn-secondary" data-module-export="sueldos" disabled onclick="downloadOperationalModule('sueldos', 'csv')">Descargar CSV</button>
+                        <button class="btn-secondary" data-module-export="sueldos" disabled onclick="downloadOperationalModule('sueldos', 'xlsx')">&#128229; Exportar a Excel</button>
                     </div>
                     <div id="salary-detail-container" style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px; border: 1px dashed var(--border-color); border-radius: 6px;">
                         Aún no se ha importado reporte de sueldos para este período.
@@ -748,67 +766,18 @@
         </section>
 
         <!-- SECCIÓN: PANEL GERENCIAL -->
+        <section id="tab-metrics" class="tab-content hidden"><div id="business-metrics-root"></div></section>
         <section id="tab-client-dashboard" class="tab-content hidden">
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <h4>Ventas Brutas</h4>
-                    <div class="value" id="client-sales-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--warning);">
-                    <h4>Egresos / Gastos Totales</h4>
-                    <div class="value" id="client-purchases-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--success);">
-                    <h4>Resultado Operativo Neto</h4>
-                    <div class="value" id="client-net-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--primary);">
-                    <h4>Costo Laboral del Mes</h4>
-                    <div class="value" id="client-labor-val">$ 0,00</div>
-                </div>
-            </div>
-
-            <div class="metrics-grid" style="margin-top: 16px;">
-                <div class="metric-card">
-                    <h4>IVA Determinado</h4>
-                    <div class="value" id="client-iva-val" style="color: var(--warning);">Pendiente de determinación</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Saldo basado en Débito y Crédito fiscal importado</span>
-                </div>
-                <div class="metric-card">
-                    <h4>IIBB Estimado AGIP/ARBA</h4>
-                    <div class="value" id="client-iibb-val" style="color: var(--warning);">Pendiente de determinación</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Pendiente del motor de determinación impositiva</span>
-                </div>
-            </div>
-
-            <div class="grid-inputs" style="margin-top: 16px;">
-                <div class="card">
-                    <h3>Desglose de Gastos por Categoría</h3>
-                    <ul class="progress-list" id="client-category-chart">
-                        <li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">
-                            Sin datos disponibles. Cargá comprobantes recibidos para ver el desglose.
-                        </li>
-                    </ul>
-                </div>
-
-                <div class="card">
-                    <h3>Alertas Contables Recientes</h3>
-                    <div id="client-alerts-container" style="font-size: 13px; display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
-                        <div id="alert-unresolved-taxes" class="alert-box alert-warning hidden" style="padding: 10px; background-color: rgba(245, 158, 11, 0.15); border-radius: 6px; color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3);">
-                            ⚠️ <strong>Atención:</strong> Existen comprobantes de compras sin categorizar o con saldo pendiente por explicar.
-                        </div>
-                        <div id="alert-no-issues" style="font-size: 13px; color: var(--text-muted); padding: 8px 0;">
-                            ✓ Sin alertas críticas pendientes.
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div id="management-root" aria-live="polite"></div>
+        </section>
+        <section id="tab-reports" class="tab-content hidden">
+            <div id="reports-root" aria-live="polite"></div>
         </section>
 
         <!-- SECCIÓN: CATEGORIZACIÓN (CATÁLOGOS E IMPUESTOS) -->
         <section id="tab-categorizacion" class="tab-content hidden">
             <!-- A. Categorías Tributarias -->
-            <div class="card">
+            <div class="card" id="card-tax-categories">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3>Categorías Tributarias</h3>
                     <div style="display: flex; gap: 8px;">
@@ -860,7 +829,7 @@
             </div>
 
             <!-- B. Actividades Económicas -->
-            <div class="card" style="margin-top: 24px;">
+            <div class="card" id="card-economic-activities" style="margin-top: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3>Actividades Económicas (ARCA)</h3>
                     <div style="display: flex; gap: 8px;">
@@ -912,10 +881,10 @@
             </div>
 
             <!-- C. Tasas IIBB por Actividad/Jurisdicción -->
-            <div class="card" style="margin-top: 24px;">
+            <div class="card" id="card-iibb-rates" style="margin-top: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3>Tasas IIBB por Actividad y Jurisdicción</h3>
-                    <button class="btn-primary" onclick="window.promptCreateIibbRateModal()">+ Nueva Tasa IIBB</button>
+                    <span class="mica-rate-ownership">Tasas asignadas desde Vegen Platform</span>
                 </div>
                 <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Gestión de alícuotas vigentes para la organización.</p>
                 
@@ -926,7 +895,7 @@
                     <table class="simple-table">
                         <thead>
                             <tr>
-                                <th style="width: 36px; text-align: center;"><input type="checkbox" id="master-checkbox-iibb-rates" onchange="window.toggleMasterIibbRates(this.checked)"></th>
+                                <th style="width: 36px;"></th>
                                 <th>Actividad Económica</th>
                                 <th>Jurisdicción</th>
                                 <th>Tasa (%)</th>
@@ -944,7 +913,7 @@
             </div>
 
             <!-- D. Configuración de Alícuotas IVA -->
-            <div class="card" style="margin-top: 24px;">
+            <div class="card" id="card-iva-rates" style="margin-top: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3>Alícuotas de IVA Habilitadas</h3>
                     <span style="font-size: 12px; color: var(--text-muted);">Tabla de referencia fiscal</span>
@@ -981,62 +950,7 @@
         </section>
 
         <!-- SECCIÓN 7: HUB DE USUARIO - PANEL GERENCIAL (TABLERO UNIFICADO) -->
-        <section id="tab-client-dashboard" class="tab-content hidden">
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <h4>Ventas Brutas</h4>
-                    <div class="value" id="client-sales-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--warning);">
-                    <h4>Egresos / Gastos Totales</h4>
-                    <div class="value" id="client-purchases-val">$ 0,00</div>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--success);">
-                    <h4>Resultado Operativo Neto</h4>
-                    <div class="value" id="client-net-val">$ 0,00</div>
-                </div>
-            </div>
 
-            <div class="metrics-grid">
-                <div class="metric-card">
-                    <h4>IVA Estimado Proximo Vencimiento</h4>
-                    <div class="value" id="client-iva-val" style="color: var(--warning);">$ 0,00</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Saldo estimado (Débito menos Crédito)</span>
-                </div>
-                <div class="metric-card">
-                    <h4>IIBB Estimado (ARBA/AGIP)</h4>
-                    <div class="value" id="client-iibb-val" style="color: var(--warning);">$ 0,00</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Calculado sobre Ventas brutas gravadas</span>
-                </div>
-                <div class="metric-card" style="border-left: 4px solid var(--danger);">
-                    <h4>Costo Laboral del Mes</h4>
-                    <div class="value" id="client-labor-val" style="color: var(--danger);">$ 0,00</div>
-                    <span style="font-size: 11px; color: var(--text-muted);">Sueldos + F931 + Sindicato</span>
-                </div>
-            </div>
-
-            <div class="grid-inputs">
-                <div class="card">
-                    <h3>Desglose de Gastos por Categoría</h3>
-                    <ul class="progress-list" id="client-category-chart">
-                        <li style="font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;">
-                            Sin datos disponibles. Cargá comprobantes recibidos para ver el desglose.
-                        </li>
-                    </ul>
-                </div>
-                <div class="card">
-                    <h3>Alertas Contables Recientes</h3>
-                    <ul style="font-size: 13px; list-style: none; display: flex; flex-direction: column; gap: 10px;">
-                        <li style="padding: 10px; background-color: var(--warning-light); border-radius: 6px; color: var(--warning);" id="alert-unresolved-taxes">
-                            ⚠️ <strong>Atención:</strong> Tienes comprobantes de compra con "Otros Tributos" sin conciliar.
-                        </li>
-                        <li style="padding: 10px; background-color: var(--success-light); border-radius: 6px; color: var(--success);">
-                            ✓ <strong>Información:</strong> La última presentación de IVA cerró correctamente.
-                        </li>
-                    </ul>
-                </div>
-            </div>
-        </section>
 
 
     </div>
@@ -1152,6 +1066,10 @@
                 <button class="btn-close-sheet" onclick="toggleMobileMoreSheet(false)">✕</button>
             </div>
             <ul class="mobile-more-list">
+                <li>
+                    <a onclick="switchTab('tab-metrics'); toggleMobileMoreSheet(false);"><span class="sheet-icon">📈</span><span class="sheet-text"><strong>Métricas</strong></span></a>
+                    <a onclick="switchTab('tab-reports'); toggleMobileMoreSheet(false);"><span class="sheet-icon">📑</span><span class="sheet-text"><strong>Reportes</strong></span></a>
+                </li>
                 <li>
                     <a onclick="switchTab('tab-movimientos-manuales'); toggleMobileMoreSheet(false);">
                         <span class="sheet-icon">📝</span>

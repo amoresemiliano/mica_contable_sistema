@@ -59,11 +59,17 @@ export function createSheetJsAdapter(xlsxLibrary) {
             }
 
             // Convertir a Array de Arrays
-            const rows = xlsxLibrary.utils.sheet_to_json(sheet, {
+            const physicalRows = xlsxLibrary.utils.sheet_to_json(sheet, {
                 header: 1, // Retorna array de arrays, no asume fila de encabezado
+                range: 0, // Preserve physical row numbers even when !ref starts below row 1.
                 defval: null,
-                blankrows: false
+                blankrows: true
             });
+            const rows = physicalRows.map((row, index) => {
+                Object.defineProperty(row, 'sourceRowNumber', { value: index + 1 });
+                return row;
+            }).filter(row => row.some(cell => cell !== null && cell !== undefined && cell !== ''));
+            Object.defineProperty(rows, 'sourceRowCount', { value: physicalRows.length });
 
             if (rows.length === 0) {
                 throw new Error(`La hoja "${sheetName}" no contiene datos.`);
